@@ -7,13 +7,39 @@
 注册成功后直接登录。用户名为 3–32 位字母、数字、点、下划线或连字符，不区分大小写；
 密码为 8–128 位，区分大小写。当前不提供邮箱验证、密码找回和第三方登录。
 
+## 会员、设备与购买
+
+账号分为 Free、终生功能会员、Pro。功能权益绑定账号，不使用激活码。购买 Pro 永久获得
+功能会员，Pro 到期后仍可使用自定义功能，只撤去 Pro 的空间和月度流量加成。
+仅**自定义 S3 同步、自定义 AI 接口**需要功能权益；修改 OpenAI / DeepSeek 预设地址也算
+自定义，官方 HTTPS 预设保持免费。WebDAV、账号云同步、阅读和加密备份免费。
+
+所有账号最多同时登录 **5 台设备**。账号页显示本账户已登录设备、当前设备、最近访问，
+可踢出设备以释放名额；被踢设备的服务端会话立即失效。管理员还能停用设备，阻止重新登录。
+客户端后台每 **24 小时**检查一次，成功时间跨重启保留；网络失败保留登录并重试，失效后
+清除对应区域会话并提示重新登录。登录、手动刷新和自定义功能使用仍实时验证权限。
+设备身份为平台密钥库保护的随机 ID，不使用硬件序列号；身份、会话、检查时间和会员状态
+不进入备份或云同步，导入备份不会占用原设备身份。
+
+账号页可创建会员、额外空间、下载流量订单并取消待支付订单。空间包目前为 10 GiB / 30 天，
+可叠加且各自到期；下载包为 10 GiB 保留余额，先用月度额度再扣余额，重置不退还已消费余额。
+Pro 或空间包到期、流量耗尽时保留已有加密文件。空间不足可买空间包或 Pro；下载用完可买
+下载包、续费 Pro 或等待月初；上传用完可续费 Pro、等月初或由管理员调整/重置额度。
+
+**目前只接入管理员确认到账，真实支付网关未接入。** 本机演示不收真实款项；生产购买默认
+关闭，价格仅是服务端示例配置。客户端不能指定价格或自行发放权益，管理员核实付款后
+在 `/admin/orders` 确认，订单创建和到账均幂等，待支付有效期为 48 小时。
+
+本机保留 8 个中国区 `demo_cn_` 虚构账号，运行独立服务器的 `python3 scripts/seed-demo.py`
+即可准备。密码只在该项目 `.local/demo-users.json`（0600）中，国际区不创建这些演示账号。
+
 ## 独立服务器项目与本机验证
 
-用户管理服务位于桌面的独立项目 `~/Desktop/kkindle_server`，使用 ASP.NET Core / .NET 10、
+用户管理服务位于桌面的独立项目 `~/Desktop/Kkindle_server`，使用 ASP.NET Core / .NET 10、
 PostgreSQL 和中文管理网页，不依赖客户端源码路径。操作与部署资料在该项目的 README 中。
 
 ```sh
-cd ~/Desktop/kkindle_server
+cd ~/Desktop/Kkindle_server
 python3 scripts/local.py start
 python3 scripts/local.py test
 ```
@@ -46,6 +72,13 @@ macOS 桌面端、移动端预览和 iOS 模拟器直接使用 `127.0.0.1`；And
 同步密钥只在用户设备本地保存，不上传服务器，不导出到备份。用户须自行牢记；遗忘后
 无法解密已有云数据或 `.kkindle` 加密备份，服务器没有密钥找回能力。完整数据备份的
 导入和导出也必须使用已配置的密钥，详见[加密备份说明](backup-encryption.md)。
+
+新上传的加密对象路径不包含密钥摘要：自定义 S3 / WebDAV 使用公开的 `encrypted/v2/`
+目录标识，账号同步使用公开账号标识。更换密钥须使用新的同步前缀。旧版自定义存储的
+对象可通过不含密钥摘要的目录列表发现并读取；不再向旧目录上传，已有旧对象保留以兼容
+旧设备。旧目录名不会因此消失，迁移时建议各设备更新后改用新前缀并重新上传本地完整书库，
+确认新书库和备份可解密后再自行清理原目录。旧对象读取需要目录列表权限。
+旧版客户端不能读取 `v2` 新对象，继续同步前须更新所有设备。
 
 ## 客户端区域隔离
 
@@ -88,12 +121,15 @@ dotnet test tests/Kkindle.Tests/Kkindle.Tests.csproj -c Debug
 iOS 原生界面另有完整的分区账号测试。安装隔离预览应用并启动上述两个本地服务后运行：
 
 ```sh
-python3 tests/Kkindle.Mobile.iOS.UITests/run-tests.py --simulator <模拟器ID> --results <新的结果目录> --only testRegionalAccountRegistrationAndCloudSync
+python3 tests/Kkindle.Mobile.iOS.UITests/run-tests.py --simulator <模拟器ID> --results <新的结果目录> --only testAccountMembershipDevicesAndOrders --only testRegionalAccountRegistrationAndCloudSync
 ```
 
-该场景可连接上述两个 PostgreSQL 本地服务，验证两区分别注册、退出、错误密码提示、重新登录和加密云同步，以及切区重开后的
-书库隔离与会话恢复。测试使用虚构密码，并处理 iOS 系统的强密码建议弹层。
-由于依赖两个服务，默认的原生界面测试会跳过此场景，需要显式选择。
+这两个场景可连接上述 PostgreSQL 本地服务，验证 Free 会员、设备列表、订单创建/取消、
+踢出当前设备后的失效提示，以及两区分别注册、退出、错误密码提示、重新登录、加密云同步
+和切区重开后的书库隔离与会话恢复。测试使用虚构密码，并处理 iOS 系统的强密码建议弹层。
+先准备不含会话和同步密钥的隔离预览；完成后通过管理网页的封禁、删除任务清理日志中
+标记的临时 `region_` 账号，不删除保留的 `demo_cn_` 用户。由于依赖本地服务，默认的
+原生界面测试会跳过这两个场景，需要显式选择。备份密钥提示和周/月/年统计场景也已验证。
 
 ## 服务器配置
 
@@ -127,18 +163,31 @@ location / {
 
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |
-| POST | `/api/accounts/register` | JSON `region`、`username`、`password`；创建账号并返回会话 |
+| POST | `/api/accounts/register` | JSON `region`、`username`、`password`、`deviceId`、`deviceName`、`platform`；创建账号并返回会话 |
 | POST | `/api/accounts/login` | 同一 JSON；验证后返回会话 |
-| GET | `/api/accounts/session` | `Authorization: Bearer <SESSION_TOKEN>`；验证当前会话 |
+| GET | `/api/accounts/session` | `Authorization: Bearer <SESSION_TOKEN>`；验证设备会话、更新最近访问，不延长到期时间 |
 | POST | `/api/accounts/logout` | 同一认证头；撤销当前会话，返回 204 |
 | GET | `/api/sync/objects?prefix=<PREFIX>` | 列出当前账号的对象键和修改时间 |
 | GET / HEAD | `/api/sync/objects/<KEY>` | 读取当前账号的对象；支持范围下载 |
 | PUT | `/api/sync/objects/<KEY>` | 仅接受客户端加密封装，流式上传后原子替换，最多 512 MiB，受流量/存储额度限制 |
 | DELETE | `/api/sync/objects/<KEY>` | 删除当前账号的对象 |
+| GET | `/api/accounts/membership` | 当前账号会员、额度、余额与设备数量 |
+| GET | `/api/accounts/devices` | 当前账号设备列表 |
+| GET | `/api/accounts/devices/<DEVICE_ID>` | 验证当前会话绑定的设备，返回会员与设备状态 |
+| POST | `/api/accounts/devices/<DEVICE_ID>/features` | 验证当前设备的功能权益 |
+| POST | `/api/accounts/devices/<DEVICE_ID>/kick` | 踢出本账户的设备，立即撤销其会话 |
+| GET | `/api/accounts/products` | 当前服务端商品；购买关闭时为空 |
+| GET / POST | `/api/accounts/orders` | 列出订单，或用 `productId`、`requestId` 创建待支付订单 |
+| POST | `/api/accounts/orders/<ORDER_ID>/cancel` | 取消自己的待支付订单 |
 
 注册/登录返回 `region`、`user: { id, username }`、`token`、`expiresAt`。
 错误密码和不存在的账号统一返回 401；重复注册返回 409；同一来源每分钟最多 10 次
 注册/登录，超过后返回 429。认证请求体最多 16 KiB。
+
+第六台设备返回 `409 device_limit_reached`；被管理员停用的设备无法登录。自定义功能无权益时
+返回 `402 membership_required`。服务端 v1 → v2 迁移会撤销缺少设备标识的旧普通会话，需要
+更新客户端并重新登录；旧书库和加密数据保留，管理员会话保留。本机测试限速放宽至每分钟
+1,000 次，正式默认仍为 10 次。
 
 密码使用随机盐和 PBKDF2-SHA256（600,000 次迭代），数据库不保存原始密码。会话使用
 32 字节随机令牌，有效期 30 天；服务器只保存令牌的 SHA-256 哈希。账号和会话在服务重启

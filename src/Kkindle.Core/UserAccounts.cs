@@ -28,6 +28,9 @@ public sealed class AccountCredentials
     public AccountRegion Region { get; init; }
     public string Username { get; init; } = "";
     public string Password { get; init; } = "";
+    public Guid DeviceId { get; init; }
+    public string DeviceName { get; init; } = "";
+    public string Platform { get; init; } = "";
 }
 
 public sealed class AccountSessionResponse
@@ -69,4 +72,12 @@ public static class AccountValidation
 [JsonSerializable(typeof(AccountStatus))]
 [JsonSerializable(typeof(AccountApiError))]
 [JsonSerializable(typeof(AccountSyncObjectMetadata[]))]
+[JsonSerializable(typeof(AccountMembership))]
+[JsonSerializable(typeof(AccountDevice[]))]
+[JsonSerializable(typeof(DeviceFeatureStatus))]
+[JsonSerializable(typeof(DeviceEnrollmentRequest))]
+[JsonSerializable(typeof(MembershipProduct[]))]
+[JsonSerializable(typeof(PurchaseRequest))]
+[JsonSerializable(typeof(PurchaseOrder))]
+[JsonSerializable(typeof(PurchaseOrder[]))]
 public partial class AccountJsonContext : JsonSerializerContext;

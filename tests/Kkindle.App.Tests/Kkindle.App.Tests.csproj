@@ -8,6 +8,8 @@
     <Compile Include="../Fixtures/PdfFixture.cs" Link="Fixtures/PdfFixture.cs" />
     <Compile Include="../Fixtures/FakePdfDocument.cs" Link="Fixtures/FakePdfDocument.cs" />
     <Compile Include="../Fixtures/AccountHttpHandler.cs" Link="Fixtures/AccountHttpHandler.cs" />
+    <Compile Include="../Fixtures/ActivatedDeviceFeatures.cs" Link="Fixtures/ActivatedDeviceFeatures.cs" />
+    <Compile Include="../Fixtures/MembershipHttpHandler.cs" Link="Fixtures/MembershipHttpHandler.cs" />
     <ProjectReference Include="../../src/Kkindle.App/Kkindle.App.csproj" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.1" />
     <PackageReference Include="Avalonia.Skia" Version="12.1.1" />

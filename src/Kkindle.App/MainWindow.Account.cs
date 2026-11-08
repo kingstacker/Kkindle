@@ -6,15 +6,32 @@ namespace Kkindle;
 public partial class MainWindow
 {
     private bool _accountWindowOpen;
+    private bool _deviceChecksStarted;
     private AccountStatus? _syncAccountStatus;
 
     private async void AccountNavigationButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_accountWindowOpen || BlockNavigationWhileTransferring()) return;
         _accountWindowOpen = true;
-        try { await new AccountWindow(_modules.Accounts.Service).ShowDialog(this); }
+        try { await new AccountWindow(_modules.Accounts.Service, _modules.Accounts.Membership).ShowDialog(this); }
         finally { _accountWindowOpen = false; await RefreshAccountSummaryAsync(); }
     }
+
+    private void StartDeviceChecks()
+    {
+        if (_deviceChecksStarted) return;
+        _deviceChecksStarted = true;
+        _modules.Accounts.Service.DeviceInvalidated += OnDeviceInvalidated;
+        _modules.Accounts.Monitor.Start();
+    }
+
+    private void OnDeviceInvalidated(object? sender, Kkindle.Infrastructure.AccountDeviceInvalidatedEventArgs e) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            if (_lifetimeCancellation.IsCancellationRequested) return;
+            await RefreshAccountSummaryAsync();
+            await ShowMessageAsync(UiText.Get("设备已失效"), UiText.Localize(e.Message));
+        });
 
     private async Task RefreshAccountSummaryAsync()
     {

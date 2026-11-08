@@ -55,7 +55,7 @@ public sealed partial class S3SyncIntegrationTests
         bucket.Objects.TryRemove(a.SnapshotKey, out _);
         await b.SqlAsync("UPDATE Books SET Title='Local edit',UpdatedAt=$time WHERE Id=$id;",
             ("$time", DateTimeOffset.UtcNow.AddMinutes(1).ToString("O")), ("$id", book.BookId.ToString()));
-        var restarted = new S3SyncService(b.Paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket));
+        var restarted = new S3SyncService(b.Paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket), TestHelpers.ActivatedFeatures);
         await restarted.SyncAsync(b.Id, b.Settings);
         var result = bucket.Snapshot(b.SnapshotKey);
         Assert.Equal(5, result.Version);

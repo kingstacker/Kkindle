@@ -196,7 +196,7 @@ public sealed class PinyinBookServiceTests
             var destinationPath = Path.Combine(root, "review-output.epub");
             CreateEpub(sourcePath, "行。 ");
 
-            using var aiClient = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+            using var aiClient = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -245,7 +245,7 @@ public sealed class PinyinBookServiceTests
             CreateEpub(sourcePath, "行。 ");
             var requestCount = 0;
 
-            using var aiClient = new AiChatClient(new TestHelpers.StubHttpMessageHandler(_ =>
+            using var aiClient = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(_ =>
             {
                 requestCount++;
                 return new HttpResponseMessage(HttpStatusCode.OK)
@@ -350,7 +350,7 @@ public sealed class PinyinBookServiceTests
             var sourcePath = Path.Combine(root, "ai-failure.epub");
             var destinationPath = Path.Combine(root, "ai-failure-output.epub");
             CreateEpub(sourcePath, "行。 ");
-            using var aiClient = new AiChatClient(new TestHelpers.StubHttpMessageHandler(_ =>
+            using var aiClient = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(_ =>
                 throw new HttpRequestException("暂时无法连接")));
             var settings = new AiConnectionSettings
             {

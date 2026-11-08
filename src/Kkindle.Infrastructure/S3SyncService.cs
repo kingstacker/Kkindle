@@ -47,6 +47,7 @@ public sealed partial class S3SyncService : ISyncService
     private readonly AppPaths _paths;
     private readonly S3SyncSettingsStore _settingsStore;
     private readonly Func<S3SyncSettings, ISyncObjectStore> _clientFactory;
+    private readonly IDeviceFeatureAccess _features;
     private readonly AccountService? _accounts;
     private readonly AccountRegion? _dataRegion;
     private readonly AppSettingsStore _appSettingsStore;
@@ -57,6 +58,8 @@ public sealed partial class S3SyncService : ISyncService
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte[]> _derivedEncryptionKeys =
         new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _legacyBlobGate = new(1, 1);
+    private IReadOnlyDictionary<string, string>? _legacyBlobKeys;
     private EncryptionSession? _encryptionSession;
 
     private sealed record CachedFileHash(long Length, DateTime LastWriteTimeUtc, string Sha256);
@@ -80,22 +83,26 @@ public sealed partial class S3SyncService : ISyncService
     {
     }
 
-    public S3SyncService(AppPaths paths, ISecretProtector protector, AccountService accounts, AccountRegion dataRegion)
-        : this(paths, protector, settings => CreateRegionalObjectStore(settings, accounts, dataRegion))
+    public S3SyncService(AppPaths paths, ISecretProtector protector, AccountService accounts, AccountRegion dataRegion,
+        IDeviceFeatureAccess? features = null)
+        : this(paths, protector, settings => CreateRegionalObjectStore(settings, accounts, dataRegion), features ?? new DeviceMembershipService(accounts))
     {
         _accounts = accounts;
         _dataRegion = dataRegion;
     }
 
-    internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, IAmazonS3> clientFactory)
-        : this(paths, protector, settings => new S3SyncObjectStore(settings, clientFactory(settings)))
+    internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, IAmazonS3> clientFactory,
+        IDeviceFeatureAccess? features = null)
+        : this(paths, protector, settings => new S3SyncObjectStore(settings, clientFactory(settings)), features)
     {
     }
 
-    internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, ISyncObjectStore> clientFactory)
+    internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, ISyncObjectStore> clientFactory,
+        IDeviceFeatureAccess? features = null)
     {
         _paths = paths;
         _clientFactory = clientFactory;
+        _features = features ?? DeniedDeviceFeatureAccess.Instance;
         _settingsStore = new S3SyncSettingsStore(paths, protector);
         _appSettingsStore = new AppSettingsStore(paths);
         _aiSettingsStore = new AiSettingsStore(paths, protector);
@@ -177,6 +184,7 @@ public sealed partial class S3SyncService : ISyncService
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
 
+        if (normalized.Provider == SyncProvider.S3) await _features.EnsureFeatureAsync(DeviceFeature.CustomS3, cancellationToken);
         using var client = _clientFactory(normalized);
         // Listing proves the credentials and bucket are usable, and decoding a
         // single snapshot validates the encryption key. Downloading every
@@ -238,6 +246,7 @@ public sealed partial class S3SyncService : ISyncService
         ArgumentNullException.ThrowIfNull(file);
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
+        if (normalized.Provider == SyncProvider.S3) await _features.EnsureFeatureAsync(DeviceFeature.CustomS3, cancellationToken);
         if (!IsSha256(file.Sha256))
             throw new InvalidDataException("同步文件缺少有效的 SHA-256 校验值。");
 
@@ -250,6 +259,7 @@ public sealed partial class S3SyncService : ISyncService
         try
         {
             _derivedEncryptionKeys.Clear();
+            _legacyBlobKeys = null;
             _encryptionSession = normalized.EncryptionKey.Length == 0
                 ? null
                 : CreateEncryptionSession(normalized.EncryptionKey);
@@ -279,6 +289,7 @@ public sealed partial class S3SyncService : ISyncService
         finally
         {
             _encryptionSession = null;
+            _legacyBlobKeys = null;
             _derivedEncryptionKeys.Clear();
             _syncGate.Release();
         }
@@ -380,12 +391,14 @@ public sealed partial class S3SyncService : ISyncService
     {
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
+        if (normalized.Provider == SyncProvider.S3) await _features.EnsureFeatureAsync(DeviceFeature.CustomS3, cancellationToken);
         deviceId = NormalizeDeviceId(deviceId);
 
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
             _derivedEncryptionKeys.Clear();
+            _legacyBlobKeys = null;
             _encryptionSession = normalized.EncryptionKey.Length == 0
                 ? null
                 : CreateEncryptionSession(normalized.EncryptionKey);
@@ -636,6 +649,7 @@ public sealed partial class S3SyncService : ISyncService
         finally
         {
             _encryptionSession = null;
+            _legacyBlobKeys = null;
             _derivedEncryptionKeys.Clear();
             _syncGate.Release();
         }
@@ -1283,14 +1297,53 @@ public sealed partial class S3SyncService : ISyncService
     private static string BlobNamespace(S3SyncSettings settings)
     {
         if (settings.EncryptionKey.Length == 0) return "plain";
-        // Account storage is already isolated by user. A key-derived path would
-        // expose a fast password verifier; use public account identity instead.
+        // A key-derived path exposes a fast password verifier. Custom stores
+        // use a public version marker, account stores use public user identity.
         // Changing the encryption key still requires a new sync prefix.
         var identity = settings.Provider == SyncProvider.AccountServer
             ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 $"KKINDLE-ACCOUNT-OBJECTS1|{AccountRegions.Slug(settings.AccountRegion)}|{settings.AccountUserId:N}"))).ToLowerInvariant()
-            : EncryptionKeyFingerprint(settings.EncryptionKey);
+            : "v2";
         return "encrypted/" + identity;
+    }
+
+    private async Task<SyncObjectRead> OpenBlobReadAsync(
+        ISyncObjectStore client, S3SyncSettings settings, string hash,
+        CancellationToken token, long rangeStart)
+    {
+        try { return await client.OpenReadAsync(BlobKey(settings, hash), token, rangeStart); }
+        catch (SyncObjectNotFoundException) when (settings.EncryptionKey.Length > 0
+            && settings.Provider is SyncProvider.S3 or SyncProvider.WebDav)
+        {
+            // Discover old paths from an unkeyed listing. Never send a newly
+            // computed passphrase fingerprint as a listing prefix or guessed
+            // GET path. Legacy objects are read only and remain authenticated.
+            await _legacyBlobGate.WaitAsync(token);
+            string? legacyKey;
+            try
+            {
+                if (_legacyBlobKeys is null)
+                {
+                    var root = $"{settings.Prefix}/objects/encrypted/";
+                    IReadOnlyList<string> listed;
+                    try { listed = await client.ListKeysAsync(root, token); }
+                    catch (SyncListingUnavailableException)
+                    {
+                        throw new InvalidDataException("读取旧版加密对象需要目录列表权限，请允许列出加密对象目录后重试。");
+                    }
+                    var legacyPrefix = root + EncryptionKeyFingerprint(settings.EncryptionKey) + "/";
+                    _legacyBlobKeys = listed.Where(key => key.StartsWith(legacyPrefix, StringComparison.OrdinalIgnoreCase)
+                            && IsSha256(key[legacyPrefix.Length..]))
+                        .GroupBy(key => key[legacyPrefix.Length..], StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+                }
+                legacyKey = _legacyBlobKeys.GetValueOrDefault(hash);
+            }
+            finally { _legacyBlobGate.Release(); }
+            if (legacyKey is null) throw new SyncObjectNotFoundException("远端同步对象不存在。");
+            // The legacy ciphertext may differ from a partial v2 download.
+            return await client.OpenReadAsync(legacyKey, token, rangeStart: 0);
+        }
     }
 
     private static string EncryptionKeyFingerprint(string encryptionKey) =>

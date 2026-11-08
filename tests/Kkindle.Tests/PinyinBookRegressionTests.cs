@@ -32,7 +32,7 @@ public sealed class PinyinBookRegressionTests : IDisposable
         var firstHandler = new ReplyHandler((call, items) => call == 2
             ? throw new HttpRequestException("Second batch unavailable")
             : Answer(items, item => Character(item) == "行" ? "háng" : Current(item)));
-        using var firstAi = new AiChatClient(firstHandler);
+        using var firstAi = TestHelpers.CreateActivatedAiClient(firstHandler);
         using var firstEngine = new RecordingEngine();
         var progress = new TestHelpers.InlineProgress<PinyinBookProgress>(value =>
         {
@@ -63,7 +63,7 @@ public sealed class PinyinBookRegressionTests : IDisposable
 
         var retryHandler = new ReplyHandler((_, items) => Answer(items,
             item => Character(item) == "数" ? "shǔ" : "zàng"));
-        using var retryAi = new AiChatClient(retryHandler);
+        using var retryAi = TestHelpers.CreateActivatedAiClient(retryHandler);
         using var retryEngine = new RecordingEngine();
         var result = await new PinyinBookService(null, retryAi, AiSettings, retryEngine).GenerateAsync(
             source, output, options, resumeMode: PinyinBookResumeMode.Resume);
@@ -120,7 +120,7 @@ public sealed class PinyinBookRegressionTests : IDisposable
     public async Task OnlyExplicitValidAiDecisionsAreMarkedReviewed(string answer, int reviewed)
     {
         var (source, output) = CreateBook("<p>行。</p>");
-        using var ai = new AiChatClient(new ReplyHandler((_, _) => answer));
+        using var ai = TestHelpers.CreateActivatedAiClient(new ReplyHandler((_, _) => answer));
         var result = await new PinyinBookService(null, ai, AiSettings).GenerateAsync(
             source, output, new PinyinBookOptions { EnableAiReview = true });
 
@@ -202,7 +202,7 @@ public sealed class PinyinBookRegressionTests : IDisposable
             ? Current(item)
             : item.GetProperty("context").GetString()!.Contains("第1⟦行⟧", StringComparison.Ordinal)
                 ? "háng" : "xíng"));
-        using var ai = new AiChatClient(handler);
+        using var ai = TestHelpers.CreateActivatedAiClient(handler);
         var result = await new PinyinBookService(null, ai, AiSettings).GenerateAsync(
             source, output, new PinyinBookOptions { EnableAiReview = true });
 

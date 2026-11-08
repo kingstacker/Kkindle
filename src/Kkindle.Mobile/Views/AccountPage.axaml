@@ -67,6 +67,20 @@
                      TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
           </StackPanel>
         </StackPanel>
+        <StackPanel Name="MembershipPanel" IsVisible="False" Spacing="12">
+          <TextBlock Classes="title" Text="会员与设备" />
+          <TextBlock Name="MembershipSummary" TextWrapping="Wrap" />
+          <TextBlock Name="MembershipStatus" Classes="muted" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="功能会员绑定账号，不使用激活码。每个账号最多登录 5 台设备；客户端每天检查一次设备状态。" TextWrapping="Wrap" />
+          <Button Classes="secondary" Content="刷新会员与设备" Click="OnMembershipRefreshClick" />
+          <StackPanel Name="DeviceListPanel" Spacing="10" />
+          <TextBlock Classes="label" Text="购买会员、空间或下载流量" />
+          <ComboBox Name="ProductsBox" HorizontalAlignment="Stretch" />
+          <TextBlock Name="ProductDescription" Classes="muted" TextWrapping="Wrap" FontSize="12" />
+          <Button Name="PurchaseButton" Classes="primary" Content="创建购买订单" Click="OnPurchaseClick" />
+          <TextBlock Classes="label" Text="订单" />
+          <StackPanel Name="OrderListPanel" Spacing="10" />
+        </StackPanel>
       </StackPanel>
     </ScrollViewer>
     <StackPanel Grid.Row="2" Name="ActionBar" Margin="24,8,24,14" Spacing="10">

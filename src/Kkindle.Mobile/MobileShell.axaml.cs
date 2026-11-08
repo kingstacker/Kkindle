@@ -88,6 +88,7 @@ public partial class MobileShell : UserControl
                     }
                 }, DispatcherPriority.Render);
         };
+        Loaded += (_, _) => StartDeviceChecks();
         if (_services.TabBar is { } tabBar)
         {
             // The platform bar is the visible one. This one only keeps the grid
@@ -115,6 +116,25 @@ public partial class MobileShell : UserControl
     public Action<string>? NativeToast { get; set; }
     public Action? NativeRestartRequired { get; set; }
     public Action? NativeLibraryChanged { get; set; }
+    private bool _deviceChecksStarted;
+
+    public void StartDeviceChecks()
+    {
+        if (_deviceChecksStarted) return;
+        _deviceChecksStarted = true;
+        _modules.Accounts.Service.DeviceInvalidated += (_, args) => Dispatcher.UIThread.Post(async () =>
+        {
+            if (_modules.IsDisposed) return;
+            await ConfirmAsync("设备已失效", args.Message, "知道了");
+        });
+        _modules.Accounts.Monitor.Start();
+    }
+
+    public async Task CheckDevicesIfDueAsync()
+    {
+        try { await _modules.Accounts.Monitor.CheckIfDueAsync(); }
+        catch (Exception error) when (error is InvalidOperationException or IOException) { }
+    }
 
     /// <summary>
     /// Developer mode holds features outside the normal product.
@@ -315,7 +335,7 @@ public partial class MobileShell : UserControl
 
     public void OpenSyncSettings() => Push(new SyncSettingsPage(_modules, this));
 
-    public void OpenAccount() => Push(new AccountPage(_modules.Accounts.Service, this));
+    public void OpenAccount() => Push(new AccountPage(_modules.Accounts.Service, this, _modules.Accounts.Membership));
 
     public void OpenAiSettings() => Push(new AiSettingsPage(_modules, this));
 

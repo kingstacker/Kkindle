@@ -3563,10 +3563,12 @@ public sealed partial class S3SyncService
             }
 
             var partialLength = File.Exists(temporaryPath) ? new FileInfo(temporaryPath).Length : 0;
-            using var response = await client.OpenReadAsync(
-                BlobKey(settings, hash),
+            using var response = await OpenBlobReadAsync(
+                client,
+                settings,
+                hash,
                 cancellationToken,
-                rangeStart: partialLength);
+                partialLength);
             if (partialLength > 0 && !response.IsPartialResponse)
             {
                 TryDeleteSyncPartialFile(temporaryPath);

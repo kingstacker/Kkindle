@@ -71,7 +71,7 @@ public sealed class ReaderWebSearchTests
     [InlineData("{\"search\":true,\"query\":\"\"}", true, true)]
     public async Task PlannerUsesModelDecisionAndFallsBackWhenOutputIsUnsupported(string response, bool evidence, bool expected)
     {
-        using var client = new AiChatClient(new AiHandler(response));
+        using var client = TestHelpers.CreateActivatedAiClient(new AiHandler(response));
         var plan = await ReaderWebSearchPlanner.PlanAsync(client, Settings, "解释这个术语", "选文", "原文", evidence, []);
         Assert.Equal(expected, plan.Search);
         if (expected) Assert.False(string.IsNullOrWhiteSpace(plan.Query));
@@ -80,7 +80,7 @@ public sealed class ReaderWebSearchTests
     [Fact]
     public async Task ExplicitSearchCannotBeSkippedByAModelThatDeclinesIt()
     {
-        using var client = new AiChatClient(new AiHandler("{\"search\":false,\"query\":\"\"}"));
+        using var client = TestHelpers.CreateActivatedAiClient(new AiHandler("{\"search\":false,\"query\":\"\"}"));
         var plan = await ReaderWebSearchPlanner.PlanAsync(client, Settings, "查一下最新资料", "", "原文", true, []);
         Assert.True(plan.Search);
         Assert.Equal("查一下最新资料", plan.Query);
@@ -90,7 +90,7 @@ public sealed class ReaderWebSearchTests
     public async Task PlannerGetsRecentConversationAndTreatsBookTextAsData()
     {
         var handler = new AiHandler("{\"search\":true,\"query\":\"the subject of the follow-up\"}");
-        using var client = new AiChatClient(handler);
+        using var client = TestHelpers.CreateActivatedAiClient(handler);
         await ReaderWebSearchPlanner.PlanAsync(client, Settings, "它最近怎么样？", "选文内容", "书中正文", true,
             [new AiConversationTurn("user", "前一个问题的主题")]);
         using var json = JsonDocument.Parse(Assert.Single(handler.Requests));
@@ -105,7 +105,7 @@ public sealed class ReaderWebSearchTests
     [Fact]
     public async Task PlannerDoesNotSwallowUserCancellation()
     {
-        using var client = new AiChatClient(new AiHandler(""));
+        using var client = TestHelpers.CreateActivatedAiClient(new AiHandler(""));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ReaderWebSearchPlanner.PlanAsync(

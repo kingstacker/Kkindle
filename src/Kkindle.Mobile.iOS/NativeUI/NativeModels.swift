@@ -50,6 +50,42 @@ struct AccountStatus: Decodable {
     var regionName: String { region == 1 ? "国际区" : "中国区" }
 }
 
+struct AccountDevice: Decodable, Identifiable {
+    let deviceId: String; let name: String; let platform: String; let state: String
+    let registeredAt: String; let lastSeenAt: String
+    var id: String { deviceId }
+}
+struct AccountMembership: Decodable {
+    let accountId: String; let region: Int; let tier: String; let hasLifetimeFeatures: Bool
+    let proExpiresAt: String?; let deviceLimit: Int; let loggedInDeviceCount: Int; let activatedDeviceCount: Int
+    let uploadBytes: Int64; let uploadQuota: Int64; let downloadBytes: Int64; let downloadRemainingBytes: Int64
+    let downloadCreditBytes: Int64; let storageBytes: Int64; let storageQuota: Int64; let storageAddonNextExpiresAt: String?
+    var tierName: String { tier == "pro" ? "Pro 会员" : tier == "lifetime" ? "终生功能会员" : "Free 会员" }
+}
+struct DeviceFeatureStatus: Decodable {
+    let membership: AccountMembership; let devices: [AccountDevice]; let currentDeviceId: String
+    let isCurrentDeviceActive: Bool; let canUseFeatures: Bool
+}
+struct MembershipProduct: Decodable, Identifiable {
+    let id: String; let name: String; let kind: String; let priceMinor: Int; let currency: String
+    let durationDays: Int; let bytes: Int64; let description: String
+    var price: String { String(format: "%.2f %@", Double(priceMinor) / 100, currency) }
+}
+struct PurchaseOrder: Decodable, Identifiable {
+    let id: String; let accountId: String; let productId: String; let productName: String; let kind: String
+    let priceMinor: Int; let currency: String; let durationDays: Int; let bytes: Int64; let state: String
+    let createdAt: String; let expiresAt: String; let fulfilledAt: String?
+    var isExpired: Bool {
+        guard state == "pending" else { return false }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var expiry = formatter.date(from: expiresAt)
+        if expiry == nil { formatter.formatOptions = [.withInternetDateTime]; expiry = formatter.date(from: expiresAt) }
+        return expiry.map { $0 <= Date() } ?? false
+    }
+    var stateName: String { state == "fulfilled" ? "已到账" : state == "cancelled" ? "已取消" : isExpired ? "已过期" : "待确认付款" }
+}
+
 struct SyncForm: Codable {
     var provider = 0
     var enabled = false

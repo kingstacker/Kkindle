@@ -14,7 +14,7 @@ public sealed class AiVisionTests
     public async Task MultiplePastedImagesAndImageHistoryReachTheAnswerModel(string provider)
     {
         string? requestBody = null;
-        using var client = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var client = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             return new HttpResponseMessage
@@ -54,7 +54,7 @@ public sealed class AiVisionTests
     public async Task ChatCompletionsVisionRequestContainsTextAndDataUriImage()
     {
         string? requestBody = null;
-        using var client = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var client = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             requestBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
             return new HttpResponseMessage

@@ -37,6 +37,17 @@ internal sealed partial class IOSNativeFrontend
             case "settings.account.logout":
                 var revoked = await modules.Accounts.Service.SignOutAsync(token);
                 return Data(("message", revoked ? "已退出登录。" : "已在本机退出；服务器暂时不可用，远端会话将在到期后失效。"));
+            case "settings.membership.get": return await modules.Accounts.Membership.RefreshAsync(token);
+            case "settings.membership.products": return await modules.Accounts.Membership.ProductsAsync(token);
+            case "settings.membership.orders": return await modules.Accounts.Membership.OrdersAsync(token);
+            case "settings.membership.purchase":
+                return await modules.Accounts.Membership.PurchaseAsync(Text(args, "productId"), Guid.Parse(Text(args, "requestId")), token);
+            case "settings.membership.cancel":
+                await modules.Accounts.Membership.CancelOrderAsync(Guid.Parse(Text(args, "orderId")), token);
+                return Data(("message", "订单已取消。"));
+            case "settings.membership.kick":
+                await modules.Accounts.Membership.KickAsync(Guid.Parse(Text(args, "deviceId")), token);
+                return Data(("message", "设备已退出登录。"));
             case "settings.developer.toggle":
                 if (!_shell.TryToggleDeveloperMode(Text(args, "password"))) throw new InvalidOperationException("密码错误");
                 break;

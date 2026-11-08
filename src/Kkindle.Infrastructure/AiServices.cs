@@ -18,6 +18,18 @@ public sealed class AiConnectionSettings
         && !string.IsNullOrWhiteSpace(Model)
         && !string.IsNullOrWhiteSpace(ApiKey);
 
+    public bool RequiresDeviceMembership
+    {
+        get
+        {
+            if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" || !uri.IsDefaultPort
+                || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0
+                || uri.AbsolutePath.TrimEnd('/') is not ("" or "/v1")) return true;
+            return Provider.Trim().ToLowerInvariant() switch
+            { "deepseek" => uri.Host != "api.deepseek.com", "openai" => uri.Host != "api.openai.com", _ => true };
+        }
+    }
+
     public string ProviderDisplayName => Provider.ToLowerInvariant() switch
     {
         "openai" => "OpenAI",
@@ -202,9 +214,11 @@ public sealed class AiChatClient : IDisposable
 {
     private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromSeconds(90);
     private readonly HttpClient _httpClient;
+    private readonly IDeviceFeatureAccess _features;
 
-    public AiChatClient(HttpMessageHandler? handler = null)
+    public AiChatClient(HttpMessageHandler? handler = null, IDeviceFeatureAccess? features = null)
     {
+        _features = features ?? DeniedDeviceFeatureAccess.Instance;
         _httpClient = handler is null ? new HttpClient() : new HttpClient(handler);
         _httpClient.Timeout = TimeSpan.FromSeconds(120);
     }
@@ -213,6 +227,7 @@ public sealed class AiChatClient : IDisposable
         AiConnectionSettings settings,
         CancellationToken cancellationToken = default)
     {
+        if (settings.RequiresDeviceMembership) await _features.EnsureFeatureAsync(DeviceFeature.CustomAi, cancellationToken);
         var endpoint = BuildEndpoint(settings.BaseUrl, "models");
         if (string.IsNullOrWhiteSpace(settings.ApiKey))
             throw new InvalidOperationException("请先配置 AI API Key。");
@@ -297,6 +312,7 @@ public sealed class AiChatClient : IDisposable
         IReadOnlyList<AiImageAttachment>? images = null)
     {
         if (!settings.IsConfigured) throw new InvalidOperationException("请先配置 AI 服务、模型和 API Key。");
+        if (settings.RequiresDeviceMembership) await _features.EnsureFeatureAsync(DeviceFeature.CustomAi, cancellationToken);
 
         if (settings.Provider.Equals("openai", StringComparison.OrdinalIgnoreCase))
         {
@@ -342,6 +358,8 @@ public sealed class AiChatClient : IDisposable
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(image);
+        if (!settings.IsConfigured) throw new InvalidOperationException("请先配置 AI 服务、模型和 API Key。");
+        if (settings.RequiresDeviceMembership) await _features.EnsureFeatureAsync(DeviceFeature.CustomAi, cancellationToken);
         if (settings.Provider.Equals("openai", StringComparison.OrdinalIgnoreCase))
         {
             await foreach (var chunk in StreamOpenAiResponsesAsync(

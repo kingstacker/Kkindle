@@ -92,6 +92,6 @@ public sealed class AiStreamCompletionTests
             Provider = provider, BaseUrl = "https://example.test/v1", ApiKey = "test-key", Model = "test-model"
         }, "Translate", "Hello", []);
 
-    private static AiChatClient Client(string response) => new(new TestHelpers.StubHttpMessageHandler(_ =>
+    private static AiChatClient Client(string response) => TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(_ =>
         new HttpResponseMessage { Content = new StringContent(response, Encoding.UTF8, "text/event-stream") }));
 }

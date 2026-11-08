@@ -9,7 +9,7 @@ public sealed class AiModelTests
     [Fact]
     public async Task ListsModelsFromOpenAiCompatibleModelsEndpoint()
     {
-        using var client = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var client = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Equal("/models", request.RequestUri?.AbsolutePath);
@@ -35,7 +35,7 @@ public sealed class AiModelTests
     [Fact]
     public async Task TestConnectionUsesARealSimpleQuestion()
     {
-        using var client = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var client = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal("/v1/chat/completions", request.RequestUri?.AbsolutePath);

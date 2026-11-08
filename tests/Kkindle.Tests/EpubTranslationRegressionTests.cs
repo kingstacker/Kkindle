@@ -170,7 +170,7 @@ public sealed class EpubTranslationRegressionTests
         var source = new string('A', 5499) + "." + new string('B', 5499) + "." + new string('C', 500) + ".";
         using var book = new TranslationTestBook("<p>" + source + "</p>");
         await new AiSettingsStore(book.Paths, new TestHelpers.PlaintextSecretProtector()).SaveAsync(AiConfiguration());
-        using var ai = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var ai = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             using var document = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
             var text = document.RootElement.GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetString()!;
@@ -298,7 +298,7 @@ public sealed class EpubTranslationRegressionTests
         var configuration = AiConfiguration();
         await store.SaveAsync(configuration);
         var models = new List<string>();
-        using var ai = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var ai = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             using var document = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
             models.Add(document.RootElement.GetProperty("model").GetString()!);
@@ -321,7 +321,7 @@ public sealed class EpubTranslationRegressionTests
     {
         using var book = new TranslationTestBook("<p>The beginning. The important final condition.</p>");
         await new AiSettingsStore(book.Paths, new TestHelpers.PlaintextSecretProtector()).SaveAsync(AiConfiguration());
-        using var ai = new AiChatClient(new TestHelpers.StubHttpMessageHandler(_ => ChatReply("只有开头，", ending)));
+        using var ai = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(_ => ChatReply("只有开头，", ending)));
         using var service = book.Service(ai: ai);
         var settings = Settings with { Provider = BookTranslationProvider.Ai };
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.TranslateAsync(book.Source, book.Output, settings));

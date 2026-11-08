@@ -16,9 +16,9 @@ public sealed partial class S3SyncIntegrationTests
         using var foreignAccount = new AccountService(international.Paths, protector, dataRegion: AccountRegion.International);
         await foreignAccount.SelectRegionAsync(AccountRegion.International);
         var chineseSync = new S3SyncService(china.Paths, protector, settings =>
-            new RegionalSyncObjectStore(new S3SyncObjectStore(settings, new MemoryClient(bucket)), chineseAccount, AccountRegion.China));
+            new RegionalSyncObjectStore(new S3SyncObjectStore(settings, new MemoryClient(bucket)), chineseAccount, AccountRegion.China), TestHelpers.ActivatedFeatures);
         var foreignSync = new S3SyncService(international.Paths, protector, settings =>
-            new RegionalSyncObjectStore(new S3SyncObjectStore(settings, new MemoryClient(bucket)), foreignAccount, AccountRegion.International));
+            new RegionalSyncObjectStore(new S3SyncObjectStore(settings, new MemoryClient(bucket)), foreignAccount, AccountRegion.International), TestHelpers.ActivatedFeatures);
         await china.AddBookAsync();
         await chineseSync.SyncAsync(china.Id, china.Settings);
         await foreignSync.SyncAsync(international.Id, international.Settings);

@@ -62,6 +62,7 @@ def main() -> int:
         # The account scenario is selected explicitly with --only after both
         # regional localhost servers have been started with disposable data.
         command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testRegionalAccountRegistrationAndCloudSync")
+        command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testAccountMembershipDevicesAndOrders")
     captures = []
     with (output / "xcodebuild.log").open("w") as log:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

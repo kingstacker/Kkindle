@@ -472,6 +472,7 @@ public partial class MainWindow : Window
         Opened += (_, _) => EnsureInteractiveControlToolTips();
         Opened += (_, _) => InitializePlugins();
         Opened += async (_, _) => await RefreshAccountSummaryAsync();
+        Opened += (_, _) => StartDeviceChecks();
         BookGrid.TemplateApplied += (_, _) => AttachBookGridAutoHideScrollbar();
         BookList.TemplateApplied += (_, _) => AttachBookListAutoHideScrollbar();
         Dispatcher.UIThread.Post(UpdateBookGridLayout, DispatcherPriority.Loaded);

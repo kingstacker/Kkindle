@@ -116,4 +116,27 @@ public sealed class NativeFrontendContractTests
             Assert.NotEqual(JsonValueKind.Null, document.RootElement.GetProperty("result").ValueKind);
         }
     }
+
+    [Fact]
+    public void MembershipDevicesAndOrdersUseTheGeneratedNativeWireContract()
+    {
+        var user = Guid.NewGuid(); var device = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
+        var member = new AccountMembership(user, AccountRegion.International, "lifetime", true, null, 5, 1, 1,
+            128, 1024, 64, 2048, 1024, 256, 4096, null);
+        var status = new DeviceFeatureStatus(member, [new(device, "Fictional native device", "iOS", "active", now, now)], device);
+        using var document = JsonDocument.Parse(Serialize(status));
+        Assert.Equal(1, document.RootElement.GetProperty("membership").GetProperty("region").GetInt32());
+        Assert.Equal(5, document.RootElement.GetProperty("membership").GetProperty("deviceLimit").GetInt32());
+        Assert.True(document.RootElement.GetProperty("isCurrentDeviceActive").GetBoolean());
+        Assert.True(document.RootElement.GetProperty("canUseFeatures").GetBoolean());
+        var restored = document.RootElement.Deserialize(IOSNativeJsonContext.Default.DeviceFeatureStatus)!;
+        Assert.Equal(device, restored.CurrentDeviceId); Assert.Equal(user, restored.Membership.AccountId);
+        using var products = JsonDocument.Parse(Serialize(new MembershipProduct[]
+            { new("fictional", "Fictional product", "lifetime", 1, "USD", 0, 0, "Local fixture only") }));
+        Assert.Equal(1, products.RootElement[0].GetProperty("priceMinor").GetInt32());
+        using var order = JsonDocument.Parse(Serialize(new PurchaseOrder(Guid.NewGuid(), user, "fictional", "Fictional product", "lifetime",
+            1, "USD", 0, 0, "pending", now, now.AddDays(2), null)));
+        Assert.Equal("pending", order.RootElement.GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, order.RootElement.GetProperty("fulfilledAt").ValueKind);
+    }
 }

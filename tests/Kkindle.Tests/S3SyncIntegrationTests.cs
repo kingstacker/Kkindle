@@ -135,6 +135,53 @@ public sealed partial class S3SyncIntegrationTests
         Assert.Equal(1, await b.BookCountAsync());
     }
 
+    [Theory]
+    [InlineData(SyncProvider.S3)]
+    [InlineData(SyncProvider.WebDav)]
+    public async Task EncryptedUploadsNeverExposeThePassphraseFingerprint(SyncProvider provider)
+    {
+        const string passphrase = "fictional-encrypted-directory-key";
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket, passphrase);
+        a.Settings = a.Settings with { Provider = provider, WebDavEndpoint = "https://example.invalid/dav" };
+        var book = await a.AddBookAsync();
+        await a.SyncAsync();
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(passphrase))).ToLowerInvariant();
+        Assert.Contains($"{a.Settings.Prefix}/objects/encrypted/v2/{book.Hash}", bucket.Objects.Keys);
+        Assert.All(bucket.Objects.Keys.Concat(bucket.ListPrefixes), key => Assert.DoesNotContain(fingerprint, key));
+        await using var b = await Device.CreateAsync(bucket, passphrase);
+        b.Settings = a.Settings;
+        await b.SyncAsync();
+        var remoteBook = Assert.Single(await b.Library.SearchAsync());
+        var path = await b.Service.EnsureBookFileDownloadedAsync(b.Id, b.Settings, Assert.Single(remoteBook.Files));
+        Assert.Equal(book.Hash, await Hashing.Sha256Async(path));
+    }
+
+    [Fact]
+    public async Task LegacyEncryptedObjectsCanBeDownloadedWithoutUploadingAKeyFingerprint()
+    {
+        const string passphrase = "fictional-legacy-directory-key";
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket, passphrase);
+        var book = await a.AddBookAsync();
+        await a.SyncAsync();
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(passphrase))).ToLowerInvariant();
+        var modernKey = $"{a.Settings.Prefix}/objects/encrypted/v2/{book.Hash}";
+        var legacyKey = $"{a.Settings.Prefix}/objects/encrypted/{fingerprint}/{book.Hash}";
+        Assert.True(bucket.Objects.TryRemove(modernKey, out var ciphertext));
+        bucket.Objects[legacyKey] = ciphertext!;
+        bucket.BeforePut = (key, _) => { Assert.DoesNotContain(fingerprint, key); return Task.CompletedTask; };
+        await using var b = await Device.CreateAsync(bucket, passphrase);
+        await b.SyncAsync();
+        var remoteBook = Assert.Single(await b.Library.SearchAsync());
+        var path = await b.Service.EnsureBookFileDownloadedAsync(b.Id, b.Settings, Assert.Single(remoteBook.Files));
+        Assert.Equal(book.Hash, await Hashing.Sha256Async(path));
+        Assert.All(bucket.ListPrefixes, prefix => Assert.DoesNotContain(fingerprint, prefix));
+        await b.SyncAsync();
+        Assert.Contains(modernKey, bucket.Objects.Keys);
+        Assert.Contains(legacyKey, bucket.Objects.Keys);
+    }
+
     [Fact]
     public async Task DeleteWhileReadingRemoteSnapshot_IsNotResurrected()
     {
@@ -849,7 +896,7 @@ public sealed partial class S3SyncIntegrationTests
             {
                 Root = root, Paths = paths, Reader = reader,
                 Library = library,
-                Service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket))
+                Service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket), TestHelpers.ActivatedFeatures)
             };
             device.Settings = device.Settings with { EncryptionKey = encryptionKey };
             await device.Service.SaveSettingsAsync(device.Id, device.Settings);
@@ -937,6 +984,7 @@ public sealed partial class S3SyncIntegrationTests
     private sealed class MemoryBucket
     {
         public ConcurrentDictionary<string, byte[]> Objects { get; } = new(StringComparer.Ordinal);
+        public ConcurrentQueue<string> ListPrefixes { get; } = new();
         public int WriteCount;
         public ConcurrentDictionary<string, DateTime> ModifiedTimes { get; } = new(StringComparer.Ordinal);
         public Func<string, CancellationToken, Task>? BeforeGet;
@@ -964,6 +1012,7 @@ public sealed partial class S3SyncIntegrationTests
         public override Task<ListObjectsV2Response> ListObjectsV2Async(ListObjectsV2Request request, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            bucket.ListPrefixes.Enqueue(request.Prefix);
             return Task.FromResult(new ListObjectsV2Response
             {
                 IsTruncated = false,

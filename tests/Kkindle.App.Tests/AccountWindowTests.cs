@@ -56,6 +56,61 @@ public sealed partial class SettingsTests
         await Until(() => !scope.Field<bool>("_accountWindowOpen"));
     });
 
+    [Fact]
+    public Task MemberCanListAndKickDevicesAndCreateThenCancelAnOrder() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        using var handler = new MembershipHttpHandler(); using var http = new HttpClient(handler);
+        using var accounts = new AccountService(scope.Paths, new AccountTestProtector(), http);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password, true);
+        var dialog = new AccountWindow(accounts, new DeviceMembershipService(accounts));
+        T Get<T>(string name) where T : Control => dialog.FindControl<T>(name)!;
+        try
+        {
+            dialog.Show(scope.Window);
+            await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 2 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Assert.Contains("终生功能会员", Get<TextBlock>("MembershipSummary").Text);
+            Assert.Contains("2/5", Get<TextBlock>("MembershipSummary").Text);
+            Assert.Contains("0.01 CNY", Get<TextBlock>("ProductDescription").Text);
+            var kick = Get<StackPanel>("DeviceListPanel").Children.OfType<StackPanel>().SelectMany(row => row.Children).OfType<Button>()
+                .Single(button => button.Tag is Guid id && id == handler.OtherDeviceId);
+            kick.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 1 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Assert.Equal(handler.OtherDeviceId, handler.LastKickedDevice);
+            Assert.True((await accounts.GetStatusAsync()).IsLoggedIn);
+            Get<Button>("PurchaseButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(() => Get<StackPanel>("OrderListPanel").Children.Count == 1 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Assert.Equal("fictional-lifetime", handler.LastPurchase!.ProductId);
+            var cancel = ((StackPanel)Get<StackPanel>("OrderListPanel").Children[0]).Children.OfType<Button>().Single();
+            cancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Until(() => handler.Orders[0].State == "cancelled" && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Capture(dialog, "membership-devices-and-order");
+        }
+        finally { dialog.Close(); }
+    });
+
+    [Fact]
+    public Task DailyInvalidationRestoresTheAccountWindowsLoginForm() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        using var handler = new MembershipHttpHandler(); using var http = new HttpClient(handler);
+        using var accounts = new AccountService(scope.Paths, new AccountTestProtector(), http);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password, true);
+        using var monitor = new AccountDeviceMonitor(accounts, scope.Paths);
+        var dialog = new AccountWindow(accounts, new DeviceMembershipService(accounts));
+        try
+        {
+            dialog.Show(scope.Window);
+            await Until(() => dialog.FindControl<StackPanel>("MembershipPanel")!.IsVisible);
+            handler.Revoked = true; await monitor.CheckIfDueAsync();
+            await Until(() => dialog.FindControl<StackPanel>("SignInPanel")!.IsVisible);
+            Assert.False(dialog.FindControl<StackPanel>("MembershipPanel")!.IsVisible);
+            Assert.Contains("重新登录", dialog.FindControl<TextBlock>("StatusText")!.Text);
+            Assert.False((await accounts.GetStatusAsync()).IsLoggedIn);
+        }
+        finally { dialog.Close(); }
+    });
+
     private sealed class AccountTestProtector : Kkindle.Core.ISecretProtector
     {
         public byte[] Protect(byte[] value) => value.ToArray();

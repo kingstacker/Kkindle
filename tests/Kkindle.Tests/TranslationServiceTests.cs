@@ -21,7 +21,7 @@ public sealed class TranslationServiceTests
     [Fact]
     public async Task TranslatesWithGoogleWebEndpoint()
     {
-        using var aiClient = new AiChatClient();
+        using var aiClient = TestHelpers.CreateActivatedAiClient();
         using var service = CreateService(request =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
@@ -45,7 +45,7 @@ public sealed class TranslationServiceTests
     public async Task FallsBackToLegacyGoogleEndpointWhenPrimaryIsRateLimited(string responseBody)
     {
         var requests = new List<HttpRequestMessage>();
-        using var aiClient = new AiChatClient();
+        using var aiClient = TestHelpers.CreateActivatedAiClient();
         using var service = CreateService(request =>
         {
             requests.Add(request);
@@ -83,7 +83,7 @@ public sealed class TranslationServiceTests
     [InlineData("[[[\" \"]]]")]
     public async Task EmptyGoogleResponsesExplainHowToRetry(string responseBody)
     {
-        using var aiClient = new AiChatClient();
+        using var aiClient = TestHelpers.CreateActivatedAiClient();
         using var service = CreateService(_ => JsonResponse(responseBody), aiClient);
         var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
             service.TranslateAsync("Hello", ReaderTranslationProvider.Google, "zh-CN"));
@@ -96,7 +96,7 @@ public sealed class TranslationServiceTests
     [InlineData(true)]
     public async Task GoogleConnectionErrorsExplainNetworkAndProxySettings(bool timeout)
     {
-        using var aiClient = new AiChatClient();
+        using var aiClient = TestHelpers.CreateActivatedAiClient();
         using var service = CreateService(_ => throw (timeout
             ? new TaskCanceledException("timeout") : new HttpRequestException("connection failed")), aiClient);
         var error = await Record.ExceptionAsync(() =>
@@ -110,7 +110,7 @@ public sealed class TranslationServiceTests
     public async Task TranslatesWithBingFreeWebEndpointAndRefreshesCredentials()
     {
         var requests = new List<HttpRequestMessage>();
-        using var aiClient = new AiChatClient();
+        using var aiClient = TestHelpers.CreateActivatedAiClient();
         using var service = CreateService(request =>
         {
             requests.Add(request);
@@ -151,7 +151,7 @@ public sealed class TranslationServiceTests
     [InlineData("www.bing.com")]
     public async Task BingPostsToTheFinalTranslatorPageHost(string pageHost)
     {
-        using var aiClient = new AiChatClient();
+        using var aiClient = TestHelpers.CreateActivatedAiClient();
         using var service = CreateService(request =>
         {
             if (request.Method == HttpMethod.Get)
@@ -177,7 +177,7 @@ public sealed class TranslationServiceTests
     [Fact]
     public async Task TranslatesWithConfiguredAiWithoutAddingChatHistory()
     {
-        using var aiClient = new AiChatClient(new TestHelpers.StubHttpMessageHandler(request =>
+        using var aiClient = TestHelpers.CreateActivatedAiClient(new TestHelpers.StubHttpMessageHandler(request =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
             var payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -220,7 +220,7 @@ public sealed class TranslationServiceTests
         AiChatClient? aiClient = null)
     {
         return new TranslationService(
-            aiClient ?? new AiChatClient(),
+            aiClient ?? TestHelpers.CreateActivatedAiClient(),
             new TestHelpers.StubHttpMessageHandler(responder));
     }
 

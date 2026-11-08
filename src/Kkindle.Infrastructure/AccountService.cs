@@ -14,6 +14,7 @@ public sealed class AccountService : IDisposable
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly AccountSessionStore _store;
+    private readonly DeviceIdentityStore _identity;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly TimeProvider _clock;
     private readonly AccountRegion? _dataRegion;
@@ -27,12 +28,86 @@ public sealed class AccountService : IDisposable
         AccountRegion? dataRegion = null)
     {
         _store = new(paths, protector);
+        _identity = new(paths, protector);
         _ownsHttp = http is null;
         // A redirect must never forward a password or a bearer token to another host.
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
         _clock = clock ?? TimeProvider.System;
         _dataRegion = dataRegion;
     }
+
+    public event EventHandler<AccountDeviceInvalidatedEventArgs>? DeviceInvalidated;
+    public Task<DeviceEnrollmentRequest> GetDeviceAsync(CancellationToken token = default) => _identity.GetAsync(token);
+
+    internal async Task<(AccountStatus Scope, T Value)> MemberRequestAsync<T>(HttpMethod method, string action,
+        JsonTypeInfo<T> metadata, JsonContent? content, CancellationToken token)
+    {
+        await _gate.WaitAsync(token);
+        try
+        {
+            await LoadAsync(token);
+            if (_session is null) throw new DeviceFeatureRequiredException("请先登录当前区域的账号。其他功能免费。");
+            var scope = Status();
+            using var request = Request(method, _serverUrl, action, _session.Token);
+            request.Content = content;
+            using var response = await SendAsync(request, token);
+            await EnsureMemberSuccessAsync(response, token);
+            return (scope, await ReadAsync(response, metadata, token, maximumBytes: 64 * 1024));
+        }
+        finally { _gate.Release(); }
+    }
+
+    internal async Task MemberActionAsync(string action, CancellationToken token)
+    {
+        await _gate.WaitAsync(token);
+        try
+        {
+            await LoadAsync(token);
+            if (_session is null) throw new InvalidOperationException("请先登录当前区域的账号。");
+            using var request = Request(HttpMethod.Post, _serverUrl, action, _session.Token);
+            using var response = await SendAsync(request, token);
+            await EnsureMemberSuccessAsync(response, token);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task EnsureMemberSuccessAsync(HttpResponseMessage response, CancellationToken token)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var code = response.Headers.TryGetValues("X-Kkindle-Error", out var values) ? values.FirstOrDefault() : null;
+        if (response.StatusCode == HttpStatusCode.Unauthorized || code is "account_banned" or "device_mismatch")
+        {
+            await InvalidateAsync(token);
+            throw new DeviceFeatureRequiredException("此设备已退出登录或账号已失效，请重新登录。");
+        }
+        var message = ApiMessage(code);
+        if (code == "membership_required") throw new DeviceFeatureRequiredException(message!);
+        throw new InvalidOperationException(message ?? "账号服务暂时不可用，请稍后重试。");
+    }
+
+    private async Task InvalidateAsync(CancellationToken token)
+    {
+        var hadSession = _session is not null;
+        await SetAsync(_serverUrl, null, token);
+        if (hadSession) DeviceInvalidated?.Invoke(this, new("此设备已退出登录或会话已过期，请重新登录。"));
+    }
+
+    private static string? ApiMessage(string? code) => code switch
+    {
+        "device_limit_reached" => "此账号已登录 5 台设备，请在已登录设备的账号页踢出旧设备，再登录。",
+        "device_blocked" => "此设备已被管理员停用，请联系管理员。",
+        "device_mismatch" => "本机设备身份已改变，请重新登录。",
+        "invalid_device" => "设备信息无效，请检查系统密钥库或更新客户端。",
+        "membership_required" => "自定义 S3 和自定义 AI 需要终生功能会员；购买 Pro 也会永久获得功能会员。其他功能免费。",
+        "purchases_disabled" => "购买服务暂未开放，请联系管理员。",
+        "invalid_product" => "商品不存在或已下架，请刷新商品列表。",
+        "order_request_conflict" => "请为不同商品创建新的订单。",
+        "too_many_orders" => "请先处理或取消已有的待支付订单。",
+        "order_not_pending" => "该订单已取消、到账或超过付款期限。",
+        "rate_limited" => "请求过于频繁，请稍后再试。",
+        "region_mismatch" => "账号服务区域不匹配，请检查所选区域。",
+        _ => null
+    };
 
     public async Task<AccountStatus> SelectRegionAsync(AccountRegion region, CancellationToken cancellationToken = default)
     {
@@ -97,7 +172,7 @@ public sealed class AccountService : IDisposable
                 using var request = Request(HttpMethod.Get, _serverUrl, "session", session.Token);
                 using var response = await SendAsync(request, cancellationToken);
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
-                    await SetAsync(_serverUrl, null, cancellationToken);
+                    await InvalidateAsync(cancellationToken);
                 else
                 {
                     EnsureSuccess(response, false);
@@ -127,8 +202,10 @@ public sealed class AccountService : IDisposable
         try
         {
             await LoadAsync(cancellationToken);
+            var device = await _identity.GetAsync(cancellationToken);
             using var request = Request(HttpMethod.Post, endpoint, register ? "register" : "login");
-            request.Content = JsonContent.Create(new AccountCredentials { Username = username, Password = password, Region = _region },
+            request.Content = JsonContent.Create(new AccountCredentials { Username = username, Password = password, Region = _region,
+                DeviceId = device.DeviceId, DeviceName = device.DeviceName, Platform = device.Platform },
                 AccountJsonContext.Default.AccountCredentials);
             using var response = await SendAsync(request, cancellationToken);
             EnsureSuccess(response, register);
@@ -187,7 +264,7 @@ public sealed class AccountService : IDisposable
             || session.Region != _region || session.Token is not { Length: 43 }
             || !session.Token.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
             || session.User.Id == Guid.Empty || !AccountValidation.IsUsername(session.User.Username)))
-            await SetAsync(_serverUrl, null, token);
+            await InvalidateAsync(token);
     }
 
     private async Task SetAsync(string server, AccountSessionResponse? session, CancellationToken token)
@@ -223,6 +300,8 @@ public sealed class AccountService : IDisposable
         if (response.IsSuccessStatusCode) return;
         if (response.Headers.TryGetValues("X-Kkindle-Error", out var values) && values.Contains("account_banned"))
             throw new InvalidOperationException("此账号已被封禁，请联系管理员。");
+        if (response.Headers.TryGetValues("X-Kkindle-Error", out values) && ApiMessage(values.FirstOrDefault()) is { } message)
+            throw new InvalidOperationException(message);
         throw new InvalidOperationException(response.StatusCode switch
         {
             HttpStatusCode.Unauthorized => "用户名或密码错误。",
@@ -234,14 +313,15 @@ public sealed class AccountService : IDisposable
         });
     }
 
-    private static async Task<T> ReadAsync<T>(HttpResponseMessage response, JsonTypeInfo<T> metadata, CancellationToken token)
+    private static async Task<T> ReadAsync<T>(HttpResponseMessage response, JsonTypeInfo<T> metadata, CancellationToken token,
+        int maximumBytes = 16 * 1024)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             // Bound replies, including replies from a mistakenly configured server.
-            await response.Content.LoadIntoBufferAsync(16 * 1024).WaitAsync(deadline.Token);
+            await response.Content.LoadIntoBufferAsync(maximumBytes).WaitAsync(deadline.Token);
             return await response.Content.ReadFromJsonAsync(metadata, deadline.Token)
                 ?? throw new InvalidOperationException("账号服务返回了无效的响应。");
         }
@@ -255,4 +335,9 @@ public sealed class AccountService : IDisposable
     {
         if (_ownsHttp) _http.Dispose();
     }
+}
+
+public sealed class AccountDeviceInvalidatedEventArgs(string message) : EventArgs
+{
+    public string Message { get; } = message;
 }

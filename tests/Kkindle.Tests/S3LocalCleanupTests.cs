@@ -25,7 +25,7 @@ public sealed partial class S3SyncIntegrationTests
             Assert.Equal(1, await b.ScalarAsync("SELECT COUNT(*) FROM LocalFileCleanupQueue;"));
         }
 
-        var restarted = new S3SyncService(b.Paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket));
+        var restarted = new S3SyncService(b.Paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket), TestHelpers.ActivatedFeatures);
         Assert.False((await restarted.SyncAsync(b.Id, b.Settings)).IsPartial);
         Assert.False(File.Exists(path));
         Assert.Equal(0, await b.ScalarAsync("SELECT COUNT(*) FROM LocalFileCleanupQueue;"));

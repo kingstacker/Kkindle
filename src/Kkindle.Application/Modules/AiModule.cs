@@ -5,10 +5,10 @@ namespace Kkindle.ApplicationServices;
 
 public sealed class AiModule
 {
-    internal AiModule(ApplicationModuleOptions options, AppSettings settings, ReaderModule reader)
+    internal AiModule(ApplicationModuleOptions options, AppSettings settings, ReaderModule reader, IDeviceFeatureAccess features)
     {
         Settings = new AiSettingsStore(options.Paths, options.SecretProtector);
-        ChatClient = new AiChatClient();
+        ChatClient = new AiChatClient(features: features);
         Translation = new TranslationService(ChatClient);
         EpubTranslation = new EpubTranslationService(options.Paths, options.SecretProtector, ChatClient);
         EmbeddingModels = new EmbeddingModelDownloadService(options.Paths);

@@ -338,7 +338,7 @@ public sealed class ReaderAiAnswerTests(SettingsUiSession session)
     {
         var handler = new CapturingAiHandler();
         scope.Field<AiChatClient>("_aiChatClient").Dispose();
-        scope.Set("_aiChatClient", new AiChatClient(handler));
+        scope.Set("_aiChatClient", new AiChatClient(handler, new Kkindle.TestFixtures.ActivatedDeviceFeatures()));
         scope.Set("_appSettings", scope.Field<AppSettings>("_appSettings") with { AiEnabled = true, NetworkEnabled = true });
         scope.Set("_readerAiSettings", new AiConnectionSettings
         {

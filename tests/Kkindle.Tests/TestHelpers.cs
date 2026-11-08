@@ -5,6 +5,8 @@ namespace Kkindle.Tests;
 
 internal static class TestHelpers
 {
+    internal static IDeviceFeatureAccess ActivatedFeatures { get; } = new Kkindle.TestFixtures.ActivatedDeviceFeatures();
+    internal static Kkindle.Infrastructure.AiChatClient CreateActivatedAiClient(HttpMessageHandler? handler = null) => new(handler, ActivatedFeatures);
     /// <summary>
     /// Stands in for the OS keystore so settings tests exercise the
     /// persistence round trip without binding to a machine account. The real

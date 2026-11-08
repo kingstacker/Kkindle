@@ -32,8 +32,8 @@ public sealed class ApplicationModules : IDisposable
         var regionalOptions = options with { Paths = Paths };
         Library = new LibraryModule(regionalOptions);
         Reader = new ReaderModule(regionalOptions, Library);
-        Ai = new AiModule(regionalOptions, StartupSettings, Reader);
-        Sync = new SyncModule(regionalOptions, Accounts.Service, DataRegion);
+        Ai = new AiModule(regionalOptions, StartupSettings, Reader, Accounts.Membership);
+        Sync = new SyncModule(regionalOptions, Accounts.Service, DataRegion, Accounts.Membership);
         Integrations = new IntegrationModule(regionalOptions);
         Plugins = new PluginManager(Paths);
     }
@@ -60,7 +60,7 @@ public sealed class ApplicationModules : IDisposable
         IDisposable?[] resources =
         [
             Integrations.Updates,
-            Accounts.Service,
+            Accounts.Monitor, Accounts.Service,
             Ai.EpubTranslation, Ai.Translation, Ai.ChatClient, Ai.WebSearch,
             Ai.EmbeddingModels, Ai.PinyinModels, Ai.Embedding
         ];

@@ -78,6 +78,8 @@ final class NativeFrontendTests: XCTestCase {
         let regions = app.segmentedControls["account.region"]
         XCTAssertTrue(regions.waitForExistence(timeout: 15))
         XCTAssertEqual(regions.buttons.count, 2)
+        if app.buttons["account.logout"].exists { tapAccountElement(app.buttons["account.logout"]) }
+        tapAccountElement(regions.buttons["中国区"])
         XCTAssertEqual(app.textFields["account.server"].value as? String, "http://127.0.0.1:5088")
         register()
         verifySignOutAndLogin()
@@ -186,6 +188,74 @@ final class NativeFrontendTests: XCTestCase {
             XCTAssertTrue(waitUntil { self.app.staticTexts["sync.status"].label.hasPrefix("同步完成") })
             attachScreenshot("账号云同步")
             tapAccountElement(app.navigationBars["同步"].buttons.firstMatch)
+        }
+    }
+
+    /// Local demo only: registration, member controls, pending order cancellation and current-device revocation.
+    func testAccountMembershipDevicesAndOrders() {
+        let username = "region_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))
+        let password = "fictional-native-password"
+        print("KKINDLE_FICTIONAL_ACCOUNT:\(username)")
+        app.tabBars.buttons["我的"].tap()
+        tapAccountElement(app.buttons["profile.account"])
+        let regions = app.segmentedControls["account.region"]
+        XCTAssertTrue(regions.waitForExistence(timeout: 15))
+        if app.buttons["account.logout"].exists { tapAccountElement(app.buttons["account.logout"]) }
+        tapAccountElement(regions.buttons["中国区"])
+        let mode = app.segmentedControls["account.mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 15))
+        tapAccountElement(mode.buttons["注册"])
+        let user = app.textFields["account.usernameField"]
+        reveal(user); replaceText(user, with: username); dismissKeyboard()
+        enterPassword(app.secureTextFields["account.password"])
+        enterPassword(app.secureTextFields["account.confirmation"])
+        tapAccountElement(app.buttons["account.submit"])
+        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["account.username"].label, username)
+        let tier = app.staticTexts["membership.tier"]
+        reveal(tier)
+        XCTAssertTrue(tier.waitForExistence(timeout: 20))
+        XCTAssertEqual(tier.label, "Free 会员")
+        let current = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH 'membership.device.' AND label CONTAINS '当前设备'")).firstMatch
+        reveal(current)
+        XCTAssertTrue(current.waitForExistence(timeout: 15))
+        attachScreenshot("会员-Free与当前设备")
+        let buy = app.buttons["membership.buy.pro-30d"]
+        reveal(buy); tapAccountElement(buy)
+        let order = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH 'membership.order.'")).firstMatch
+        reveal(order)
+        XCTAssertTrue(order.waitForExistence(timeout: 20))
+        XCTAssertTrue(order.label.contains("待确认付款"))
+        let orderIdentifier = order.identifier
+        let cancel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'membership.cancel.'")).firstMatch
+        reveal(cancel); tapAccountElement(cancel)
+        // Removing the cancellation controls changes the List row height;
+        // SwiftUI can recycle its accessibility element outside the viewport.
+        let cancelled = app.staticTexts[orderIdentifier]
+        reveal(cancelled)
+        XCTAssertTrue(waitUntil { cancelled.exists && cancelled.label.contains("已取消") }, app.debugDescription)
+        attachScreenshot("会员-订单取消")
+        let kick = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'membership.kick.'")).firstMatch
+        for _ in 0..<8 { if kick.exists && kick.isHittable { break }; app.swipeDown() }
+        tapAccountElement(kick)
+        let confirm = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "踢出 ")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10)); confirm.tap()
+        let invalidation = app.staticTexts["设备已失效"]
+        XCTAssertTrue(invalidation.waitForExistence(timeout: 15))
+        attachScreenshot("会员-设备失效提示")
+        tapAccountElement(app.buttons["知道了"])
+        XCTAssertTrue(mode.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["account.username"].exists)
+
+        func enterPassword(_ field: XCUIElement) {
+            reveal(field); field.tap(); field.typeText(String(password.prefix(1)))
+            let suggestion = app.staticTexts["使用强密码？"]
+            if suggestion.waitForExistence(timeout: 2) {
+                let close = app.buttons.matching(NSPredicate(format: "label IN {'关闭', 'Close', '取消', 'Cancel'}")).firstMatch
+                XCTAssertTrue(close.exists); close.tap(); XCTAssertTrue(waitUntil { !suggestion.exists })
+                field.typeText(XCUIKeyboardKey.delete.rawValue); field.typeText(password)
+            } else { field.typeText(String(password.dropFirst())) }
+            dismissKeyboard()
         }
     }
 

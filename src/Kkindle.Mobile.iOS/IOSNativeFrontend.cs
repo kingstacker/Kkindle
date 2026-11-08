@@ -47,8 +47,9 @@ internal sealed partial class IOSNativeFrontend
         shell.NativeConfirmation = ConfirmAsync;
         shell.NativeRestartRequired = () => Publish(Data(("type", "restart")));
         shell.NativeLibraryChanged = () => Publish(Data(("type", "libraryChanged")));
+        shell.Modules.Accounts.Service.DeviceInvalidated += (_, _) => Publish(Data(("type", "accountInvalidated")));
         shell.DeveloperModeChanged += (_, _) => Publish(Data(("type", "developer"), ("enabled", shell.IsDeveloperMode)));
-        _observers.Add(UIApplication.Notifications.ObserveDidBecomeActive((_, _) => _reader?.Resume()));
+        _observers.Add(UIApplication.Notifications.ObserveDidBecomeActive((_, _) => { _reader?.Resume(); _ = shell.CheckDevicesIfDueAsync(); }));
         _observers.Add(UIApplication.Notifications.ObserveWillResignActive((_, _) =>
         {
             if (_reader is not { } reader) return;
@@ -88,6 +89,7 @@ internal sealed partial class IOSNativeFrontend
         Console.WriteLine("Kkindle native: SwiftUI root created.");
 #endif
         ReleaseShell(pointer);
+        shell.StartDeviceChecks();
         lifetime.MainView = null;
         if (MobileDataCoordinator.IsRestartRequired) Publish(Data(("type", "restart")));
         else shell.RequestAutoSync(MobileShell.AutoSyncGap.OnStart);

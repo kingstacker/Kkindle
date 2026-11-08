@@ -10,6 +10,8 @@
   <ItemGroup>
     <Compile Include="../../src/Kkindle.Mobile/ReadingActivityClock.cs" Link="ReadingActivityClock.cs" />
     <Compile Include="../Fixtures/PdfFixture.cs" Link="Fixtures/PdfFixture.cs" />
+    <Compile Include="../Fixtures/ActivatedDeviceFeatures.cs" Link="Fixtures/ActivatedDeviceFeatures.cs" />
+    <Compile Include="../Fixtures/MembershipHttpHandler.cs" Link="Fixtures/MembershipHttpHandler.cs" />
     <Compile Include="../Fixtures/FakePdfDocument.cs" Link="Fixtures/FakePdfDocument.cs" />
     <None Include="../Fixtures/Azw3/*" Link="Fixtures/Azw3/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\..\src\Kkindle.Core\Kkindle.Core.csproj" />

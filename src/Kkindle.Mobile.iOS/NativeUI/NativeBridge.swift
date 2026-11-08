@@ -216,6 +216,7 @@ final class NativeStore: ObservableObject {
         case "aiText": if let id = event.sessionId { session.aiStreams[id] = event.text ?? "" }
         case "restart": restartRequired = true
         case "toast": showToast(event.message ?? "")
+        case "accountInvalidated": account = nil
         default: break
         }
     }

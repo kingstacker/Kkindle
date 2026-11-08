@@ -5,9 +5,9 @@ namespace Kkindle.ApplicationServices;
 
 public sealed class SyncModule
 {
-    internal SyncModule(ApplicationModuleOptions options, AccountService accounts, AccountRegion dataRegion)
+    internal SyncModule(ApplicationModuleOptions options, AccountService accounts, AccountRegion dataRegion, IDeviceFeatureAccess features)
     {
-        Service = options.SyncService ?? new S3SyncService(options.Paths, options.SecretProtector, accounts, dataRegion);
+        Service = options.SyncService ?? new S3SyncService(options.Paths, options.SecretProtector, accounts, dataRegion, features);
     }
 
     public ISyncService Service { get; }

@@ -33,6 +33,7 @@ struct NativeAccountPage: View {
                     Text(account.serverUrl).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
                     if let expiry = account.expiresAt { Text("会话有效至 \(expiry.prefix(10))").font(NativeTheme.font(12, relativeTo: .caption)) }
                 }
+                NativeMembershipSections(store: store)
             } else {
                 Section {
                     Picker("账号操作", selection: $register) { Text("登录").tag(false); Text("注册").tag(true) }

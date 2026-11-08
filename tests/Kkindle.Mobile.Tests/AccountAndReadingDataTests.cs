@@ -157,6 +157,43 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
     }, CancellationToken.None);
 
     [Fact]
+    public Task MembershipPageManagesDevicesOrdersAndDailyInvalidation() => session.Session.Dispatch(async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-membership-" + Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root); var protector = new TestProtector();
+        using var handler = new MembershipHttpHandler(); using var http = new HttpClient(handler);
+        using var accounts = new AccountService(paths, protector, http);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password, true);
+        var services = Services(paths, protector); using var modules = MobileComposition.Create(services);
+        var confirmations = 0;
+        var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths))
+            { NativeConfirmation = (_, _, _) => { confirmations++; return Task.FromResult(true); } };
+        var page = new AccountPage(accounts, shell, new DeviceMembershipService(accounts));
+        var window = new Window { Width = 411, Height = 880, Content = page };
+        T Get<T>(string name) where T : Control => page.FindControl<T>(name)!;
+        try
+        {
+            window.Show();
+            await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 2 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Assert.Contains("终生功能会员", Get<TextBlock>("MembershipSummary").Text);
+            var kick = Get<StackPanel>("DeviceListPanel").Children.OfType<StackPanel>().SelectMany(row => row.Children).OfType<Button>()
+                .Single(button => button.Tag is Guid id && id == handler.OtherDeviceId);
+            Click(kick);
+            await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 1 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Assert.Equal(1, confirmations); Assert.True((await accounts.GetStatusAsync()).IsLoggedIn);
+            Click(Get<Button>("PurchaseButton"));
+            await Until(() => Get<StackPanel>("OrderListPanel").Children.Count == 1 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Click(((StackPanel)Get<StackPanel>("OrderListPanel").Children[0]).Children.OfType<Button>().Single());
+            await Until(() => handler.Orders[0].State == "cancelled" && Get<StackPanel>("MembershipPanel").IsEnabled);
+            using var monitor = new AccountDeviceMonitor(accounts, paths); handler.Revoked = true;
+            await monitor.CheckIfDueAsync(); await Until(() => Get<StackPanel>("SignInPanel").IsVisible);
+            Assert.Contains("重新登录", Get<TextBlock>("StatusText").Text); Assert.False(Get<StackPanel>("MembershipPanel").IsVisible);
+        }
+        finally { page.OnClosed(); window.Close(); SqliteConnection.ClearAllPools(); if (Directory.Exists(root)) Directory.Delete(root, true); }
+        return true;
+    }, CancellationToken.None);
+
+    [Fact]
     public Task ReadingPeriodButtonsChangeTheChartAndPreserveTheOverview() => session.Session.Dispatch(async () =>
     {
         var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-periods-" + Guid.NewGuid().ToString("N"));
