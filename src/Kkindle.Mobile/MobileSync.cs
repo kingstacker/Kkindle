@@ -69,7 +69,7 @@ public sealed class MobileSync(ApplicationModules modules)
     {
         using var operation = MobileDataCoordinator.TryBeginOperation();
         if (operation is null) return;
-        var modules = MobileComposition.Create(services);
+        using var modules = MobileComposition.Create(services);
         // Initialization completes any interrupted import before settings are read.
         await modules.Library.Books.InitializeAsync(cancellationToken);
         await modules.Reader.Data.InitializeAsync(cancellationToken);

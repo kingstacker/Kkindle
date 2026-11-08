@@ -48,6 +48,10 @@ public partial class ProfilePage : UserControl
         if (operation is null) return;
         try
         {
+            var account = await _modules!.Accounts.Service.GetStatusAsync();
+            AccountNameText.Text = account.User?.Username ?? "登录 / 注册";
+            AccountHintText.Text = AccountRegions.DisplayName(account.Region) + " · "
+                + (account.RequiresDataRestart ? "请重新打开应用" : account.IsLoggedIn ? "已登录 · 管理账号" : "登录你的 Kkindle 账号");
             await _modules!.Library.Books.InitializeAsync();
             var books = await _modules.Library.Books.SearchAsync();
             var sync = await _modules.Sync.Service.LoadSettingsAsync();
@@ -83,6 +87,8 @@ public partial class ProfilePage : UserControl
 
     private void OnSyncClick(object? sender, RoutedEventArgs e) => _shell?.OpenSyncSettings();
 
+    private void OnAccountClick(object? sender, RoutedEventArgs e) => _shell?.OpenAccount();
+
     private void OnAiClick(object? sender, RoutedEventArgs e) => _shell?.OpenAiSettings();
 
     private void OnKindleClick(object? sender, RoutedEventArgs e) => _shell?.OpenKindleSettings();
@@ -107,6 +113,7 @@ public partial class ProfilePage : UserControl
         string? directory = null;
         try
         {
+            await _shell.EnsureBackupEncryptionAsync();
             var fileName = $"Kkindle-备份-{DateTime.Now:yyyyMMdd-HHmmss}{AppBackupService.FileExtension}";
             var share = _shell.Services.FileShare;
             IStorageFile? destination = null;
@@ -177,6 +184,7 @@ public partial class ProfilePage : UserControl
         IReadOnlyList<string> files = [];
         try
         {
+            await _shell.EnsureBackupEncryptionAsync();
             files = await _shell.Services.ImportSource.PickFilesAsync();
             if (files.Count == 0)
             {

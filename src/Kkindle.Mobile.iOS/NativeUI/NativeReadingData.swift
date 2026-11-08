@@ -109,7 +109,7 @@ struct NativeMaterials: View {
 struct NativeReadingDashboard: View {
     @ObservedObject var store: NativeStore
     @State private var value: DashboardSnapshot?
-    @State private var days = 14
+    @State private var period = 0
     @State private var picked: String?
     @State private var allMedals = false
     private var dashboard: ReadingDashboard? { value?.dashboard }
@@ -135,7 +135,7 @@ struct NativeReadingDashboard: View {
                         statistic("书签", "\(value.dashboard.bookmarkCount)")
                         statistic("划线与笔记", "\(value.dashboard.annotationCount)")
                     }
-                    dailyChart(value.dashboard.dailyReading)
+                    dailyChart(value)
                     Text("最近在读").font(NativeTheme.font(16, relativeTo: .headline))
                     if value.dashboard.recentBooks.isEmpty { Text("还没有阅读记录").foregroundStyle(NativeTheme.secondary) }
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -180,7 +180,7 @@ struct NativeReadingDashboard: View {
                 } else { ProgressView("正在读取阅读数据…").frame(maxWidth: .infinity).padding(.top, 70) }
             }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 36)
             }.refreshable { await load() }
-        }.background(NativeTheme.page).navigationBarHidden(true).task(id: days) { await load() }
+        }.background(NativeTheme.page).navigationBarHidden(true).task(id: period) { await load() }
     }
     private func durationValue(_ seconds: Int64) -> String {
         String(format: "%.1f", Double(seconds) / (seconds < 3600 ? 60 : 3600))
@@ -193,27 +193,36 @@ struct NativeReadingDashboard: View {
         }.frame(maxWidth: .infinity, minHeight: 70, alignment: .topLeading).padding(16)
             .background(NativeTheme.sunk, in: RoundedRectangle(cornerRadius: 18))
     }
-    private func dailyChart(_ values: [ReadingDay]) -> some View {
+    private func dailyChart(_ snapshot: DashboardSnapshot) -> some View {
+        let values = snapshot.buckets
         let maximum = max(1, values.map(\.activeSeconds).max() ?? 1)
-        let selected = values.first { $0.date == picked } ?? values.last
+        let selected = values.first { $0.id == picked } ?? values.first { $0.contains(snapshot.today) }
+        let title = snapshot.period == 0 ? "本周阅读时长" : snapshot.period == 1 ? "本月阅读时长" : "今年阅读时长"
+        let detail = (selected?.startDate ?? "") > snapshot.today ? "尚未到来" : readingDuration(selected?.activeSeconds ?? 0)
         return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
-                Text("近 \(days) 天阅读时长").font(NativeTheme.font(16, relativeTo: .headline))
+                Text(title).font(NativeTheme.font(16, relativeTo: .headline))
                 Spacer(minLength: 0)
-                Picker("阅读天数", selection: $days) { Text("7 天").tag(7); Text("14 天").tag(14); Text("30 天").tag(30) }.pickerStyle(.segmented).frame(width: 140)
+                Picker("阅读周期", selection: $period) { Text("周").tag(0); Text("月").tag(1); Text("年").tag(2) }
+                    .pickerStyle(.segmented).frame(width: 120).accessibilityIdentifier("dashboard.period")
             }
-            Text("\(selected?.date ?? "") · \(readingDuration(selected?.activeSeconds ?? 0))").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
+            Text("\(bucketLabel(selected, yearly: snapshot.period == 2)) · \(detail)")
+                .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
             HStack(alignment: .bottom, spacing: 5) {
                 ForEach(values) { day in
-                    Button { picked = day.date } label: {
+                    Button { picked = day.id } label: {
                         VStack { Spacer(minLength: 0); RoundedRectangle(cornerRadius: 4).fill(day.activeSeconds > 0 ? NativeTheme.ink : NativeTheme.strong)
                             .frame(maxWidth: 16).frame(height: max(3, 124 * Double(day.activeSeconds) / Double(maximum))) }
                             .frame(maxWidth: .infinity).frame(height: 124).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel("\(day.date)，\(readingDuration(day.activeSeconds))")
+                    }.buttonStyle(.plain).accessibilityLabel("\(bucketLabel(day, yearly: snapshot.period == 2))，\(readingDuration(day.activeSeconds))")
                 }
             }
-            HStack { Text(values.first?.date ?? ""); Spacer(); Text(values.last?.date ?? "") }.font(NativeTheme.font(11, relativeTo: .caption2)).foregroundStyle(NativeTheme.secondary)
+            HStack { Text(values.first?.startDate ?? ""); Spacer(); Text(values.last?.endDate ?? "") }.font(NativeTheme.font(11, relativeTo: .caption2)).foregroundStyle(NativeTheme.secondary)
         }.padding(16).background(NativeTheme.sunk, in: RoundedRectangle(cornerRadius: 18))
+    }
+    private func bucketLabel(_ bucket: ReadingPeriodBucket?, yearly: Bool) -> String {
+        guard let bucket else { return "" }
+        return yearly ? String(bucket.startDate.prefix(7)) : bucket.startDate
     }
     @ViewBuilder private func dashboardBook(_ item: DashboardBook, detail: String) -> some View {
         if let book = store.library.first(where: { $0.id == item.bookId }) {
@@ -243,7 +252,13 @@ struct NativeReadingDashboard: View {
         }.padding(16).background(NativeTheme.sunk, in: RoundedRectangle(cornerRadius: 18))
     }
     private func load() async {
-        do { let result: DashboardSnapshot = try await store.request("dashboard.get", ["days": days]); if !Task.isCancelled { value = result } }
+        do {
+            let result: DashboardSnapshot = try await store.request("dashboard.get", ["period": period])
+            if !Task.isCancelled {
+                if !result.buckets.contains(where: { $0.id == picked }) { picked = nil }
+                value = result
+            }
+        }
         catch { if !Task.isCancelled { store.failure = error.localizedDescription } }
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Tests;
 
+// Every password/API/sync key in these tests is a fabricated local fixture, never a live credential.
 public sealed partial class BackupTests
 {
     [Fact]
@@ -17,6 +18,7 @@ public sealed partial class BackupTests
             CreateEpub(sourceBook);
             var protector = new TestHelpers.PlaintextSecretProtector();
             var sourcePaths = new AppPaths(Path.Combine(root, "source-app"));
+            await SetBackupKeyAsync(sourcePaths);
             var sourceLibrary = new SqliteBookLibraryService(sourcePaths, new BookMetadataService());
             var sourceReaderData = new ReaderDataService(sourcePaths);
             await sourceLibrary.InitializeAsync();
@@ -66,7 +68,7 @@ public sealed partial class BackupTests
             Assert.Equal(1, export.BookCount);
             Assert.Equal(1, export.FileCount);
             Assert.True(export.ArchiveSize > 0);
-            using (var archive = ZipFile.OpenRead(backupPath))
+            using (var archive = await OpenBackupArchiveAsync(backupPath, key: "source-s3-encryption-key"))
             {
                 Assert.DoesNotContain(archive.Entries, entry =>
                     entry.FullName.Contains("browser-data", StringComparison.OrdinalIgnoreCase)
@@ -86,6 +88,8 @@ public sealed partial class BackupTests
             }
 
             var targetPaths = new AppPaths(Path.Combine(root, "target-app"));
+
+            await SetBackupKeyAsync(targetPaths);
             var targetLibrary = new SqliteBookLibraryService(targetPaths, new BookMetadataService());
             var targetReaderData = new ReaderDataService(targetPaths);
             await targetLibrary.InitializeAsync();
@@ -143,6 +147,7 @@ public sealed partial class BackupTests
         {
             var protector = new TestHelpers.PlaintextSecretProtector();
             var source = new AppPaths(Path.Combine(root, "source"));
+            await SetBackupKeyAsync(source);
             await new SqliteBookLibraryService(source, new BookMetadataService()).InitializeAsync();
             var coverDirectory = Path.Combine(source.Data, "reading-material-covers");
             if (hasCover)
@@ -159,7 +164,7 @@ public sealed partial class BackupTests
 
             var backupPath = Path.Combine(root, "backup.kkindle");
             await new AppBackupService(source, protector).ExportAsync(backupPath);
-            using (var archive = ZipFile.Open(backupPath, ZipArchiveMode.Update))
+            using (var archive = await OpenBackupArchiveAsync(backupPath, ZipArchiveMode.Update))
             {
                 var marker = archive.GetEntry("reading-material-covers/");
                 Assert.NotNull(marker);
@@ -168,6 +173,8 @@ public sealed partial class BackupTests
             }
 
             var target = new AppPaths(Path.Combine(root, "target"));
+
+            await SetBackupKeyAsync(target);
             await new SqliteBookLibraryService(target, new BookMetadataService()).InitializeAsync();
             var targetCovers = Path.Combine(target.Data, "reading-material-covers");
             Directory.CreateDirectory(targetCovers);
@@ -201,6 +208,7 @@ public sealed partial class BackupTests
             await File.WriteAllBytesAsync(converted, [1, 2, 3, 4]);
             var protector = new TestHelpers.PlaintextSecretProtector();
             var sourcePaths = new AppPaths(Path.Combine(root, "source-app"));
+            await SetBackupKeyAsync(sourcePaths);
             var sourceLibrary = new SqliteBookLibraryService(sourcePaths, new BookMetadataService());
             await sourceLibrary.InitializeAsync();
             await sourceLibrary.ImportAsync([sourceBook]);
@@ -211,10 +219,12 @@ public sealed partial class BackupTests
 
             var backupPath = Path.Combine(root, "with-trash.kkindle");
             await new AppBackupService(sourcePaths, protector).ExportAsync(backupPath);
-            using (var archive = ZipFile.OpenRead(backupPath))
+            using (var archive = await OpenBackupArchiveAsync(backupPath))
                 Assert.Contains(archive.Entries, entry => entry.FullName.StartsWith("trash/", StringComparison.OrdinalIgnoreCase));
 
             var targetPaths = new AppPaths(Path.Combine(root, "target-app"));
+
+            await SetBackupKeyAsync(targetPaths);
             var targetLibrary = new SqliteBookLibraryService(targetPaths, new BookMetadataService());
             await targetLibrary.InitializeAsync();
             await new AppBackupService(targetPaths, protector).ImportAsync(backupPath);
@@ -238,6 +248,7 @@ public sealed partial class BackupTests
         try
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
             using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
@@ -255,7 +266,7 @@ public sealed partial class BackupTests
 
             var backupPath = Path.Combine(root, "snapshot.kkindle");
             await new AppBackupService(paths, new TestHelpers.PlaintextSecretProtector()).ExportAsync(backupPath);
-            using var archive = ZipFile.OpenRead(backupPath);
+            using var archive = await OpenBackupArchiveAsync(backupPath);
             Assert.DoesNotContain(archive.Entries, entry => entry.FullName.EndsWith("-wal") || entry.FullName.EndsWith("-shm"));
             var snapshotPath = Path.Combine(root, "snapshot.db");
             archive.GetEntry("database/kkindle.db")!.ExtractToFile(snapshotPath);
@@ -282,6 +293,7 @@ public sealed partial class BackupTests
             var source = Path.Combine(root, "book.epub");
             CreateEpub(source);
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             await library.InitializeAsync();
             await library.ImportAsync([source]);
@@ -368,6 +380,7 @@ public sealed partial class BackupTests
             CreateEpub(source);
             var protector = new TestHelpers.PlaintextSecretProtector();
             var paths = new AppPaths(Path.Combine(root, "source"));
+            await SetBackupKeyAsync(paths);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             await library.InitializeAsync();
             await library.ImportAsync([source]);
@@ -385,7 +398,7 @@ public sealed partial class BackupTests
             // Recreate a v1 package written on Windows, even when this test
             // itself runs on Linux/macOS or the exporter has been fixed.
             var legacyDatabase = Path.Combine(root, "legacy.db");
-            using (var archive = ZipFile.Open(backupPath, ZipArchiveMode.Update))
+            using (var archive = await OpenBackupArchiveAsync(backupPath, ZipArchiveMode.Update))
             {
                 archive.GetEntry("database/kkindle.db")!.ExtractToFile(legacyDatabase);
                 using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -410,6 +423,8 @@ public sealed partial class BackupTests
             }
 
             var targetPaths = new AppPaths(Path.Combine(root, "target"));
+
+            await SetBackupKeyAsync(targetPaths);
             var target = new SqliteBookLibraryService(targetPaths, new BookMetadataService());
             await target.InitializeAsync();
             await new AppBackupService(targetPaths, protector).ImportAsync(backupPath);
@@ -437,6 +452,7 @@ public sealed partial class BackupTests
         CreateEpub(source);
         var protector = new TestHelpers.PlaintextSecretProtector();
         var sourcePaths = new AppPaths(Path.Combine(root, "source"));
+        await SetBackupKeyAsync(sourcePaths);
         var sourceLibrary = new SqliteBookLibraryService(sourcePaths, new BookMetadataService());
         await sourceLibrary.InitializeAsync();
         await sourceLibrary.ImportAsync([source]);
@@ -444,6 +460,7 @@ public sealed partial class BackupTests
         var backupPath = Path.Combine(root, "backup.kkindle");
         await new AppBackupService(sourcePaths, protector).ExportAsync(backupPath);
         var paths = new AppPaths(Path.Combine(root, "target"));
+        await SetBackupKeyAsync(paths);
         var library = new SqliteBookLibraryService(paths, new BookMetadataService());
         await library.InitializeAsync();
         await library.ImportAsync([source]);

@@ -732,8 +732,17 @@
                         </StackPanel>
                     </ScrollViewer>
 
+                    <StackPanel Grid.Row="2" Spacing="4">
+                    <Button x:Name="AccountNavigationButton" Height="36" Classes="sidebarPrimaryItem"
+                            AutomationProperties.Name="{DynamicResource Ui.Account.Title}" Click="AccountNavigationButton_Click">
+                        <Grid Classes="sidebarEntry" ColumnDefinitions="20,12,*,16">
+                            <Path Classes="sidebarOutline" Data="M12,3 A4,4 0 1 1 11.99,3 M4,22 L4,20 Q4,13 12,13 Q20,13 20,20 L20,22" />
+                            <TextBlock x:Name="AccountNavigationText" Grid.Column="2" Classes="sidebarLabel"
+                                       Text="{DynamicResource Ui.Account.LoginOrRegister}" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Button>
                     <Button x:Name="SettingsNavigationButton"
-                            Grid.Row="2" Height="36" Margin="0" Classes="sidebarPrimaryItem"
+                            Height="36" Margin="0" Classes="sidebarPrimaryItem"
                             AutomationProperties.Name="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}"
                             Click="SettingsButton_Click">
                         <Grid Classes="sidebarEntry" ColumnDefinitions="20,12,*,16">
@@ -741,6 +750,7 @@
                             <TextBlock Grid.Column="2" Classes="sidebarLabel" Text="{DynamicResource Ui.Auto.DF3D58C7D84B85F2}" />
                         </Grid>
                     </Button>
+                    </StackPanel>
 
                     <Border x:Name="DeviceStatusBox"
                             Grid.Row="3"
@@ -2446,12 +2456,21 @@
                             </Grid.RowDefinitions>
                             <Border Classes="flatPanel" BorderBrush="{DynamicResource HairlineBrush}" BorderThickness="0,1,0,0" Padding="16">
                                 <Grid RowDefinitions="Auto,*" RowSpacing="10">
-                                    <Button x:Name="DashboardDailyRangeButton" Classes="quiet" Padding="0"
-                                            BorderThickness="0" Background="Transparent" MinHeight="0"
-                                            HorizontalAlignment="Left" Cursor="Hand"
-                                            Click="DashboardDailyRangeButton_Click">
-                                        <TextBlock x:Name="DashboardDailyTitleText" Text="{DynamicResource Ui.Auto.7644551F37492A5D}" FontSize="14" FontWeight="SemiBold" />
-                                    </Button>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock x:Name="DashboardDailyTitleText" Text="{DynamicResource Ui.Reading.WeekTitle}"
+                                                   FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="3">
+                                            <Button x:Name="DashboardWeekButton" Classes="settingsCategory active" Tag="Week"
+                                                    Content="{DynamicResource Ui.Reading.Week}" Padding="7,3" Margin="0" MinHeight="28"
+                                                    Click="DashboardPeriodButton_Click" />
+                                            <Button x:Name="DashboardMonthButton" Classes="settingsCategory" Tag="Month"
+                                                    Content="{DynamicResource Ui.Reading.Month}" Padding="7,3" Margin="0" MinHeight="28"
+                                                    Click="DashboardPeriodButton_Click" />
+                                            <Button x:Name="DashboardYearButton" Classes="settingsCategory" Tag="Year"
+                                                    Content="{DynamicResource Ui.Reading.Year}" Padding="7,3" Margin="0" MinHeight="28"
+                                                    Click="DashboardPeriodButton_Click" />
+                                        </StackPanel>
+                                    </Grid>
                                     <ItemsControl x:Name="DashboardDaysChart" Grid.Row="1" MinHeight="220" Padding="16,0" ItemsSource="{Binding DashboardDays}" AutomationProperties.Name="{DynamicResource Ui.Auto.83A25C492C9A33C4}">
                                         <ItemsControl.Styles>
                                             <Style Selector="ContentPresenter">
@@ -2969,8 +2988,14 @@
                                                 <ComboBox x:Name="SyncProviderBox" Grid.Column="1" SelectedIndex="0" MinWidth="160" HorizontalAlignment="Left" AutomationProperties.Name="{DynamicResource Sync.ProviderLabel}">
                                                     <ComboBoxItem Content="S3" />
                                                     <ComboBoxItem Content="WebDAV" />
+                                                    <ComboBoxItem Content="{DynamicResource Sync.AccountProvider}" />
                                                 </ComboBox>
                                             </Grid>
+                                            <StackPanel x:Name="AccountSyncConnectionPanel" Spacing="9" IsVisible="False">
+                                                <TextBlock x:Name="AccountSyncSummaryText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                                                <TextBlock Text="{DynamicResource Sync.AccountHint}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+                                                <Button Content="{DynamicResource Ui.Account.LoginOrRegister}" Classes="quiet" Click="AccountNavigationButton_Click" HorizontalAlignment="Left" />
+                                            </StackPanel>
                                             <Border x:Name="S3ConnectionPanel" Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
                                                 <StackPanel Spacing="9">
                                                     <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -3027,6 +3052,7 @@
                                                             <TextBlock Text="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                             <TextBox x:Name="S3EncryptionKeyBox" Grid.Column="1" PasswordChar="●" AutomationProperties.Name="{DynamicResource Ui.Auto.BBB1A6FC79050563}" FontSize="14" />
                                                         </Grid>
+                                                        <TextBlock Text="{DynamicResource Sync.EncryptionKeyHelp}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                                         <Grid ColumnDefinitions="150,150" ColumnSpacing="10">
                                                             <TextBlock Text="{DynamicResource Ui.Auto.72EC61D7855C86A1}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                             <NumericUpDown x:Name="S3TimeoutBox" Grid.Column="1" Minimum="10" Maximum="600" Increment="10" Value="60" AutomationProperties.Name="{DynamicResource Ui.Auto.72EC61D7855C86A1}" FontSize="14" />

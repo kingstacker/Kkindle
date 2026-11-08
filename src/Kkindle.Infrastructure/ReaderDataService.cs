@@ -1237,9 +1237,11 @@ public sealed partial class ReaderDataService
     public async Task<ReadingDashboard> GetReadingDashboardAsync(
         int recentLimit = 12,
         CancellationToken cancellationToken = default,
-        int dayCount = 14)
+        int dayCount = 14,
+        DateOnly? throughDate = null)
     {
-        dayCount = Math.Clamp(dayCount, 1, 90);
+        dayCount = Math.Clamp(dayCount, 1, 366);
+        var lastDay = throughDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         await using var connection = await OpenConnectionAsync(cancellationToken);
         using var librarySchema = connection.CreateCommand();
         librarySchema.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Books');";
@@ -1303,16 +1305,17 @@ public sealed partial class ReaderDataService
 
         var recentBooks = books.Take(Math.Clamp(recentLimit, 1, 100)).ToArray();
 
-        var firstDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-(dayCount - 1)));
+        var firstDay = lastDay.AddDays(-(dayCount - 1));
         var dailyCommand = connection.CreateCommand();
         dailyCommand.CommandText = """
             SELECT ReadingDate, COALESCE(SUM(Seconds), 0)
             FROM S3SyncReadingDayCounters
-            WHERE ReadingDate >= $cutoff
+            WHERE ReadingDate >= $cutoff AND ReadingDate <= $lastDay
             GROUP BY ReadingDate
             ORDER BY ReadingDate;
             """;
         dailyCommand.Parameters.AddWithValue("$cutoff", firstDay.ToString("yyyy-MM-dd"));
+        dailyCommand.Parameters.AddWithValue("$lastDay", lastDay.ToString("yyyy-MM-dd"));
         var dailyValues = new Dictionary<DateOnly, long>();
         await using (var reader = await dailyCommand.ExecuteReaderAsync(cancellationToken))
         {

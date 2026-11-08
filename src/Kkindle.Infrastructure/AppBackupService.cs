@@ -10,11 +10,11 @@ namespace Kkindle.Infrastructure;
 public sealed class AppBackupRollbackException(string message, Exception innerException) : IOException(message, innerException);
 
 /// <summary>
-/// Creates and restores a portable Kkindle backup package.
+/// Creates and restores a portable Kkindle backup package, encrypted with the local sync key.
 ///
 /// The package deliberately contains only non-secret settings. API keys, sync
 /// credentials, the client-side encryption key and SMTP passwords stay
-/// protected by Windows on the current machine and are never written to an
+/// protected by the platform on the current machine and are never written to an
 /// export file.
 /// </summary>
 /// <summary>Coarse backup progress for a progress bar; fraction is 0..1.</summary>
@@ -62,6 +62,7 @@ public sealed partial class AppBackupService
         CancellationToken cancellationToken = default,
         IProgress<AppBackupProgress>? progress = null)
     {
+        var encryptionKey = await RequireEncryptionKeyAsync(cancellationToken);
         void Report(double fraction, string message) =>
             progress?.Report(new AppBackupProgress(fraction, message));
         Report(0, "正在读取书库…");
@@ -127,7 +128,8 @@ public sealed partial class AppBackupService
                 FileShare.None,
                 81920,
                 useAsync: true))
-            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
+            await using (var encrypted = BackupEncryption.CreateWriter(output, encryptionKey))
+            using (var archive = new ZipArchive(encrypted, ZipArchiveMode.Create, leaveOpen: true))
             {
                 await AddJsonEntryAsync(archive, ManifestEntryName, manifest, cancellationToken);
                 ReportFile(await AddFileEntryAsync(archive, databaseSnapshotPath, DatabaseEntryName, cancellationToken));
@@ -140,7 +142,7 @@ public sealed partial class AppBackupService
                 }
                 await AddJsonEntryAsync(archive, SettingsEntryName, settings, cancellationToken);
             }
-            Report(0.97, "正在写入备份文件…");
+            Report(0.97, "正在写入加密备份文件…");
 
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(pendingPath, destinationPath, overwrite: true);
@@ -162,6 +164,7 @@ public sealed partial class AppBackupService
         CancellationToken cancellationToken = default,
         IProgress<AppBackupProgress>? progress = null)
     {
+        var encryptionKey = await RequireEncryptionKeyAsync(cancellationToken);
         void Report(double fraction, string message) =>
             progress?.Report(new AppBackupProgress(fraction, message));
         Report(0, "正在读取备份文件…");
@@ -178,10 +181,15 @@ public sealed partial class AppBackupService
         var stagingRoot = CreateWorkingDirectory(".kkindle-import-");
         try
         {
+            var decryptedPath = Path.Combine(stagingRoot, "decrypted-archive.zip");
+            Report(0.01, "正在使用同步密钥验证并解密备份…");
+            await using (var encrypted = File.OpenRead(sourcePath))
+            await using (var decrypted = new FileStream(decryptedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                await BackupEncryption.DecryptAsync(encrypted, decrypted, encryptionKey, cancellationToken);
             BackupManifest manifest;
             BackupSettings? backupSettings;
             bool hasReadingMaterialCovers;
-            using (var archive = ZipFile.OpenRead(sourcePath))
+            using (var archive = ZipFile.OpenRead(decryptedPath))
             {
                 manifest = await ReadManifestAsync(archive, cancellationToken);
                 ValidateManifest(manifest);
@@ -202,6 +210,7 @@ public sealed partial class AppBackupService
                         "正在解压备份…");
                 });
             }
+            File.Delete(decryptedPath);
             Report(0.82, "正在检查备份数据…");
 
             var stagedDatabasePath = Path.Combine(stagingRoot, DatabaseEntryName.Replace('/', Path.DirectorySeparatorChar));
@@ -326,6 +335,16 @@ public sealed partial class AppBackupService
         {
             TryDeleteDirectory(stagingRoot);
         }
+    }
+
+    public async Task EnsureEncryptionConfiguredAsync(CancellationToken cancellationToken = default) =>
+        _ = await RequireEncryptionKeyAsync(cancellationToken);
+
+    private async Task<string> RequireEncryptionKeyAsync(CancellationToken cancellationToken)
+    {
+        var stored = await _s3SyncSettingsStore.LoadAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(stored.Settings.EncryptionKey)) throw new SyncEncryptionKeyRequiredException();
+        return stored.Settings.EncryptionKey;
     }
 
     private async Task<BackupSettings> BuildExportSettingsAsync(CancellationToken cancellationToken)
@@ -636,7 +655,9 @@ public sealed partial class AppBackupService
         if (imported is null) return current.Settings;
 
         var currentSettings = current.Settings;
-        var credentialsReady = imported.Provider == SyncProvider.WebDav
+        var credentialsReady = imported.Provider == SyncProvider.AccountServer
+            ? false // A backup must never rebind or enable an account session.
+            : imported.Provider == SyncProvider.WebDav
             ? currentSettings.Provider == SyncProvider.WebDav
                 && currentSettings.WebDavEndpoint == S3SyncSettings.Normalize(new S3SyncSettings { WebDavEndpoint = imported.WebDavEndpoint ?? string.Empty }).WebDavEndpoint
                 && (!imported.WebDavAuthenticationRequired || currentSettings.WebDavUsername.Length > 0)
@@ -790,6 +811,7 @@ public sealed partial class AppBackupService
         // to the managed directories, even when data lives on another drive.
         var path = Path.Combine(_paths.Data, prefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return path;
     }
 

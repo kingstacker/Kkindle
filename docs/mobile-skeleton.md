@@ -154,6 +154,14 @@ The reader hides its listening button when a host has no TTS engine and player.
   totals, stat cards, a tappable daily chart, recent and most-read books with
   covers, a stacked progress bar and medals with progress rings.
   `ReadingMedalCatalog` in Core is the one definition of medals and streaks.
+- The reading chart selects the current week, month or year. Weeks start on
+  Monday, yearly charts group time into 12 months, and all frontends share the
+  UTC calendar rules in `ReadingPeriodRange`.
+- 我的 → 登录 / 注册 selects China or International, with separate server
+  addresses and protected sessions. Libraries and sync settings are separate by
+  region; switching requires reopening before sync. Account cloud sync uses the
+  selected regional account, and S3/WebDAV also use regional namespaces. See
+  [account-server.md](account-server.md) for local verification and hosting.
 - `SyncSettingsPage` edits the settings file the desktop app uses. Its connection
   parameter files are compatible with desktop S3 and WebDAV profiles: import
   fills a draft that must be saved, while export uses the current draft. The file

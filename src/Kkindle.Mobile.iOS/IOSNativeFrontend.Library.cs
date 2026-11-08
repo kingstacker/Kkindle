@@ -75,9 +75,15 @@ internal sealed partial class IOSNativeFrontend
                 await ExportMaterialsAsync(args, token);
                 break;
             case "dashboard.get":
-                var dashboard = await _shell.Modules.Reader.Data.GetReadingDashboardAsync(100, token, Number(args, "days", 14));
+                var period = (ReadingPeriod)Number(args, "period");
+                if (!Enum.IsDefined(period)) throw new InvalidOperationException("无效的阅读周期。");
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                var range = ReadingPeriodRange.Create(period, today);
+                var dashboard = await _shell.Modules.Reader.Data.GetReadingDashboardAsync(100, token, 366, today);
                 return Data(("dashboard", dashboard), ("medals", ReadingMedalCatalog.Build(dashboard).ToArray()),
-                    ("streak", ReadingMedalCatalog.ComputeStreakDays(dashboard.DailyReading)));
+                    ("streak", ReadingMedalCatalog.ComputeStreakDays(dashboard.DailyReading)),
+                    ("period", (int)period), ("today", today.ToString("yyyy-MM-dd")),
+                    ("buckets", range.BuildBuckets(dashboard.DailyReading, today).ToArray()));
             case "trash.get":
                 return (await library.GetTrashItemsAsync(token)).Select(item => Data(
                     ("id", item.Id), ("title", item.DisplayTitle), ("detail", item.KindLabel + " · " + item.SizeLabel),
@@ -214,6 +220,7 @@ internal sealed partial class IOSNativeFrontend
         IReadOnlyList<string> files = [];
         try
         {
+            await _shell.EnsureBackupEncryptionAsync(token);
             if (restore)
             {
                 files = await _shell.Services.ImportSource.PickFilesAsync(token);

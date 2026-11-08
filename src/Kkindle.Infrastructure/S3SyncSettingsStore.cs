@@ -76,6 +76,9 @@ public sealed class S3SyncSettingsStore
                 TimeoutSeconds = persisted.TimeoutSeconds,
                 ConcurrentRequests = persisted.ConcurrentRequests,
                 Prefix = persisted.Prefix ?? "kkindle",
+                AccountRegion = persisted.AccountRegion,
+                AccountServerUrl = persisted.AccountServerUrl ?? string.Empty,
+                AccountUserId = persisted.AccountUserId,
                 EncryptionKey = Unprotect(persisted.ProtectedEncryptionKey)
             });
 
@@ -141,6 +144,9 @@ public sealed class S3SyncSettingsStore
             TimeoutSeconds = normalized.TimeoutSeconds,
             ConcurrentRequests = normalized.ConcurrentRequests,
             Prefix = normalized.Prefix,
+            AccountRegion = normalized.AccountRegion,
+            AccountServerUrl = normalized.AccountServerUrl,
+            AccountUserId = normalized.AccountUserId,
             ProtectedEncryptionKey = Protect(normalized.EncryptionKey)
         };
 
@@ -204,6 +210,9 @@ public sealed class S3SyncSettingsStore
         public int TimeoutSeconds { get; set; } = 60;
         public int ConcurrentRequests { get; set; } = 4;
         public string? Prefix { get; set; }
+        public AccountRegion AccountRegion { get; set; }
+        public string? AccountServerUrl { get; set; }
+        public Guid AccountUserId { get; set; }
         public string? ProtectedEncryptionKey { get; set; }
     }
 }

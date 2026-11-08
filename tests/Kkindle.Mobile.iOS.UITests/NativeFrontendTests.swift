@@ -38,6 +38,157 @@ final class NativeFrontendTests: XCTestCase {
         XCTAssertFalse(app.textFields["library.search"].exists)
     }
 
+    /// Run on a fresh isolated preview seed, which has no sync key or credentials.
+    func testBackupEncryptionKeyPrompt() {
+        app.tabBars.buttons["我的"].tap()
+        for identifier in ["profile.backup.export", "profile.backup.restore"] {
+            let button = app.buttons[identifier]
+            reveal(button); button.tap()
+            let prompt = app.alerts["操作失败"]
+            XCTAssertTrue(prompt.waitForExistence(timeout: 15))
+            let message = prompt.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "设置同步密钥")).firstMatch
+            XCTAssertTrue(message.exists)
+            XCTAssertTrue(message.label.contains("密钥不会上传"))
+            XCTAssertTrue(message.label.contains("遗忘后无法解密"))
+            attachScreenshot("备份-先设置同步密钥")
+            prompt.buttons["好"].tap()
+            XCTAssertTrue(waitUntil { !prompt.exists })
+        }
+    }
+
+    func testReadingCalendarPeriodPicker() {
+        app.tabBars.buttons["阅读数据"].tap()
+        let picker = app.segmentedControls["dashboard.period"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 20))
+        XCTAssertFalse(picker.buttons["14 天"].exists)
+        for (label, title) in [("周", "本周阅读时长"), ("月", "本月阅读时长"), ("年", "今年阅读时长")] {
+            picker.buttons[label].tap()
+            XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
+        }
+        attachScreenshot("阅读数据-周月年")
+    }
+
+    /// Requires the two local account servers at 5088 and 5089, each with an isolated test database.
+    func testRegionalAccountRegistrationAndCloudSync() {
+        let username = "region_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))
+        let password = "fictional-native-password"
+        print("KKINDLE_FICTIONAL_ACCOUNT:\(username)")
+        app.tabBars.buttons["我的"].tap()
+        tapAccountElement(app.buttons["profile.account"])
+        let regions = app.segmentedControls["account.region"]
+        XCTAssertTrue(regions.waitForExistence(timeout: 15))
+        XCTAssertEqual(regions.buttons.count, 2)
+        XCTAssertEqual(app.textFields["account.server"].value as? String, "http://127.0.0.1:5088")
+        register()
+        verifySignOutAndLogin()
+        attachScreenshot("账号-中国区")
+        tapAccountElement(app.navigationBars["用户账号"].buttons.firstMatch)
+        syncCurrentAccount()
+        tapAccountElement(app.buttons["profile.account"])
+        XCTAssertTrue(regions.waitForExistence(timeout: 10))
+        tapAccountElement(regions.buttons["国际区"])
+        XCTAssertTrue(app.staticTexts["account.restart"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.textFields["account.server"].value as? String, "http://127.0.0.1:5089")
+        register()
+        verifySignOutAndLogin()
+        attachScreenshot("账号-国际区-重开提示")
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.tabBars.buttons["我的"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book.' AND label CONTAINS 'Native UI EPUB'")).firstMatch.exists)
+        app.tabBars.buttons["我的"].tap()
+        tapAccountElement(app.buttons["profile.account"])
+        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["account.username"].label, username)
+        XCTAssertFalse(app.staticTexts["account.restart"].exists)
+        tapAccountElement(app.navigationBars["用户账号"].buttons.firstMatch)
+        syncCurrentAccount()
+        app.tabBars.buttons["书库"].tap()
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book.' AND label CONTAINS 'Native UI EPUB'")).firstMatch.exists)
+        app.tabBars.buttons["我的"].tap()
+        tapAccountElement(app.buttons["profile.account"])
+        XCTAssertTrue(regions.waitForExistence(timeout: 10))
+        tapAccountElement(regions.buttons["中国区"])
+        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["account.username"].label, username)
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.tabBars.buttons["书库"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book.' AND label CONTAINS 'Native UI EPUB'")).firstMatch.waitForExistence(timeout: 15))
+
+        func register() {
+            let mode = app.segmentedControls["account.mode"]
+            XCTAssertTrue(mode.waitForExistence(timeout: 10))
+            tapAccountElement(mode.buttons["注册"])
+            let user = app.textFields["account.usernameField"]
+            reveal(user); user.tap(); user.typeText(username); dismissKeyboard()
+            let secret = app.secureTextFields["account.password"]
+            typePassword(secret, password)
+            XCTAssertEqual((secret.value as? String)?.count, password.count, "The password field must retain every typed character.")
+            let confirmation = app.secureTextFields["account.confirmation"]
+            typePassword(confirmation, password)
+            XCTAssertEqual((confirmation.value as? String)?.count, password.count)
+            tapAccountElement(app.buttons["account.submit"])
+            XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 20))
+            XCTAssertEqual(app.staticTexts["account.username"].label, username)
+        }
+
+        func verifySignOutAndLogin() {
+            tapAccountElement(app.buttons["account.logout"])
+            let mode = app.segmentedControls["account.mode"]
+            XCTAssertTrue(mode.waitForExistence(timeout: 15))
+            tapAccountElement(mode.buttons["登录"])
+            let secret = app.secureTextFields["account.password"]
+            typePassword(secret, "fictional-wrong-password")
+            tapAccountElement(app.buttons["account.submit"])
+            XCTAssertTrue(app.staticTexts["用户名或密码错误。"].waitForExistence(timeout: 15))
+            XCTAssertFalse(app.staticTexts["account.username"].exists)
+            let cleared = secret.value as? String ?? ""
+            XCTAssertTrue(cleared.isEmpty || cleared == secret.placeholderValue, "Failed login must clear the password.")
+            typePassword(secret, password)
+            tapAccountElement(app.buttons["account.submit"])
+            XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 20))
+            XCTAssertEqual(app.staticTexts["account.username"].label, username)
+        }
+
+        func typePassword(_ field: XCUIElement, _ value: String) {
+            reveal(field); field.tap()
+            // iOS can suggest a strong password after the first character.
+            // Dismiss that system sheet before typing the rest of this fictional password.
+            field.typeText(String(value.prefix(1)))
+            let suggestion = app.staticTexts["使用强密码？"]
+            if suggestion.waitForExistence(timeout: 2) {
+                let close = app.buttons.matching(NSPredicate(format: "label IN {'关闭', 'Close', '取消', 'Cancel'}")).firstMatch
+                XCTAssertTrue(close.exists, "The strong-password sheet must provide a dismiss button. Buttons: \(app.buttons.allElementsBoundByIndex.map(\.label))")
+                close.tap()
+                XCTAssertTrue(waitUntil { !suggestion.exists })
+                // The system can reset the initial character when returning
+                // focus to the secure field after declining its suggestion.
+                field.typeText(XCUIKeyboardKey.delete.rawValue)
+                field.typeText(value)
+            } else {
+                field.typeText(String(value.dropFirst()))
+            }
+            dismissKeyboard()
+        }
+
+        func syncCurrentAccount() {
+            tapAccountElement(app.buttons["profile.sync"])
+            let providers = app.segmentedControls["sync.provider"]
+            XCTAssertTrue(providers.waitForExistence(timeout: 15))
+            tapAccountElement(providers.buttons["账号云同步"])
+            let encryption = app.secureTextFields["同步密钥（账号云同步与备份必填）"]
+            XCTAssertTrue(encryption.waitForExistence(timeout: 10))
+            let encryptionValue = encryption.value as? String ?? ""
+            if encryptionValue.isEmpty || encryptionValue == encryption.placeholderValue {
+                typePassword(encryption, "fictional-ios-sync-test-key")
+            }
+            let run = app.buttons["sync.run"]
+            reveal(run); tapAccountElement(run)
+            XCTAssertTrue(waitUntil { self.app.staticTexts["sync.status"].label.hasPrefix("同步完成") })
+            attachScreenshot("账号云同步")
+            tapAccountElement(app.navigationBars["同步"].buttons.firstMatch)
+        }
+    }
+
     func testSyncKeyboardCanDismissAndRefocusAndSaveDisabledDraft() {
         app.tabBars.buttons["我的"].tap()
         app.buttons["profile.sync"].tap()
@@ -483,6 +634,21 @@ final class NativeFrontendTests: XCTestCase {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func tapAccountElement(_ element: XCUIElement) {
+        XCTAssertTrue(waitUntil {
+            let savePrompt = self.app.staticTexts.matching(NSPredicate(
+                format: "label CONTAINS[c] '保存密码' OR label CONTAINS[c] 'Save Password'")).firstMatch
+            if savePrompt.exists {
+                let later = self.app.buttons.matching(NSPredicate(
+                    format: "label IN {'以后', '稍后', '以后再说', 'Not Now'}")).firstMatch
+                if later.exists && later.isHittable { later.tap() }
+                return false
+            }
+            return element.exists && element.isEnabled && element.isHittable
+        }, "Account control must be ready after any system password-saving prompt.")
+        element.tap()
     }
 
     private func dismissKeyboard() {

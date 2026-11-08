@@ -94,6 +94,9 @@ public sealed class NativeFrontendContractTests
             Data(("books", new object[] { Data(("id", bookId), ("progress", 25.0), ("collectionIds", new Guid[] { Guid.NewGuid() }), ("updatedAt", now)) }),
                 ("collections", new[] { Data(("id", Guid.NewGuid()), ("count", 1), ("automatic", false)) }), ("preferences", new MobilePreferences())),
             Data(("dashboard", dashboard), ("medals", ReadingMedalCatalog.Build(dashboard).ToArray()), ("streak", 1)),
+            new AccountStatus("http://127.0.0.1:5088", new AccountUser(bookId, "test_reader"), now.AddDays(30)),
+            Data(("period", 2), ("today", "2026-11-08"), ("buckets", new ReadingPeriodBucket[]
+                { new(new(2026, 11, 1), new(2026, 11, 30), 120) })),
             new BookCollection { Id = Guid.NewGuid(), Name = "测试收藏夹" },
             new NativeReaderTocItem[] { new(0, "第一章", 0, true) },
             new NativeReaderSearchItem[] { new(0, "第一章", "匹配的原文") },

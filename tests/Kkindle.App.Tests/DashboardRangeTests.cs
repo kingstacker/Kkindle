@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.VisualTree;
+using Kkindle.Core;
 using Xunit;
 
 namespace Kkindle.Ui.Tests;
@@ -58,14 +59,16 @@ public sealed partial class SettingsTests
     });
 
     [Theory]
-    [InlineData(7)]
-    [InlineData(14)]
-    [InlineData(30)]
-    public Task DashboardDaysStayOnOneRow(int days) => Run(async () =>
+    [InlineData(ReadingPeriod.Week)]
+    [InlineData(ReadingPeriod.Month)]
+    [InlineData(ReadingPeriod.Year)]
+    public Task DashboardPeriodsStayOnOneRow(ReadingPeriod period) => Run(async () =>
     {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var days = ReadingPeriodRange.Create(period, today).BuildBuckets([], today).Count;
         await using var scope = await TestWindow.Create();
         scope.Call("ShowStage3Page", scope.Get<Grid>("ReadingDashboardPage"), null);
-        scope.Set("_readingDashboardDayCount", days);
+        scope.Set("_readingDashboardPeriod", period);
         await scope.Call<Task>("RefreshReadingDashboardAsync");
         await Render();
         var charts = scope.Get<Grid>("DashboardChartsGrid").Children.OfType<Border>().ToArray();
@@ -91,7 +94,8 @@ public sealed partial class SettingsTests
             Assert.Equal(first.Height, child.Bounds.Height);
             Assert.True(child.Bounds.Right <= panel.Bounds.Width + 1, $"Child {child.Bounds}; panel {panel.Bounds}");
         }
-        Assert.Contains(days.ToString(), scope.Get<TextBlock>("DashboardDailyTitleText").Text);
+        Assert.Equal(UiText.Get(period switch { ReadingPeriod.Week => "本周阅读时长", ReadingPeriod.Month => "本月阅读时长", _ => "今年阅读时长" }),
+            scope.Get<TextBlock>("DashboardDailyTitleText").Text);
         for (var i = 0; i < scope.Window.DashboardDays.Count; i++)
             scope.Window.DashboardDays[i] = scope.Window.DashboardDays[i] with { BarHeight = 4 + i % 6 * 35 };
         for (var i = 0; i < scope.Window.DashboardProgressBuckets.Count; i++)
@@ -121,19 +125,24 @@ public sealed partial class SettingsTests
     });
 
     [Fact]
-    public Task DashboardTitleClickCyclesDayRange() => Run(async () =>
+    public Task DashboardButtonsSelectWeekMonthAndYear() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
         scope.Call("ShowStage3Page", scope.Get<Grid>("ReadingDashboardPage"), null);
         await Render();
         Assert.Null(scope.Window.FindControl<ComboBox>("DashboardRangeBox"));
         await scope.Call<Task>("RefreshReadingDashboardAsync");
-        var button = scope.Get<Button>("DashboardDailyRangeButton");
-        foreach (var days in new[] { 30, 7, 14 })
+        Assert.Null(scope.Window.FindControl<Button>("DashboardDailyRangeButton"));
+        foreach (var period in new[] { ReadingPeriod.Month, ReadingPeriod.Year, ReadingPeriod.Week })
         {
+            var button = scope.Get<Button>($"Dashboard{period}Button");
             button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-            await Until(() => scope.Window.DashboardDays.Count == days
-                && scope.Get<TextBlock>("DashboardDailyTitleText").Text!.Contains(days.ToString()));
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var count = ReadingPeriodRange.Create(period, today).BuildBuckets([], today).Count;
+            Assert.Equal(count, scope.Window.DashboardDays.Count);
+            Assert.Contains("active", button.Classes);
+            Assert.All(new[] { ReadingPeriod.Week, ReadingPeriod.Month, ReadingPeriod.Year }.Where(other => other != period),
+                other => Assert.DoesNotContain("active", scope.Get<Button>($"Dashboard{other}Button").Classes));
         }
     });
 }

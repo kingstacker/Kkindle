@@ -92,7 +92,9 @@ public partial class MainWindow
     private bool _suppressS3SettingsDraftTracking;
     private DateTimeOffset? _lastS3SyncAt;
     private S3SyncResult? _lastS3SyncResult;
-    private int _readingDashboardDayCount = 14;
+    private ReadingPeriod _readingDashboardPeriod = ReadingPeriod.Week;
+    private IReadOnlyList<ReadingDashboardDay> _readingDashboardDailyReading = [];
+    private int _readingDashboardGeneration;
     private bool _readingMaterialsExportMode;
     private Popup? _readingMaterialPreviewPopup;
     private Border? _readingMaterialPreviewTarget;
@@ -4452,19 +4454,21 @@ public partial class MainWindow
         await RefreshReadingDashboardAsync();
     }
 
-    private async void DashboardDailyRangeButton_Click(object? sender, RoutedEventArgs e)
+    private void DashboardPeriodButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (!_stage3Ready) return;
-        _readingDashboardDayCount = _readingDashboardDayCount switch { 7 => 14, 14 => 30, _ => 7 };
-        await RefreshReadingDashboardAsync();
+        if (sender is not Button { Tag: string name } || !Enum.TryParse<ReadingPeriod>(name, out var period)) return;
+        _readingDashboardPeriod = period;
+        PresentDashboardDays();
     }
 
     private async Task RefreshReadingDashboardAsync()
     {
+        var generation = ++_readingDashboardGeneration;
         try
         {
             var dashboard = await _readerData.GetReadingDashboardAsync(
-                100, _lifetimeCancellation.Token, _readingDashboardDayCount);
+                100, _lifetimeCancellation.Token, 366);
+            if (generation != _readingDashboardGeneration) return;
             DashboardBooksStartedText.Text = T("{0} 本", dashboard.BooksStarted);
             DashboardBooksFinishedText.Text = T("{0} 本", dashboard.BooksFinished);
             DashboardTotalTimeText.Text = FormatReadingTime(dashboard.TotalSeconds);
@@ -4501,28 +4505,8 @@ public partial class MainWindow
             }
             DashboardRecentEmptyText.IsVisible = _readingDashboardItems.Count == 0;
 
-            DashboardDays.Clear();
-            DashboardDailyTitleText.Text = T("近 {0} 天阅读时长", dashboard.DailyReading.Count);
-            var maximumSeconds = Math.Max(1, dashboard.DailyReading.Max(day => day.ActiveSeconds));
-            var today = DateOnly.FromDateTime(DateTime.Today);
-            var dayIndex = 0;
-            var labelInterval = Math.Max(1, (int)Math.Ceiling(dashboard.DailyReading.Count / 7d));
-            foreach (var day in dashboard.DailyReading)
-            {
-                var lastIndex = dashboard.DailyReading.Count - 1;
-                var showLabel = dayIndex == lastIndex
-                    || (dayIndex % labelInterval == 0 && lastIndex - dayIndex >= Math.Min(labelInterval, 2));
-                var timeLabel = T("{0:0.#} 分", day.ActiveSeconds / 60d);
-                DashboardDays.Add(new Stage3DashboardDayViewModel(
-                    showLabel ? day.Date.ToString("MM-dd", CultureInfo.InvariantCulture) : "",
-                    showLabel && day.ActiveSeconds > 0 ? timeLabel : "",
-                    day.ActiveSeconds == 0 ? 4 : 10 + 170d * day.ActiveSeconds / maximumSeconds,
-                    day.Date == today ? 1d : 0.3)
-                {
-                    DetailLabel = $"{day.Date:yyyy-MM-dd}: {timeLabel}"
-                });
-                dayIndex++;
-            }
+            _readingDashboardDailyReading = dashboard.DailyReading;
+            PresentDashboardDays();
 
             PopulateDashboardBars(DashboardBookTimes, dashboard.MostReadBooks
                 .Select(item => (
@@ -4547,6 +4531,34 @@ public partial class MainWindow
         {
             DashboardStatusText.Text = T("阅读数据暂时不可用：{0}", UiText.Localize(exception.Message));
             DashboardStatusText.IsVisible = true;
+        }
+    }
+
+    private void PresentDashboardDays()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var range = ReadingPeriodRange.Create(_readingDashboardPeriod, today);
+        var buckets = range.BuildBuckets(_readingDashboardDailyReading, today);
+        DashboardWeekButton.Classes.Set("active", _readingDashboardPeriod == ReadingPeriod.Week);
+        DashboardMonthButton.Classes.Set("active", _readingDashboardPeriod == ReadingPeriod.Month);
+        DashboardYearButton.Classes.Set("active", _readingDashboardPeriod == ReadingPeriod.Year);
+        DashboardDailyTitleText.Text = T(_readingDashboardPeriod switch
+        { ReadingPeriod.Week => "本周阅读时长", ReadingPeriod.Month => "本月阅读时长", _ => "今年阅读时长" });
+        var maximumSeconds = Math.Max(1, buckets.Max(bucket => bucket.ActiveSeconds));
+        var labelInterval = Math.Max(1, (int)Math.Ceiling(buckets.Count / 7d));
+        DashboardDays.Clear();
+        for (var index = 0; index < buckets.Count; index++)
+        {
+            var bucket = buckets[index];
+            var showLabel = index == buckets.Count - 1 || index % labelInterval == 0;
+            var timeLabel = FormatReadingTime(bucket.ActiveSeconds);
+            var dateLabel = _readingDashboardPeriod == ReadingPeriod.Year
+                ? T("{0} 月", bucket.StartDate.Month) : bucket.StartDate.ToString("MM-dd", CultureInfo.InvariantCulture);
+            DashboardDays.Add(new Stage3DashboardDayViewModel(showLabel ? dateLabel : "",
+                showLabel && bucket.ActiveSeconds > 0 ? timeLabel : "",
+                bucket.ActiveSeconds == 0 ? 4 : 10 + 170d * bucket.ActiveSeconds / maximumSeconds,
+                bucket.Contains(today) ? 1 : 0.3)
+            { DetailLabel = $"{bucket.StartDate:yyyy-MM-dd} — {bucket.EndDate:yyyy-MM-dd}: {timeLabel}" });
         }
     }
 
@@ -5210,6 +5222,12 @@ public partial class MainWindow
         PathStyle = S3PathStyleCheck.IsChecked == true,
         SkipTlsVerify = S3SkipTlsVerifyCheck.IsChecked == true,
         EncryptionKey = S3EncryptionKeyBox.Text ?? string.Empty,
+        AccountRegion = SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer
+            ? _syncAccountStatus?.Region ?? _modules.DataRegion : _modules.DataRegion,
+        AccountServerUrl = SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer
+            ? _syncAccountStatus?.ServerUrl ?? _s3SyncStoredSettings.Settings.AccountServerUrl : _s3SyncStoredSettings.Settings.AccountServerUrl,
+        AccountUserId = SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer
+            ? _syncAccountStatus?.User?.Id ?? _s3SyncStoredSettings.Settings.AccountUserId : _s3SyncStoredSettings.Settings.AccountUserId,
         TimeoutSeconds = S3TimeoutBox.Value is { } timeout ? (int)timeout : 60,
         ConcurrentRequests = S3ConcurrencyBox.Value is { } concurrency ? (int)concurrency : 4
     });
@@ -5238,6 +5256,7 @@ public partial class MainWindow
         try
         {
             using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token, cancellationToken);
+            settings = await BindAccountSyncSettingsAsync(settings, linkedCancellation.Token);
             await _s3SyncService.SaveSettingsAsync(_s3SyncStoredSettings.DeviceId, settings, linkedCancellation.Token);
             if (settings != _s3SyncStoredSettings.Settings)
             {
@@ -5380,6 +5399,7 @@ public partial class MainWindow
         S3SyncStatusText.Text = T("正在测试 {0} 连接…", settings.ProviderName);
         try
         {
+            settings = await BindAccountSyncSettingsAsync(settings, cancellation.Token);
             await _s3SyncService.TestConnectionAsync(settings, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             S3SyncStatusText.Text = T("{0} 连接成功。", settings.ProviderName);
@@ -6633,9 +6653,25 @@ public partial class MainWindow
         }
     }
 
+    private async Task<bool> EnsureBackupEncryptionForUiAsync()
+    {
+        try
+        {
+            await _backupService.EnsureEncryptionConfiguredAsync(_lifetimeCancellation.Token);
+            return true;
+        }
+        catch (SyncEncryptionKeyRequiredException exception)
+        {
+            SettingsBackupStatusText.Text = UiText.Localize(exception.Message);
+            await ShowMessageAsync(T("请先设置同步密钥"), UiText.Localize(exception.Message));
+            return false;
+        }
+    }
+
     private async void ExportBackupButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_backupBusy || _readingDataResetBusy) return;
+        if (!await EnsureBackupEncryptionForUiAsync()) return;
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel is null) return;
         var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -6712,6 +6748,7 @@ public partial class MainWindow
     private async void ImportBackupButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_backupBusy || _readingDataResetBusy) return;
+        if (!await EnsureBackupEncryptionForUiAsync()) return;
         if (_s3SyncBusy)
         {
             await ShowMessageAsync(T("请稍候"), T("云端同步正在进行，请完成后再导入备份。"));

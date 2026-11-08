@@ -796,10 +796,12 @@ public partial class MainWindow
             };
         NumericUpDown[] numbers = [S3SyncIntervalBox, S3TimeoutBox, S3ConcurrencyBox];
         foreach (var control in numbers) control.ValueChanged += (_, _) => S3SettingsFieldChanged();
-        SyncProviderBox.SelectionChanged += (_, _) =>
+        SyncProviderBox.SelectionChanged += async (_, _) =>
         {
             UpdateSyncProviderControls();
             S3SettingsFieldChanged();
+            if (!_suppressS3SettingsDraftTracking && SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer)
+                await RefreshAccountSummaryAsync();
         };
         UpdateSyncProviderControls();
         UpdateS3SettingsDraftState();
@@ -808,10 +810,14 @@ public partial class MainWindow
     private void UpdateSyncProviderControls()
     {
         var webDav = SyncProviderBox.SelectedIndex == (int)SyncProvider.WebDav;
-        S3ConnectionPanel.IsVisible = !webDav;
+        var account = SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer;
+        S3ConnectionPanel.IsVisible = !webDav && !account;
         WebDavConnectionPanel.IsVisible = webDav;
-        S3RegionRow.IsVisible = !webDav;
-        S3PathStyleCheck.IsVisible = !webDav;
+        AccountSyncConnectionPanel.IsVisible = account;
+        S3RegionRow.IsVisible = !webDav && !account;
+        S3PathStyleCheck.IsVisible = !webDav && !account;
+        S3SkipTlsVerifyCheck.IsVisible = !account;
+        S3ExportConnectionProfileButton.IsEnabled = !account;
     }
 
     private void S3SettingsFieldChanged()

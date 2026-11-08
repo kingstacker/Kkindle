@@ -7,6 +7,7 @@ using Kkindle.Infrastructure;
 
 namespace Kkindle.Tests;
 
+// Credentials and reserved example domains below are fictional fixtures for local protocol tests.
 public sealed class WebDavSettingsTests
 {
     [Theory]
@@ -189,7 +190,7 @@ public sealed class WebDavSettingsTests
             await store.SaveAsync(Guid.NewGuid().ToString("N"), settings);
             var backup = Path.Combine(root, "dav.kkindle");
             await new AppBackupService(source, protector).ExportAsync(backup);
-            using (var zip = ZipFile.OpenRead(backup))
+            using (var zip = await BackupTests.OpenBackupArchiveAsync(backup, key: settings.EncryptionKey))
             using (var reader = new StreamReader(zip.GetEntry("settings/settings.json")!.Open()))
             {
                 var json = await reader.ReadToEndAsync();
@@ -198,6 +199,7 @@ public sealed class WebDavSettingsTests
                 Assert.DoesNotContain(settings.EncryptionKey, json, StringComparison.Ordinal);
                 Assert.Contains("dav.example.test", json, StringComparison.Ordinal);
             }
+            await BackupTests.SetBackupKeyAsync(target, settings.EncryptionKey);
             var restored = await new AppBackupService(target, protector).ImportAsync(backup);
             Assert.Equal(SyncProvider.WebDav, restored.S3Settings!.Provider);
             Assert.Equal(settings.WebDavEndpoint, restored.S3Settings.WebDavEndpoint);

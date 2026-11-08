@@ -144,6 +144,7 @@ final class NativeStore: ObservableObject {
     @Published var readerBook: LibraryBook?
     @Published var openingReader = false
     @Published var developerMode = false
+    @Published var account: AccountStatus?
     let session = NativeReaderSession()
     @Published var prompt: NativePrompt?
     @Published var toast: String?

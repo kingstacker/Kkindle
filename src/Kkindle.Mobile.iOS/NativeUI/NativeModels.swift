@@ -42,7 +42,13 @@ struct CreatedFolder: Decodable { let id: String; let name: String }
 struct CoverResult: Decodable { let cover: String? }
 struct MessageResult: Decodable { let message: String; let warning: String? }
 struct TextResult: Decodable { let text: String }
-struct ProfileSummary: Decodable { let version: String; let sync: String; let ai: String; let kindle: String; let storage: String }
+struct ProfileSummary: Decodable { let version: String; let sync: String; let ai: String; let kindle: String; let storage: String; let account: AccountStatus }
+struct AccountUser: Decodable { let id: String; let username: String }
+struct AccountStatus: Decodable {
+    let serverUrl: String; let user: AccountUser?; let expiresAt: String?; let isLoggedIn: Bool
+    let region: Int; let requiresDataRestart: Bool
+    var regionName: String { region == 1 ? "国际区" : "中国区" }
+}
 
 struct SyncForm: Codable {
     var provider = 0
@@ -61,6 +67,9 @@ struct SyncForm: Codable {
     var skipTlsVerify = false
     var prefix = "kkindle"
     var encryptionKey = ""
+    var accountRegion = 0
+    var accountServerUrl = ""
+    var accountUserId = "00000000-0000-0000-0000-000000000000"
 }
 struct SyncFormSnapshot: Decodable { let settings: SyncForm; let summary: String }
 
@@ -123,7 +132,15 @@ struct Medal: Decodable, Identifiable {
     let fraction: Double
     var id: String { name }
 }
-struct DashboardSnapshot: Decodable { let dashboard: ReadingDashboard; let medals: [Medal]; let streak: Int }
+struct ReadingPeriodBucket: Decodable, Identifiable {
+    let startDate: String; let endDate: String; let activeSeconds: Int64
+    var id: String { startDate }
+    func contains(_ date: String) -> Bool { date >= startDate && date <= endDate }
+}
+struct DashboardSnapshot: Decodable {
+    let dashboard: ReadingDashboard; let medals: [Medal]; let streak: Int
+    let period: Int; let today: String; let buckets: [ReadingPeriodBucket]
+}
 struct TrashRecord: Decodable, Identifiable { let id: String; let title: String; let detail: String; let deletedAt: String }
 
 struct ReaderToc: Decodable, Identifiable { let id: Int; let title: String; let level: Int; let selected: Bool }

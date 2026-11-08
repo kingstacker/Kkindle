@@ -103,9 +103,9 @@
               <c:NativeSegmentGroup Grid.Column="1" VerticalAlignment="Top">
               <Border Classes="segments" Background="{DynamicResource SunkStrongBrush}" Padding="2">
                 <StackPanel Orientation="Horizontal">
-                  <Button Name="Range7" Classes="seg" Padding="10,4" FontSize="12.5" Content="7 天" Click="OnRangeClick" />
-                  <Button Name="Range14" Classes="seg on" Padding="10,4" FontSize="12.5" Content="14 天" Click="OnRangeClick" />
-                  <Button Name="Range30" Classes="seg" Padding="10,4" FontSize="12.5" Content="30 天" Click="OnRangeClick" />
+                  <Button Name="RangeWeek" Classes="seg on" Padding="10,4" FontSize="12.5" Content="周" Click="OnRangeClick" />
+                  <Button Name="RangeMonth" Classes="seg" Padding="10,4" FontSize="12.5" Content="月" Click="OnRangeClick" />
+                  <Button Name="RangeYear" Classes="seg" Padding="10,4" FontSize="12.5" Content="年" Click="OnRangeClick" />
                 </StackPanel>
               </Border>
               </c:NativeSegmentGroup>

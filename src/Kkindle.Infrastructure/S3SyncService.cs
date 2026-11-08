@@ -47,6 +47,8 @@ public sealed partial class S3SyncService : ISyncService
     private readonly AppPaths _paths;
     private readonly S3SyncSettingsStore _settingsStore;
     private readonly Func<S3SyncSettings, ISyncObjectStore> _clientFactory;
+    private readonly AccountService? _accounts;
+    private readonly AccountRegion? _dataRegion;
     private readonly AppSettingsStore _appSettingsStore;
     private readonly AiSettingsStore _aiSettingsStore;
     private readonly KindleEmailSettingsStore _kindleEmailSettingsStore;
@@ -78,6 +80,13 @@ public sealed partial class S3SyncService : ISyncService
     {
     }
 
+    public S3SyncService(AppPaths paths, ISecretProtector protector, AccountService accounts, AccountRegion dataRegion)
+        : this(paths, protector, settings => CreateRegionalObjectStore(settings, accounts, dataRegion))
+    {
+        _accounts = accounts;
+        _dataRegion = dataRegion;
+    }
+
     internal S3SyncService(AppPaths paths, ISecretProtector protector, Func<S3SyncSettings, IAmazonS3> clientFactory)
         : this(paths, protector, settings => new S3SyncObjectStore(settings, clientFactory(settings)))
     {
@@ -93,8 +102,13 @@ public sealed partial class S3SyncService : ISyncService
         _kindleEmailSettingsStore = new KindleEmailSettingsStore(paths, protector);
     }
 
-    public Task<S3SyncStoredSettings> LoadSettingsAsync(CancellationToken cancellationToken = default) =>
-        _settingsStore.LoadAsync(cancellationToken);
+    public async Task<S3SyncStoredSettings> LoadSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var stored = await _settingsStore.LoadAsync(cancellationToken);
+        if (_dataRegion is { } region && stored.Settings.AccountRegion != region)
+            return stored with { Settings = stored.Settings with { AccountRegion = region, Enabled = false } };
+        return stored;
+    }
 
     // A later upload can fail after settings have already been committed.
     public event EventHandler? RemoteSettingsApplied;
@@ -105,6 +119,13 @@ public sealed partial class S3SyncService : ISyncService
         CancellationToken cancellationToken = default)
     {
         var normalized = S3SyncSettings.Normalize(settings);
+        if (_dataRegion is { } dataRegion)
+        {
+            await _accounts!.EnsureSyncRegionAsync(dataRegion, cancellationToken);
+            if (normalized.Provider == SyncProvider.AccountServer && normalized.AccountRegion != dataRegion)
+                throw new InvalidOperationException("同步账号区域与当前书库不一致，请重新打开应用。");
+            normalized = normalized with { AccountRegion = dataRegion };
+        }
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
@@ -993,12 +1014,22 @@ public sealed partial class S3SyncService : ISyncService
             : (deviceId ?? string.Empty).Trim();
 
     private static bool SameRemoteDirectory(S3SyncSettings left, S3SyncSettings right) =>
-        left.Provider == right.Provider && left.Prefix == right.Prefix
-        && (left.Provider == SyncProvider.WebDav
-            ? left.WebDavEndpoint == right.WebDavEndpoint && left.WebDavUsername == right.WebDavUsername
-            : left.Endpoint == right.Endpoint && left.Bucket == right.Bucket);
+        left.Provider == right.Provider && left.Prefix == right.Prefix && left.AccountRegion == right.AccountRegion
+        && (left.Provider switch
+        {
+            SyncProvider.WebDav => left.WebDavEndpoint == right.WebDavEndpoint && left.WebDavUsername == right.WebDavUsername,
+            SyncProvider.AccountServer => left.AccountServerUrl == right.AccountServerUrl && left.AccountUserId == right.AccountUserId,
+            _ => left.Endpoint == right.Endpoint && left.Bucket == right.Bucket
+        });
 
-    private static string BuildStorageIdentity(S3SyncSettings settings) => settings.Provider == SyncProvider.WebDav
+    private string BuildStorageIdentity(S3SyncSettings settings) =>
+        (_dataRegion is { } region ? "region:" + AccountRegions.Slug(region) + "|" : "") + BuildProviderStorageIdentity(settings);
+
+    private static string BuildProviderStorageIdentity(S3SyncSettings settings) => settings.Provider == SyncProvider.AccountServer
+        ? string.Join("|", "AccountServer", AccountRegions.Slug(settings.AccountRegion), settings.AccountServerUrl,
+            settings.AccountUserId.ToString("N"), settings.Prefix,
+            settings.EncryptionKey.Length > 0 ? $"encrypted:{EncryptionKeyFingerprint(settings.EncryptionKey)}" : "plain")
+        : settings.Provider == SyncProvider.WebDav
         ? string.Join("|", "WebDAV", settings.WebDavEndpoint, EncryptionKeyFingerprint(settings.WebDavUsername), settings.Prefix,
             settings.EncryptionKey.Length > 0 ? $"encrypted:{EncryptionKeyFingerprint(settings.EncryptionKey)}" : "plain")
         // Keep the legacy S3 identity unchanged so existing baselines survive
@@ -1247,11 +1278,20 @@ public sealed partial class S3SyncService : ISyncService
         $"{settings.Prefix}/devices/{deviceId}/snapshot.bin";
 
     private static string BlobKey(S3SyncSettings settings, string hash) =>
-        $"{settings.Prefix}/objects/"
-        + (settings.EncryptionKey.Length > 0
-            ? $"encrypted/{EncryptionKeyFingerprint(settings.EncryptionKey)}"
-            : "plain")
-        + $"/{hash.ToLowerInvariant()}";
+        $"{settings.Prefix}/objects/{BlobNamespace(settings)}/{hash.ToLowerInvariant()}";
+
+    private static string BlobNamespace(S3SyncSettings settings)
+    {
+        if (settings.EncryptionKey.Length == 0) return "plain";
+        // Account storage is already isolated by user. A key-derived path would
+        // expose a fast password verifier; use public account identity instead.
+        // Changing the encryption key still requires a new sync prefix.
+        var identity = settings.Provider == SyncProvider.AccountServer
+            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                $"KKINDLE-ACCOUNT-OBJECTS1|{AccountRegions.Slug(settings.AccountRegion)}|{settings.AccountUserId:N}"))).ToLowerInvariant()
+            : EncryptionKeyFingerprint(settings.EncryptionKey);
+        return "encrypted/" + identity;
+    }
 
     private static string EncryptionKeyFingerprint(string encryptionKey) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(encryptionKey))).ToLowerInvariant();
@@ -1262,6 +1302,16 @@ public sealed partial class S3SyncService : ISyncService
         SyncProvider.WebDav => new WebDavSyncObjectStore(settings),
         _ => throw new InvalidOperationException(UiText.Get("请选择受支持的同步方式。"))
     };
+
+    private static ISyncObjectStore CreateRegionalObjectStore(S3SyncSettings settings, AccountService accounts, AccountRegion region)
+    {
+        if (settings.AccountRegion != region)
+            throw new InvalidOperationException("同步区域与当前书库不一致，请检查区域设置。");
+        var store = settings.Provider == SyncProvider.AccountServer
+            ? new AccountSyncObjectStore(settings, accounts)
+            : CreateObjectStore(settings);
+        return new RegionalSyncObjectStore(store, accounts, region);
+    }
 
     private static async Task<List<string>> ListSnapshotKeysAsync(
         ISyncObjectStore client,
@@ -1424,11 +1474,7 @@ public sealed partial class S3SyncService : ISyncService
         CancellationToken cancellationToken)
     {
         var keys = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-        var prefix = $"{settings.Prefix}/objects/"
-            + (settings.EncryptionKey.Length > 0
-                ? $"encrypted/{EncryptionKeyFingerprint(settings.EncryptionKey)}"
-                : "plain")
-            + "/";
+        var prefix = $"{settings.Prefix}/objects/{BlobNamespace(settings)}/";
         try
         {
             foreach (var key in await client.ListKeysAsync(prefix, cancellationToken)) keys.TryAdd(key, 0);

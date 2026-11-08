@@ -71,7 +71,7 @@ public partial class MobileShell : UserControl
     public MobileShell(ApplicationModules modules, MobileServices services, MobilePreferencesStore preferences)
     {
         _modules = modules;
-        _services = services;
+        _services = services with { Paths = modules.Paths };
         Preferences = preferences;
         Covers = new CoverCache(modules.Paths);
         Sync = new MobileSync(modules);
@@ -168,8 +168,12 @@ public partial class MobileShell : UserControl
     public Task RestoreBackupAsync(string path, CancellationToken token = default) =>
         RunBackupAsync(path, restore: true, token);
 
+    public Task EnsureBackupEncryptionAsync(CancellationToken token = default) =>
+        new AppBackupService(_services.Paths, _services.SecretProtector).EnsureEncryptionConfiguredAsync(token);
+
     private async Task RunBackupAsync(string path, bool restore, CancellationToken token)
     {
+        await EnsureBackupEncryptionAsync(token);
         if (_backupBlocked) throw new InvalidOperationException("备份或恢复正在进行，请稍候。");
         _backupBlocked = true;
         BackupBlockerTitle.Text = restore ? "正在恢复备份" : "正在导出备份";
@@ -310,6 +314,8 @@ public partial class MobileShell : UserControl
     public void ShowReadingData() => ShowRoot(ShellTab.ReadingData, new ReadingDataPage(_modules, this));
 
     public void OpenSyncSettings() => Push(new SyncSettingsPage(_modules, this));
+
+    public void OpenAccount() => Push(new AccountPage(_modules.Accounts.Service, this));
 
     public void OpenAiSettings() => Push(new AiSettingsPage(_modules, this));
 

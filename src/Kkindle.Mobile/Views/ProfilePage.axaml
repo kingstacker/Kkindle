@@ -7,7 +7,18 @@
     <StackPanel Margin="24,20,24,32">
       <TextBlock Classes="display" Text="我的" />
 
-      <Button Classes="row" Margin="0,16,0,0" Click="OnSyncClick">
+      <Button Name="AccountButton" Classes="row" Margin="0,16,0,8" Click="OnAccountClick">
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <StackPanel Spacing="4">
+            <TextBlock Name="AccountNameText" Text="登录 / 注册" />
+            <TextBlock Name="AccountHintText" Classes="muted" FontSize="12" Text="登录你的 Kkindle 账号" />
+          </StackPanel>
+          <c:LineIcon Grid.Column="2" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
+                      Margin="6,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+        </Grid>
+      </Button>
+
+      <Button Classes="row" Click="OnSyncClick">
         <Grid ColumnDefinitions="*,Auto,Auto">
           <TextBlock Text="云同步" VerticalAlignment="Center" />
           <TextBlock Grid.Column="1" Name="SyncSummaryText" Classes="muted" FontSize="14"

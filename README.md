@@ -34,7 +34,7 @@ Kkindle is a quiet, cross-platform ebook and Kindle manager built with Avalonia.
 - **PDF reading** — First-page library covers, continuous scrolling, single-page and two-page reading, fit-width/page controls, sharp zoom and 90° rotation. Supports selectable text, six underline/highlight styles, editable comments, and page annotations at arbitrary PDF positions through the page-note icon or right-click. Pages appear before full-book text indexing finishes; only visible regions are rendered at the screen's pixel density. Search, bookmarks and reading position use the same local reading data as EPUB. Scanned pages support viewing and page notes; OCR is not included.
 - **AI assistant** — Ask questions about the current book, summarize chapters, explain selections, and choose from discovered models through DeepSeek, OpenAI, or compatible endpoints. Requests use relevant local excerpts only.
 - **Kindle** — Detect USB/WPD/MTP devices, transfer books, manage fonts and dictionaries, and import `My Clippings.txt`.
-- **Tools and sync** — Calibre conversion, local backups, encrypted credentials, and optional S3 / WebDAV synchronization.
+- **Tools and sync** — Calibre conversion, encrypted local backups, protected credentials, and account / S3 / WebDAV synchronization. Account servers and local libraries stay separate for China and International regions.
 
 ## Download
 
@@ -48,11 +48,15 @@ The **Settings → Diagnostics** page checks the data directory, PDF parser, Web
 
 ## Cloud sync
 
-Choose **S3** or **WebDAV** in **Settings → Data & sync → Cloud sync**, enter the connection details, and select **Save settings**. Both providers retain their own addresses and credentials. Manual, startup, exit, and scheduled sync use the saved selection.
+For **Account cloud sync**, first register or sign in through **Login / Register**, choose **China** or **International**, and enter that region's server address. Then choose Account cloud sync in the sync settings and set a sync encryption key. Accounts, sessions, local libraries, and cloud files are independent between the two regions. See [account server setup](docs/account-server.md) for the independent PostgreSQL server and its administration website.
+
+For **S3** or **WebDAV**, choose the provider in **Settings → Data & sync → Cloud sync**, enter the connection details, and select **Save settings**. Both providers retain their own addresses and credentials. Manual, startup, exit, and scheduled sync use the saved selection.
 
 For WebDAV, enter the URL of an existing directory, such as `https://dav.example.com/dav/`, and credentials if required. Some services require an app password. Kkindle creates a sync subdirectory named `kkindle` by default; change it in Advanced options. The connection test verifies read/write access and removes its test file. The server must support standard PROPFIND, MKCOL, GET, PUT, MOVE, and DELETE operations. Completed uploads are published with MOVE so interrupted transfers do not replace existing snapshots.
 
-The sync subdirectory, encryption, scheduling, and transfer options are shared between providers. Devices syncing the same directory need the same encryption key; use a new subdirectory when changing keys. Connection profile exports include only the selected provider's credentials. Existing `.kkindle-s3.json` profiles remain supported; WebDAV profiles use `.kkindle-webdav.json`. Local backups exclude connection passwords and encryption keys.
+The sync subdirectory, encryption, scheduling, and transfer options are shared between providers within each region. Devices syncing the same directory need the same encryption key; use a new subdirectory when changing keys. Connection profile exports include only the selected provider's credentials. Existing `.kkindle-s3.json` profiles remain supported; WebDAV profiles use `.kkindle-webdav.json`.
+
+Every `.kkindle` data backup is encrypted with the locally configured sync key, including books, reading records, and library metadata. Import and export first prompt you to set that key if it is missing, even when cloud sync is disabled. To restore on another device, configure the original key before importing. Backups exclude connection passwords, account sessions, and the key itself. The key is never uploaded or recovered by the server; forgetting it makes existing encrypted data unreadable. Older plaintext backup files are rejected. See [encrypted backup details](docs/backup-encryption.md).
 
 ## Run from source
 

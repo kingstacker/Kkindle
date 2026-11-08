@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kkindle.AccountServer/Kkindle.AccountServer.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kkindle.AccountServer.Tests/Kkindle.AccountServer.Tests.csproj" />
+  </Folder>
+</Solution>

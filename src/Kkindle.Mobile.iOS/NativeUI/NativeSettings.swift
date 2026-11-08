@@ -25,6 +25,10 @@ struct NativeProfilePage: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("我的").font(NativeTheme.font(26, relativeTo: .largeTitle)).accessibilityIdentifier("page.profile")
                     .padding(.bottom, 16)
+                NavigationLink { NativeAccountPage(store: store) } label: {
+                    NativeSettingsRow(title: (store.account ?? summary?.account)?.user?.username ?? "登录 / 注册",
+                        value: (store.account ?? summary?.account)?.regionName ?? "用户账号")
+                }.accessibilityIdentifier("profile.account")
                 NavigationLink { NativeSyncSettings(store: store) } label: { NativeSettingsRow(title: "云同步", value: summary?.sync ?? "") }
                     .accessibilityIdentifier("profile.sync")
                 NavigationLink { NativeAiSettings(store: store) } label: { NativeSettingsRow(title: "AI 助手", value: summary?.ai ?? "") }
@@ -40,8 +44,10 @@ struct NativeProfilePage: View {
 
                 sectionLabel("数据", top: 32).padding(.bottom, 4)
                 NativeSettingsRow(title: "书籍占用", value: summary?.storage ?? "—", chevron: false)
-                Button { runBackup(false) } label: { NativeSettingsRow(title: "导出备份") }.disabled(busy)
-                Button { runBackup(true) } label: { NativeSettingsRow(title: "恢复备份") }.disabled(busy)
+                Button { runBackup(false) } label: { NativeSettingsRow(title: "导出备份") }
+                    .disabled(busy).accessibilityIdentifier("profile.backup.export")
+                Button { runBackup(true) } label: { NativeSettingsRow(title: "恢复备份") }
+                    .disabled(busy).accessibilityIdentifier("profile.backup.restore")
                 NavigationLink { NativeTrash(store: store) } label: { NativeSettingsRow(title: "回收站") }
                 NavigationLink { NativeDictionary(store: store, initialTerm: "") } label: { NativeSettingsRow(title: "本地词典") }
 
@@ -60,7 +66,10 @@ struct NativeProfilePage: View {
                 }
             }
             .task {
-                do { summary = try await store.request("settings.profile") }
+                do {
+                    let result: ProfileSummary = try await store.request("settings.profile")
+                    summary = result; store.account = result.account
+                }
                 catch { if !Task.isCancelled { store.failure = error.localizedDescription } }
             }
     }
@@ -94,7 +103,8 @@ struct NativeSyncSettings: View {
     var body: some View {
         NativeForm {
             Section {
-                Picker("同步方式", selection: $form.provider) { Text("S3").tag(0); Text("WebDAV").tag(1) }.pickerStyle(.segmented)
+                Picker("同步方式", selection: $form.provider) { Text("S3").tag(0); Text("WebDAV").tag(1); Text("账号云同步").tag(2) }
+                    .pickerStyle(.segmented).accessibilityIdentifier("sync.provider")
                 Toggle("启用同步", isOn: $form.enabled)
                 Toggle("自动同步", isOn: $form.automaticSyncEnabled)
             }
@@ -103,12 +113,20 @@ struct NativeSyncSettings: View {
                     field("服务地址", text: $form.webDavEndpoint)
                     field("用户名", text: $form.webDavUsername)
                     secret("密码", text: $form.webDavPassword)
-                } else {
+                } else if form.provider == 0 {
                     field("Endpoint（AWS 可留空）", text: $form.endpoint)
                     field("Bucket", text: $form.bucket)
                     field("Region", text: $form.region)
                     field("Access Key", text: $form.accessKey)
                     secret("Secret Key", text: $form.secretKey)
+                } else {
+                    Text((store.account?.regionName ?? "中国区") + " · " + (store.account?.user?.username ?? "请先登录"))
+                    Text("仅同步当前区域账号的数据，两区不互通。")
+                        .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
+                    if store.account?.requiresDataRestart == true {
+                        Text("区域已切换，请重新打开应用后同步。")
+                    }
+                    NavigationLink("登录 / 管理账号") { NativeAccountPage(store: store) }
                 }
                 field("目录前缀", text: $form.prefix)
             }
@@ -116,11 +134,15 @@ struct NativeSyncSettings: View {
                 DisclosureGroup("高级选项", isExpanded: $advanced) {
                     if form.provider == 0 { Toggle("Path Style", isOn: $form.pathStyle) }
                     Toggle("同步时下载书籍文件", isOn: $form.downloadBookFilesOnSync)
-                    Toggle("跳过 TLS 验证", isOn: $form.skipTlsVerify)
-                    secret("同步加密密钥", text: $form.encryptionKey)
+                    if form.provider != 2 { Toggle("跳过 TLS 验证", isOn: $form.skipTlsVerify) }
                 }
+                // This user-owned key must not be offered to password AutoFill.
+                NativeTextField(title: "同步密钥（账号云同步与备份必填）", text: $form.encryptionKey, secure: true)
+                    .textContentType(.oneTimeCode).textInputAutocapitalization(.never).disableAutocorrection(true)
+                Text("密钥由你自行牢记，不会上传或写入备份。遗忘后无法解密已有数据，设置新密钥也无法恢复旧数据。")
+                    .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
                 Button("导入连接参数") { run("import") }
-                Button("导出连接参数") { run("export") }
+                if form.provider != 2 { Button("导出连接参数") { run("export") } }
             }
             Section {
                 Text(summary).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
@@ -155,7 +177,10 @@ struct NativeSyncSettings: View {
     }
     private func load() async {
         defer { loading = false }
-        do { let value: SyncFormSnapshot = try await store.request("settings.sync.get"); form = value.settings; summary = value.summary }
+        do {
+            let value: SyncFormSnapshot = try await store.request("settings.sync.get"); form = value.settings; summary = value.summary
+            let account: AccountStatus = try await store.request("settings.account.get"); store.account = account
+        }
         catch { if !Task.isCancelled { status = error.localizedDescription } }
     }
     private func run(_ operation: String) {

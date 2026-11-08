@@ -31,7 +31,7 @@ public partial class MobileApp : Application
             ?? throw new InvalidOperationException(
                 "MobileApp.Services must be set by the platform head before Avalonia starts.");
         var modules = MobileComposition.Create(services);
-        var preferences = new MobilePreferencesStore(services.Paths);
+        var preferences = new MobilePreferencesStore(modules.Paths);
         preferences.Load();
         var shell = new MobileShell(modules, services, preferences);
         Shell = shell;

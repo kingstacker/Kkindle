@@ -32,7 +32,8 @@ internal static class DesktopApplicationBootstrap
     {
         var paths = services?.Paths
             ?? new AppPaths(AppRootConfiguration.ResolveRoot(AppContext.BaseDirectory));
-        var settings = new AppSettingsStore(paths).LoadSynchronously();
+        var dataPaths = AccountRegionPaths.ForRegion(paths, AccountRegionPaths.ReadActiveRegion(paths));
+        var settings = new AppSettingsStore(dataPaths).LoadSynchronously();
         return Create(paths: paths, services: services, startupSettings: settings);
     }
 

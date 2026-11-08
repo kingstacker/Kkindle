@@ -1,0 +1,61 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Kkindle.AccountWindow" Title="{DynamicResource Ui.Account.Title}"
+        Width="440" Height="750" MinWidth="360" MinHeight="480" WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource PaperBrush}">
+  <Grid Margin="28" RowDefinitions="Auto,*,Auto" RowSpacing="18">
+    <TextBlock Text="{DynamicResource Ui.Account.Title}" FontSize="24" FontWeight="SemiBold" />
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Spacing="14">
+        <StackPanel Name="RegionPanel" Spacing="8">
+          <TextBlock Text="{DynamicResource Ui.Account.Region}" />
+          <ComboBox Name="RegionBox" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="OnRegionChanged">
+            <ComboBoxItem Content="{DynamicResource Ui.Account.China}" />
+            <ComboBoxItem Content="{DynamicResource Ui.Account.International}" />
+          </ComboBox>
+          <TextBlock Text="{DynamicResource Ui.Account.RegionHint}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+          <TextBlock Name="RestartText" Text="{DynamicResource Ui.Account.Restart}" FontSize="12" TextWrapping="Wrap"
+                     Foreground="{DynamicResource MutedInkBrush}" IsVisible="False" />
+        </StackPanel>
+        <StackPanel Name="AccountPanel" IsVisible="False" Spacing="10">
+          <TextBlock Text="{DynamicResource Ui.Account.SignedIn}" Foreground="{DynamicResource MutedInkBrush}" />
+          <TextBlock Name="UsernameText" FontSize="22" />
+          <TextBlock Name="ServerText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+          <TextBlock Name="ExpiryText" Foreground="{DynamicResource MutedInkBrush}" />
+        </StackPanel>
+        <StackPanel Name="SignInPanel" Spacing="14">
+          <ComboBox Name="ModeBox" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="OnModeChanged">
+            <ComboBoxItem Content="{DynamicResource Ui.Account.Login}" />
+            <ComboBoxItem Content="{DynamicResource Ui.Account.Register}" />
+          </ComboBox>
+          <StackPanel Spacing="6">
+            <TextBlock Text="{DynamicResource Ui.Account.Server}" />
+            <TextBox Name="ServerUrlBox" PlaceholderText="https://accounts.example.com" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="{DynamicResource Ui.Account.Username}" />
+            <TextBox Name="UsernameBox" MaxLength="32" TextInputOptions.IsSensitive="True" />
+            <TextBlock Text="{DynamicResource Ui.Account.UsernameHint}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="{DynamicResource Ui.Account.Password}" />
+            <TextBox Name="PasswordBox" PasswordChar="•" MaxLength="128"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+            <TextBlock Text="{DynamicResource Ui.Account.PasswordHint}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+          </StackPanel>
+          <StackPanel Name="ConfirmPasswordPanel" IsVisible="False" Spacing="6">
+            <TextBlock Text="{DynamicResource Ui.Account.ConfirmPassword}" />
+            <TextBox Name="ConfirmPasswordBox" PasswordChar="•" MaxLength="128"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+    <StackPanel Grid.Row="2" Spacing="12">
+      <TextBlock Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
+      <Button Name="SubmitButton" Content="{DynamicResource Ui.Account.Login}" HorizontalAlignment="Stretch"
+              Click="OnSubmitClick" IsEnabled="False" />
+      <Button Name="SignOutButton" Content="{DynamicResource Ui.Account.SignOut}" Classes="quiet" HorizontalAlignment="Stretch"
+              Click="OnSignOutClick" IsVisible="False" />
+    </StackPanel>
+  </Grid>
+</Window>

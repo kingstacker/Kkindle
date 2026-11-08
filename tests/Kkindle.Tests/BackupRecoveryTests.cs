@@ -19,6 +19,7 @@ public sealed partial class BackupTests
         try
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             var reader = new ReaderDataService(paths);
             await library.InitializeAsync();
@@ -56,6 +57,7 @@ public sealed partial class BackupTests
         try
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
             var reader = new ReaderDataService(paths);
             await reader.InitializeAsync();
@@ -77,7 +79,7 @@ public sealed partial class BackupTests
             await export.WaitAsync(TimeSpan.FromSeconds(10));
 
             var snapshot = Path.Combine(root, "snapshot.db");
-            using (var archive = ZipFile.OpenRead(archivePath))
+            using (var archive = await OpenBackupArchiveAsync(archivePath))
                 archive.GetEntry("database/kkindle.db")!.ExtractToFile(snapshot);
             await using var connection = new SqliteConnection($"Data Source={snapshot}");
             await connection.OpenAsync();
@@ -95,6 +97,7 @@ public sealed partial class BackupTests
         try
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             var reader = new ReaderDataService(paths);
             await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
             await reader.InitializeAsync();
@@ -153,7 +156,7 @@ public sealed partial class BackupTests
             await File.WriteAllTextAsync(incomingPath, "replacement file");
             if (databaseReplaced)
             {
-                using var zip = ZipFile.OpenRead(archive);
+                using var zip = await OpenBackupArchiveAsync(archive);
                 var snapshot = Path.Combine(staging, "incoming.db");
                 zip.GetEntry("database/kkindle.db")!.ExtractToFile(snapshot);
                 await CopySnapshot(snapshot, paths.Database);
@@ -194,6 +197,7 @@ public sealed partial class BackupTests
         try
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             var library = new SqliteBookLibraryService(paths, new BookMetadataService());
             var reader = new ReaderDataService(paths);
             await library.InitializeAsync();
@@ -278,6 +282,7 @@ public sealed partial class BackupTests
         try
         {
             var paths = new AppPaths(Path.Combine(root, "app"));
+            await SetBackupKeyAsync(paths);
             await new SqliteBookLibraryService(paths, new BookMetadataService()).InitializeAsync();
             await File.WriteAllTextAsync(Path.Combine(paths.Covers, "retained.jpg"), "cover");
             await using (var db = new SqliteConnection($"Data Source={paths.Database}"))
@@ -291,7 +296,7 @@ public sealed partial class BackupTests
             var archive = Path.Combine(root, "portable.kkindle");
             await new AppBackupService(paths, new TestHelpers.PlaintextSecretProtector()).ExportAsync(archive);
             var snapshot = Path.Combine(root, "snapshot.db");
-            using (var zip = ZipFile.OpenRead(archive)) zip.GetEntry("database/kkindle.db")!.ExtractToFile(snapshot);
+            using (var zip = await OpenBackupArchiveAsync(archive)) zip.GetEntry("database/kkindle.db")!.ExtractToFile(snapshot);
             await using var source = new SqliteConnection($"Data Source={snapshot};Pooling=False");
             await source.OpenAsync();
             using var read = source.CreateCommand();

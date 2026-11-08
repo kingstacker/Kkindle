@@ -8,8 +8,8 @@ using Kkindle.Core;
 
 namespace Kkindle.Mobile.Views;
 
-/// <param name="IsStrong">Today, drawn in solid ink.</param>
-/// <param name="IsPicked">The day whose value the header shows.</param>
+/// <param name="IsStrong">The bucket containing today, drawn in solid ink.</param>
+/// <param name="IsPicked">The day or month whose value the header shows.</param>
 public sealed record ReadingDayBar(
     DateOnly Date, string Label, double BarHeight, long Seconds, bool IsStrong, bool IsPicked);
 
@@ -82,7 +82,7 @@ public partial class ReadingDataPage : UserControl
 
     private readonly ApplicationModules? _modules;
     private readonly MobileShell? _shell;
-    private int _dayCount = 14;
+    private ReadingPeriod _period = ReadingPeriod.Week;
     private bool _showAllMedals;
     private DateOnly _pickedDay = ReadingToday;
     private IReadOnlyList<ReadingDashboardDay> _days = [];
@@ -104,7 +104,7 @@ public partial class ReadingDataPage : UserControl
     // same calendar or the newest bar is labelled with the wrong day.
     private static DateOnly ReadingToday => DateOnly.FromDateTime(DateTime.UtcNow);
 
-    // Quick 7/14/30 taps overlap; only the newest refresh may paint.
+    // Quick period taps overlap; only the newest refresh may paint.
     private int _refreshGeneration;
 
     private async Task RefreshAsync()
@@ -116,7 +116,8 @@ public partial class ReadingDataPage : UserControl
         {
             await _modules!.Library.Books.InitializeAsync();
             await _shell!.EnsureReaderDataAsync();
-            var dashboard = await _modules.Reader.Data.GetReadingDashboardAsync(RecentLimit, dayCount: _dayCount);
+            // Keep the overview and streak independent of the selected chart period.
+            var dashboard = await _modules.Reader.Data.GetReadingDashboardAsync(RecentLimit, dayCount: 366);
             var books = (await _modules.Library.Books.SearchAsync()).ToDictionary(book => book.Id);
             if (generation != _refreshGeneration) return;
             StatusText.IsVisible = false;
@@ -164,28 +165,34 @@ public partial class ReadingDataPage : UserControl
 
     private void PresentDays()
     {
-        DailyTitleText.Text = $"近 {_days.Count} 天";
-        var longest = Math.Max(1, _days.Count == 0 ? 1 : _days.Max(day => day.ActiveSeconds));
         var today = ReadingToday;
-        var labelInterval = Math.Max(1, (int)Math.Ceiling(_days.Count / 5d));
-        var lastIndex = _days.Count - 1;
-        var bars = _days.Select((day, index) =>
+        var range = ReadingPeriodRange.Create(_period, today);
+        var buckets = range.BuildBuckets(_days, today);
+        if (_pickedDay < range.StartDate || _pickedDay > range.EndDate) _pickedDay = today;
+        DailyTitleText.Text = _period switch
+        { ReadingPeriod.Week => "本周阅读时长", ReadingPeriod.Month => "本月阅读时长", _ => "今年阅读时长" };
+        var longest = Math.Max(1, buckets.Max(bucket => bucket.ActiveSeconds));
+        var labelInterval = Math.Max(1, (int)Math.Ceiling(buckets.Count / 5d));
+        var lastIndex = buckets.Count - 1;
+        var bars = buckets.Select((bucket, index) =>
         {
             var showLabel = index == lastIndex || (index % labelInterval == 0 && lastIndex - index >= labelInterval);
             return new ReadingDayBar(
-                day.Date,
-                showLabel ? (day.Date == today ? "今天" : day.Date.ToString("M/d")) : string.Empty,
-                Math.Max(MinBarHeight, MaxBarHeight * day.ActiveSeconds / longest),
-                day.ActiveSeconds,
-                day.Date == today,
-                day.Date == _pickedDay && day.Date != today);
+                bucket.StartDate,
+                showLabel ? (_period == ReadingPeriod.Year ? $"{bucket.StartDate.Month} 月"
+                    : bucket.StartDate == today ? "今天" : bucket.StartDate.ToString("M/d")) : string.Empty,
+                Math.Max(MinBarHeight, MaxBarHeight * bucket.ActiveSeconds / longest),
+                bucket.ActiveSeconds,
+                bucket.Contains(today),
+                bucket.Contains(_pickedDay) && !bucket.Contains(today));
         }).ToList();
         DaysChart.ItemsSource = bars;
         DaysLabels.ItemsSource = bars;
 
-        var picked = _days.FirstOrDefault(day => day.Date == _pickedDay);
-        var name = _pickedDay == today ? "今天" : _pickedDay.ToString("M 月 d 日");
-        PickedDayText.Text = $"{name} · {(picked is null || picked.ActiveSeconds == 0 ? "未阅读" : MobileFormat.ReadingTime(picked.ActiveSeconds))}";
+        var picked = buckets.First(bucket => bucket.Contains(_pickedDay));
+        var name = _period == ReadingPeriod.Year ? $"{picked.StartDate.Month} 月"
+            : _pickedDay == today ? "今天" : _pickedDay.ToString("M 月 d 日");
+        PickedDayText.Text = $"{name} · {(picked.StartDate > today ? "尚未到来" : picked.ActiveSeconds == 0 ? "未阅读" : MobileFormat.ReadingTime(picked.ActiveSeconds))}";
     }
 
     private static string BookTitle(ReadingDashboardBook item)
@@ -281,18 +288,18 @@ public partial class ReadingDataPage : UserControl
     }
 
 
-    private async void OnRangeClick(object? sender, RoutedEventArgs e)
+    private void OnRangeClick(object? sender, RoutedEventArgs e)
     {
-        _dayCount = sender switch
+        _period = sender switch
         {
-            Button { Name: nameof(Range7) } => 7,
-            Button { Name: nameof(Range30) } => 30,
-            _ => 14
+            Button { Name: nameof(RangeMonth) } => ReadingPeriod.Month,
+            Button { Name: nameof(RangeYear) } => ReadingPeriod.Year,
+            _ => ReadingPeriod.Week
         };
-        Range7.Classes.Set("on", _dayCount == 7);
-        Range14.Classes.Set("on", _dayCount == 14);
-        Range30.Classes.Set("on", _dayCount == 30);
-        await RefreshAsync();
+        RangeWeek.Classes.Set("on", _period == ReadingPeriod.Week);
+        RangeMonth.Classes.Set("on", _period == ReadingPeriod.Month);
+        RangeYear.Classes.Set("on", _period == ReadingPeriod.Year);
+        PresentDays();
     }
 
     private void OnDayClick(object? sender, RoutedEventArgs e)

@@ -136,6 +136,7 @@ public sealed class ReadingTimeRecoveryTests
             await library.InitializeAsync();
             await reader.InitializeAsync();
             var file = Guid.NewGuid();
+            await BackupTests.SetBackupKeyAsync(paths);
             var backup = new AppBackupService(paths, new TestHelpers.PlaintextSecretProtector());
             var archive = Path.Combine(root, "checkpoint.kkindle");
             await backup.ExportAsync(archive);

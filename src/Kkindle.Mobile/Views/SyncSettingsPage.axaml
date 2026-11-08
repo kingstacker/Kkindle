@@ -64,12 +64,19 @@
 
         <c:NativeSegmentGroup Margin="0,0,0,16">
           <Border Classes="segments">
-            <Grid ColumnDefinitions="*,*">
+            <Grid ColumnDefinitions="*,*,*">
               <Button Grid.Column="0" Name="ProviderS3" Classes="seg" Content="S3" Click="OnProviderClick" />
               <Button Grid.Column="1" Name="ProviderWebDav" Classes="seg" Content="WebDAV" Click="OnProviderClick" />
+              <Button Grid.Column="2" Name="ProviderAccount" Classes="seg" Content="账号云同步" Click="OnProviderClick" />
             </Grid>
           </Border>
         </c:NativeSegmentGroup>
+
+        <StackPanel Name="AccountFields" IsVisible="False" Spacing="10" Margin="0,0,0,16">
+          <TextBlock Name="AccountSummaryText" Classes="muted" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="仅同步当前区域账号的数据，两区不互通。" TextWrapping="Wrap" />
+          <Button Classes="secondary" Content="登录 / 管理账号" Click="OnAccountClick" />
+        </StackPanel>
 
         <StackPanel Name="WebDavFields" IsVisible="False">
           <StackPanel Classes="field">
@@ -148,10 +155,12 @@
             </c:NativeSwitchGroup>
           </Grid>
           <StackPanel Classes="field" Margin="0">
-            <TextBlock Text="加密密钥（可选）" />
+            <TextBlock Text="同步密钥（账号云同步与备份必填）" />
             <TextBox Name="EncryptionKeyBox" Classes="field" PasswordChar="•"
                      PlaceholderText="所有设备必须一致"
                      TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                       Text="密钥由你自行牢记，不会上传或写入备份。遗忘后无法解密已有数据，设置新密钥也无法恢复旧数据。" />
           </StackPanel>
         </StackPanel>
       </StackPanel>

@@ -17,7 +17,8 @@ public static class MobileComposition
         // The mobile views are written in Chinese only; shared text (medals, sync
         // messages) must not switch to English with the system language.
         UiText.SetLanguage("zh-CN");
-        var settings = new AppSettingsStore(services.Paths).LoadSynchronously();
+        var dataPaths = AccountRegionPaths.ForRegion(services.Paths, AccountRegionPaths.ReadActiveRegion(services.Paths));
+        var settings = new AppSettingsStore(dataPaths).LoadSynchronously();
         return new ApplicationModules(new ApplicationModuleOptions
         {
             Paths = services.Paths,

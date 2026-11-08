@@ -24,6 +24,19 @@ internal sealed partial class IOSNativeFrontend
         }
         switch (command)
         {
+            case "settings.account.get":
+                return await modules.Accounts.Service.GetStatusAsync(Flag(args, "validateSession"), token);
+            case "settings.account.select":
+                return await modules.Accounts.Service.SelectRegionAsync((AccountRegion)args.GetProperty("region").GetInt32(), token);
+            case "settings.account.login":
+            case "settings.account.register":
+                if (args.TryGetProperty("region", out var loginRegion))
+                    await modules.Accounts.Service.SelectRegionAsync((AccountRegion)loginRegion.GetInt32(), token);
+                return await modules.Accounts.Service.SignInAsync(Text(args, "serverUrl"), Text(args, "username"),
+                    Text(args, "password"), command == "settings.account.register", token);
+            case "settings.account.logout":
+                var revoked = await modules.Accounts.Service.SignOutAsync(token);
+                return Data(("message", revoked ? "已退出登录。" : "已在本机退出；服务器暂时不可用，远端会话将在到期后失效。"));
             case "settings.developer.toggle":
                 if (!_shell.TryToggleDeveloperMode(Text(args, "password"))) throw new InvalidOperationException("密码错误");
                 break;
@@ -37,7 +50,8 @@ internal sealed partial class IOSNativeFrontend
                     ("sync", syncProfile.Settings is { Enabled: true, IsConfigured: true } ? syncProfile.Settings.ProviderName + " · 已开启" : "未开启"),
                     ("ai", aiProfile.IsConfigured ? aiProfile.ProviderDisplayName : "未设置"),
                     ("kindle", emailProfile.IsConfigured ? "已设置" : "未设置"),
-                    ("storage", MobileFormat.Size(profileBooks.Sum(book => book.Files.Sum(file => file.Size)))));
+                    ("storage", MobileFormat.Size(profileBooks.Sum(book => book.Files.Sum(file => file.Size)))),
+                    ("account", await modules.Accounts.Service.GetStatusAsync(cancellationToken: token)));
             case "settings.sync.get":
                 var stored = await modules.Sync.Service.LoadSettingsAsync(token);
                 _syncDraft = stored.Settings;
@@ -47,6 +61,9 @@ internal sealed partial class IOSNativeFrontend
             case "settings.sync.run":
                 var current = await modules.Sync.Service.LoadSettingsAsync(token);
                 var settings = ReadSyncSettings(args, _syncDraft ?? current.Settings);
+                settings = settings with { AccountRegion = modules.DataRegion };
+                if (settings.Provider == SyncProvider.AccountServer)
+                    settings = await modules.Accounts.Service.CreateSyncSettingsAsync(settings, token);
                 if (command == "settings.sync.run") settings = settings with { Enabled = true };
                 if ((settings.Enabled || command != "settings.sync.save") && settings.Validate() is { } invalid)
                     throw new InvalidOperationException(invalid);
@@ -146,7 +163,8 @@ internal sealed partial class IOSNativeFrontend
             AccessKey = draft.AccessKey, SecretKey = draft.SecretKey, WebDavEndpoint = draft.WebDavEndpoint,
             WebDavUsername = draft.WebDavUsername, WebDavPassword = draft.WebDavPassword,
             Bucket = draft.Bucket, Region = draft.Region, PathStyle = draft.PathStyle,
-            SkipTlsVerify = draft.SkipTlsVerify, Prefix = draft.Prefix, EncryptionKey = draft.EncryptionKey
+            SkipTlsVerify = draft.SkipTlsVerify, Prefix = draft.Prefix, EncryptionKey = draft.EncryptionKey,
+            AccountRegion = current.AccountRegion, AccountServerUrl = current.AccountServerUrl, AccountUserId = current.AccountUserId
         });
     }
 

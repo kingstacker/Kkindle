@@ -3,7 +3,8 @@ namespace Kkindle.Core;
 public enum SyncProvider
 {
     S3 = 0,
-    WebDav = 1
+    WebDav = 1,
+    AccountServer = 2
 }
 
 /// <summary>
@@ -36,14 +37,25 @@ public sealed record S3SyncSettings
     public int ConcurrentRequests { get; init; } = 4;
     public string Prefix { get; init; } = "kkindle";
     public string EncryptionKey { get; init; } = string.Empty;
+    public AccountRegion AccountRegion { get; init; }
+    public string AccountServerUrl { get; init; } = string.Empty;
+    public Guid AccountUserId { get; init; }
 
     public bool IsConfigured => Validate() is null;
-    public string ProviderName => Provider == SyncProvider.WebDav ? "WebDAV" : "S3";
+    public string ProviderName => Provider switch { SyncProvider.WebDav => "WebDAV", SyncProvider.AccountServer => "账号云同步", _ => "S3" };
 
     public string? Validate()
     {
-        if (Provider is not (SyncProvider.S3 or SyncProvider.WebDav))
+        if (Provider is not (SyncProvider.S3 or SyncProvider.WebDav or SyncProvider.AccountServer))
             return "请选择受支持的同步方式。";
+        if (Provider == SyncProvider.AccountServer)
+        {
+            if (!Enum.IsDefined(AccountRegion) || AccountUserId == Guid.Empty) return "请先登录当前区域的用户账号。";
+            try { _ = AccountValidation.ServerUri(AccountServerUrl); }
+            catch (ArgumentException) { return "请输入有效的账号服务地址。"; }
+            if (string.IsNullOrWhiteSpace(EncryptionKey)) return "账号云同步必须设置同步密钥；密钥不会上传，遗忘后无法解密已有数据。";
+            return string.IsNullOrWhiteSpace(Prefix) ? "请输入同步目录前缀。" : null;
+        }
         if (Provider == SyncProvider.WebDav)
         {
             if (!Uri.TryCreate(WebDavEndpoint, UriKind.Absolute, out var webDav)
@@ -99,7 +111,8 @@ public sealed record S3SyncSettings
             TimeoutSeconds = Math.Clamp(settings.TimeoutSeconds, 10, 600),
             ConcurrentRequests = Math.Clamp(settings.ConcurrentRequests, 1, 32),
             Prefix = string.IsNullOrWhiteSpace(prefix) ? "kkindle" : prefix,
-            EncryptionKey = settings.EncryptionKey ?? string.Empty
+            EncryptionKey = settings.EncryptionKey ?? string.Empty,
+            AccountServerUrl = (settings.AccountServerUrl ?? string.Empty).Trim().TrimEnd('/')
         };
     }
 

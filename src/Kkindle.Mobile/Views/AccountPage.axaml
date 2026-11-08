@@ -1,0 +1,78 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
+             x:Class="Kkindle.Mobile.Views.AccountPage"
+             Background="{DynamicResource PageBackgroundBrush}">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Grid ColumnDefinitions="Auto,*" Margin="8,6,24,0">
+      <Button Classes="icon" Click="OnBackClick">
+        <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
+      </Button>
+      <TextBlock Grid.Column="1" Classes="title" Text="用户账号" VerticalAlignment="Center" Margin="2,0,0,0" />
+    </Grid>
+    <ScrollViewer Grid.Row="1" Name="FormScroller">
+      <StackPanel Margin="24,24,24,20" Spacing="14">
+        <StackPanel Name="RegionPanel" Spacing="8">
+          <TextBlock Classes="label" Text="服务器区域" />
+          <c:NativeSegmentGroup>
+            <Border Classes="segments">
+              <Grid ColumnDefinitions="*,*">
+                <Button Name="ChinaRegionButton" Classes="seg on" Content="中国区" Click="OnRegionClick" />
+                <Button Grid.Column="1" Name="InternationalRegionButton" Classes="seg" Content="国际区" Click="OnRegionClick" />
+              </Grid>
+            </Border>
+          </c:NativeSegmentGroup>
+          <TextBlock Classes="muted" FontSize="12" Text="两区账号和同步数据独立，不互通。" TextWrapping="Wrap" />
+          <TextBlock Name="RestartText" Classes="muted" FontSize="12" Text="区域已切换，请重新打开应用后使用该区域的独立书库和同步。"
+                     TextWrapping="Wrap" IsVisible="False" />
+        </StackPanel>
+        <StackPanel Name="AccountPanel" IsVisible="False" Spacing="10">
+          <TextBlock Classes="muted" Text="已登录" />
+          <TextBlock Name="UsernameText" Classes="title" />
+          <TextBlock Name="ServerText" Classes="muted" TextWrapping="Wrap" />
+          <TextBlock Name="ExpiryText" Classes="muted" />
+        </StackPanel>
+        <StackPanel Name="SignInPanel" Spacing="14">
+          <c:NativeSegmentGroup>
+            <Border Classes="segments">
+              <Grid ColumnDefinitions="*,*">
+                <Button Name="LoginModeButton" Classes="seg on" Content="登录" Click="OnModeClick" />
+                <Button Grid.Column="1" Name="RegisterModeButton" Classes="seg" Content="注册" Click="OnModeClick" />
+              </Grid>
+            </Border>
+          </c:NativeSegmentGroup>
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="账号服务地址" />
+            <TextBox Name="ServerUrlBox" PlaceholderText="https://accounts.example.com"
+                     TextInputOptions.ContentType="Url" TextInputOptions.AutoCapitalization="False"
+                     TextInputOptions.ShowSuggestions="False" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="用户名" />
+            <TextBox Name="UsernameBox" MaxLength="32" TextInputOptions.AutoCapitalization="False"
+                     TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
+            <TextBlock Classes="muted" FontSize="12" Text="3–32 位字母、数字、点、下划线或连字符" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="密码" />
+            <TextBox Name="PasswordBox" PasswordChar="•" MaxLength="128"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
+                     TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
+            <TextBlock Classes="muted" FontSize="12" Text="8–128 位，区分大小写" />
+          </StackPanel>
+          <StackPanel Name="ConfirmPasswordPanel" IsVisible="False" Spacing="6">
+            <TextBlock Classes="label" Text="确认密码" />
+            <TextBox Name="ConfirmPasswordBox" PasswordChar="•" MaxLength="128"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
+                     TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+    <StackPanel Grid.Row="2" Name="ActionBar" Margin="24,8,24,14" Spacing="10">
+      <TextBlock Name="StatusText" Classes="muted" TextWrapping="Wrap" IsVisible="False" />
+      <Button Name="SubmitButton" Classes="primary" Content="登录" Click="OnSubmitClick" IsEnabled="False" />
+      <Button Name="SignOutButton" Classes="secondary" Content="退出登录" Click="OnSignOutClick" IsVisible="False" />
+    </StackPanel>
+  </Grid>
+</UserControl>

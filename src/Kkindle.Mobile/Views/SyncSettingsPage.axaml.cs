@@ -56,6 +56,7 @@ public partial class SyncSettingsPage : UserControl, IShellPage
             _stored = await _modules.Sync.Service.LoadSettingsAsync(_lifetime.Token);
             _draftSettings = _stored.Settings;
             Present(_stored.Settings);
+            await PresentAccountAsync();
             await PresentLastSyncAsync();
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -109,6 +110,27 @@ public partial class SyncSettingsPage : UserControl, IShellPage
         EncryptionKey = EncryptionKeyBox.Text ?? string.Empty
     });
 
+    private async Task<S3SyncSettings?> PrepareSettingsAsync()
+    {
+        try
+        {
+            var settings = ReadSettings() with { AccountRegion = _modules!.DataRegion };
+            return settings.Provider == SyncProvider.AccountServer
+                ? await _modules.Accounts.Service.CreateSyncSettingsAsync(settings, _lifetime.Token)
+                : settings;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { return null; }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        { ShowStatus(UiText.Localize(exception.Message)); return null; }
+    }
+
+    private async Task PresentAccountAsync()
+    {
+        var account = await _modules!.Accounts.Service.GetStatusAsync(cancellationToken: _lifetime.Token);
+        AccountSummaryText.Text = AccountRegions.DisplayName(account.Region) + " · " + (account.User?.Username ?? "请先登录")
+            + (account.RequiresDataRestart ? "\n区域已切换，请重新打开应用后同步。" : "");
+    }
+
     private async Task PresentLastSyncAsync()
     {
         if (_stored is not { } stored) return;
@@ -155,7 +177,10 @@ public partial class SyncSettingsPage : UserControl, IShellPage
     private async void OnSaveClick(object? sender, RoutedEventArgs e)
     {
         if (_stored is null || _busy) return;
-        var settings = ReadSettings();
+        SetBusy(true);
+        var settings = await PrepareSettingsAsync();
+        SetBusy(false);
+        if (settings is null) return;
         // Like the desktop app, a disabled draft may be saved incomplete.
         if (settings.Enabled && settings.Validate() is { } invalid)
         {
@@ -292,7 +317,10 @@ public partial class SyncSettingsPage : UserControl, IShellPage
     private async void OnTestClick(object? sender, RoutedEventArgs e)
     {
         if (_stored is null || _busy) return;
-        var settings = ReadSettings();
+        SetBusy(true);
+        var settings = await PrepareSettingsAsync();
+        SetBusy(false);
+        if (settings is null) return;
         if (settings.Validate() is { } invalid)
         {
             ShowStatus(UiText.Localize(invalid));
@@ -322,7 +350,11 @@ public partial class SyncSettingsPage : UserControl, IShellPage
     private async void OnSyncNowClick(object? sender, RoutedEventArgs e)
     {
         if (_stored is null || _busy) return;
-        var settings = ReadSettings() with { Enabled = true };
+        SetBusy(true);
+        var settings = await PrepareSettingsAsync();
+        SetBusy(false);
+        if (settings is null) return;
+        settings = settings with { Enabled = true };
         if (settings.Validate() is { } invalid)
         {
             ShowStatus(UiText.Localize(invalid));
@@ -377,18 +409,32 @@ public partial class SyncSettingsPage : UserControl, IShellPage
     private void PresentProvider()
     {
         var webDav = _provider == SyncProvider.WebDav;
-        ProviderS3.Classes.Set("on", !webDav);
+        var account = _provider == SyncProvider.AccountServer;
+        ProviderS3.Classes.Set("on", _provider == SyncProvider.S3);
         ProviderWebDav.Classes.Set("on", webDav);
-        S3Fields.IsVisible = !webDav;
+        ProviderAccount.Classes.Set("on", account);
+        S3Fields.IsVisible = _provider == SyncProvider.S3;
         WebDavFields.IsVisible = webDav;
-        PathStyleRow.IsVisible = !webDav;
+        AccountFields.IsVisible = account;
+        PathStyleRow.IsVisible = _provider == SyncProvider.S3;
+        ExportProfileButton.IsEnabled = !account;
     }
 
-    private void OnProviderClick(object? sender, RoutedEventArgs e)
+    private async void OnProviderClick(object? sender, RoutedEventArgs e)
     {
-        _provider = sender is Button { Name: nameof(ProviderWebDav) } ? SyncProvider.WebDav : SyncProvider.S3;
+        if (_busy) return;
+        _provider = sender is Button { Name: nameof(ProviderAccount) } ? SyncProvider.AccountServer
+            : sender is Button { Name: nameof(ProviderWebDav) } ? SyncProvider.WebDav : SyncProvider.S3;
         PresentProvider();
+        if (_modules is not null)
+        {
+            try { await PresentAccountAsync(); }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { ShowStatus(exception.Message); }
+        }
     }
+
+    private void OnAccountClick(object? sender, RoutedEventArgs e) => _shell?.OpenAccount();
 
     private void OnAdvancedClick(object? sender, RoutedEventArgs e)
     {

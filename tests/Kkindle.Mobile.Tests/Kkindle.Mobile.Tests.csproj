@@ -7,6 +7,7 @@
   <ItemGroup>
     <!-- The iOS bridge contract is plain .NET and can be checked without UIKit. -->
     <Compile Include="../../src/Kkindle.Mobile.iOS/IOSNativeJson.cs" Link="IOSNativeJson.cs" />
+    <Compile Include="../Fixtures/AccountHttpHandler.cs" Link="Fixtures/AccountHttpHandler.cs" />
     <ProjectReference Include="../../src/Kkindle.Mobile/Kkindle.Mobile.csproj" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.1" />
     <PackageReference Include="Avalonia.Skia" Version="12.1.1" />
