@@ -73,6 +73,11 @@ public static class PluginPackage
             if (!files.Contains(page))
                 throw new PluginPackageException($"插件缺少页面文件“{page}”。");
         }
+        foreach (var script in manifest.ScriptPaths)
+        {
+            if (!files.Contains(script))
+                throw new PluginPackageException($"插件缺少脚本文件“{script}”。");
+        }
         if (manifest.Icon is { } icon && !files.Contains(icon))
             throw new PluginPackageException($"插件缺少图标文件“{icon}”。");
         return manifest;

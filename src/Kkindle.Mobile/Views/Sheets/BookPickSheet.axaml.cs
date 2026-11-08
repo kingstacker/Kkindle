@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kkindle.Core;
@@ -29,6 +30,17 @@ public partial class BookPickSheet : UserControl, IFullHeightSheet
     }
 
     public bool FillsHeight => true;
+
+    private void OnToggleSearchClick(object? sender, RoutedEventArgs e)
+    {
+        var open = !FilterBox.IsVisible;
+        if (!open) FilterBox.Text = string.Empty;
+        FilterBox.IsVisible = open;
+        FilterBox.Classes.Set("search-expand", open);
+        if (this.TryFindResource(open ? "IconClose" : "IconSearch", out var icon) && icon is Geometry geometry)
+            FilterIcon.Data = geometry;
+        if (open) FilterBox.Focus();
+    }
 
     private void OnFilterChanged(object? sender, TextChangedEventArgs e)
     {

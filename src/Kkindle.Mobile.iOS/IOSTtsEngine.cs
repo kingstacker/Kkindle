@@ -81,36 +81,87 @@ internal sealed class IOSTtsEngine : ITtsEngine
             };
 
             var audio = new PcmCollector();
+            var callbackGate = new object();
+            var rawMarkers = new List<(int Start, int Length, ulong Offset)>();
+            var bufferCount = 0;
+            var bytesPerFrame = 0;
+            var sampleRate = 0d;
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _speech.WriteUtterance(utterance, buffer =>
+            void ReceiveBuffer(AVAudioBuffer buffer)
             {
-                if (done.Task.IsCompleted)
+                lock (callbackGate)
                 {
-                    return;
-                }
-
-                try
-                {
-                    if (buffer is not AVAudioPcmBuffer pcm || pcm.FrameLength == 0)
+                    if (done.Task.IsCompleted) return;
+                    try
                     {
-                        audio.WriteWav(path);
-                        done.TrySetResult(audio.FrameCount > 0);
-                        return;
+                        if (buffer is not AVAudioPcmBuffer pcm || pcm.FrameLength == 0)
+                        {
+                            audio.WriteWav(path);
+                            done.TrySetResult(audio.FrameCount > 0);
+                            return;
+                        }
+                        bufferCount++;
+                        var sampleBytes = pcm.Format.CommonFormat switch
+                        {
+                            AVAudioCommonFormat.PCMInt16 => 2,
+                            AVAudioCommonFormat.PCMInt32 or AVAudioCommonFormat.PCMFloat32 => 4,
+                            AVAudioCommonFormat.PCMFloat64 => 8,
+                            _ => 0,
+                        };
+                        bytesPerFrame = sampleBytes * (pcm.Format.Interleaved ? (int)pcm.Format.ChannelCount : 1);
+                        sampleRate = pcm.Format.SampleRate;
+                        audio.Append(pcm);
                     }
+                    catch (Exception exception) { done.TrySetException(exception); }
+                }
+            }
 
-                    audio.Append(pcm);
-                }
-                catch (Exception exception)
+            if (OperatingSystem.IsIOSVersionAtLeast(16))
+            {
+                _speech.WriteUtterance(utterance, ReceiveBuffer, markers =>
                 {
-                    done.TrySetException(exception);
-                }
-            });
+                    if (!OperatingSystem.IsIOSVersionAtLeast(16)) return;
+                    lock (callbackGate)
+                    {
+                        if (done.Task.IsCompleted) return;
+                        foreach (var marker in markers)
+                        {
+                            if (marker.Mark != AVSpeechSynthesisMarkerMark.Word) continue;
+                            var range = marker.TextRange;
+                            if ((ulong)range.Location > int.MaxValue || (ulong)range.Length > int.MaxValue) continue;
+                            rawMarkers.Add(((int)range.Location, (int)range.Length, (ulong)marker.ByteSampleOffset));
+                        }
+                    }
+                });
+            }
+            else _speech.WriteUtterance(utterance, ReceiveBuffer);
 
             using var registration = cancellationToken.Register(() => done.TrySetCanceled(cancellationToken));
-            var succeeded = await done.Task.WaitAsync(SynthesisTimeout, cancellationToken);
-            return succeeded && File.Exists(path)
-                ? TtsResult.Success(path, "wav")
-                : TtsResult.Failure("系统语音合成失败，请稍后重试。");
+            bool succeeded;
+            try { succeeded = await done.Task.WaitAsync(SynthesisTimeout, cancellationToken); }
+            catch
+            {
+                lock (callbackGate) done.TrySetCanceled();
+                try { _speech.StopSpeaking(AVSpeechBoundary.Immediate); } catch { }
+                try { File.Delete(path); } catch { }
+                throw;
+            }
+            if (!succeeded || !File.Exists(path)) return TtsResult.Failure("系统语音合成失败，请稍后重试。");
+
+            // Apple does not specify how separate callbacks associate markers with
+            // multiple buffers. Only a single non-empty buffer is unambiguous.
+            IReadOnlyList<TtsTimingMarker>? timing = null;
+            lock (callbackGate)
+            {
+                if (bufferCount == 1 && bytesPerFrame > 0 && sampleRate > 0
+                    && rawMarkers.All(m => m.Offset % (ulong)bytesPerFrame == 0
+                        && m.Offset / (ulong)bytesPerFrame < (ulong)audio.FrameCount))
+                {
+                    timing = rawMarkers.Select(m => new TtsTimingMarker(m.Start, m.Length,
+                        m.Offset / (double)bytesPerFrame / sampleRate)).ToArray();
+                }
+            }
+            return TtsResult.Success(path, "wav") with { TimingMarkers = timing };
         }
         catch (TimeoutException)
         {
@@ -122,7 +173,7 @@ internal sealed class IOSTtsEngine : ITtsEngine
         }
     }
 
-    private static AVSpeechSynthesisVoice? SelectVoice(string requested)
+    internal static AVSpeechSynthesisVoice? SelectVoice(string requested)
     {
         if (!string.IsNullOrWhiteSpace(requested))
         {
@@ -151,7 +202,7 @@ internal sealed class IOSTtsEngine : ITtsEngine
             ?? AVSpeechSynthesisVoice.GetSpeechVoices().FirstOrDefault();
     }
 
-    private static float MapRate(int ratePercent)
+    internal static float MapRate(int ratePercent)
     {
         var multiplier = Math.Clamp(1f + ratePercent / 100f, 0.5f, 2f);
         return Math.Clamp(

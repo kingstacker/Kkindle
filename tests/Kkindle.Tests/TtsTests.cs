@@ -6,6 +6,192 @@ namespace Kkindle.Tests;
 
 public sealed class TtsTests
 {
+    [Fact]
+    public async Task TimingCacheRejectsMissingOrChangedAudio()
+    {
+        var root = CreateTemporaryDirectory();
+        var source = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(source, [1, 2, 3]);
+            var cache = new TtsCacheManager(root);
+            var audio = await cache.WriteAsync("book", "chapter", "text", new TtsOptions(), source);
+            Assert.Null(await cache.ReadTimingAsync(audio));
+            var markers = new[] { new TtsTimingMarker(0, 2, 0.25) };
+            await cache.WriteTimingAsync(audio, source, markers);
+            Assert.Equal(markers, await cache.ReadTimingAsync(audio));
+            await File.WriteAllBytesAsync(audio, [4, 5, 6]);
+            Assert.Null(await cache.ReadTimingAsync(audio));
+            await cache.WriteTimingAsync(audio, source, markers);
+            Assert.Null(await cache.ReadTimingAsync(audio));
+        }
+        finally
+        {
+            File.Delete(source);
+            DeleteTemporaryDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task PlaybackQueueReturnsMarkersOnCacheHit()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new FakeEngine { TimingMarkers = [new(0, 1, 0.2)] };
+            using var queue = new TtsPlaybackQueue(engine, new TtsCacheManager(root));
+            var first = await queue.GetOrCreateAsync(QueueItem("文字"));
+            var second = await queue.GetOrCreateAsync(QueueItem("文字"));
+            Assert.False(first.FromCache);
+            Assert.True(second.FromCache);
+            Assert.Equal(engine.TimingMarkers, first.TimingMarkers);
+            Assert.Equal(engine.TimingMarkers, second.TimingMarkers);
+            Assert.Equal(1, engine.SynthesisCount);
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task CrossPageNavigationFollowsPlaybackClockAndKeepsWholeSentenceHighlighted()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            const string text = "一二三四五六七八。";
+            var engine = new FakeEngine { TimingMarkers = [new(0, 2, 0), new(4, 2, 1)] };
+            var player = new ClockPlayer();
+            var navigated = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var highlights = new List<(int, int)>();
+            var document = new ReaderTtsDocument("chapter", text, 0,
+                (start, length) => { highlights.Add((start, length)); return Task.CompletedTask; },
+                () => { }, MapHighlight: (start, length) => (start + 10, length),
+                PageBreakOffsets: [4],
+                NavigateToSpeechOffset: (offset, token) => { token.ThrowIfCancellationRequested(); navigated.TrySetResult(offset); return Task.CompletedTask; });
+            using var service = new TtsService(engine, new TtsCacheManager(root), player, () => document);
+            await service.StartAsync(new TtsSettings { AutoAdvance = false, PrefetchCount = 0 });
+            await player.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await Task.Delay(100);
+            Assert.False(navigated.Task.IsCompleted);
+            player.Seconds = 1;
+            Assert.Equal(14, await navigated.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+            Assert.Equal(new[] { (10, text.Length) }, highlights);
+            await service.StopAsync();
+            Assert.Single(engine.Requests);
+            Assert.Equal(text, Assert.Single(engine.Requests).Text);
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task ManualNavigationInvalidatesQueuedSpeechPosition()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new FakeEngine { TimingMarkers = [new(0, 1, 0), new(2, 1, 0)] };
+            var player = new ClockPlayer();
+            var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var moved = false;
+            var document = new ReaderTtsDocument("chapter", "一二三四。", 0,
+                (_, _) => Task.CompletedTask, () => { }, PageBreakOffsets: [2],
+                NavigateToSpeechOffset: async (_, token) =>
+                {
+                    dispatched.TrySetResult();
+                    await release.Task;
+                    moved = !token.IsCancellationRequested;
+                    completed.TrySetResult();
+                });
+            using var service = new TtsService(engine, new TtsCacheManager(root), player, () => document);
+            await service.StartAsync(new TtsSettings { AutoAdvance = false, PrefetchCount = 0 });
+            await dispatched.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            service.NotifyManualNavigation();
+            release.TrySetResult();
+            await completed.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.False(moved);
+            await service.StopAsync();
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task LiveSpeechFollowsRangeAfterResumeWithoutGeneratingAudio()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            const string text = "一二三四五六七八。";
+            var engine = new FakeEngine();
+            var player = new LivePlayer();
+            var navigated = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var highlights = new List<(int, int)>();
+            var document = new ReaderTtsDocument("chapter", text, 0,
+                (start, length) => { highlights.Add((start, length)); return Task.CompletedTask; },
+                () => { }, MapHighlight: (start, length) => (start + 10, length),
+                PageBreakOffsets: [4],
+                NavigateToSpeechOffset: (offset, token) => { token.ThrowIfCancellationRequested(); navigated.TrySetResult(offset); return Task.CompletedTask; });
+            using var service = new TtsService(engine, new TtsCacheManager(root), player, () => document);
+            await service.StartAsync(new TtsSettings { AutoAdvance = false, PrefetchCount = 2 });
+            Assert.Equal(text, await player.Started.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+            player.Position = 3;
+            await Task.Delay(100);
+            Assert.False(navigated.Task.IsCompleted);
+            service.PauseOrResume();
+            player.Position = 4;
+            await Task.Delay(100);
+            Assert.False(navigated.Task.IsCompleted);
+            service.PauseOrResume();
+            Assert.Equal(14, await navigated.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+            Assert.Equal(new[] { (10, text.Length) }, highlights);
+            Assert.Equal(0, engine.SynthesisCount);
+            await service.StopAsync();
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task LiveSpeechDoesNotSplitLongSentencesAtRequestLimit()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var text = new string('字', 1400) + "。";
+            var player = new LivePlayer();
+            var document = new ReaderTtsDocument("chapter", text, 0,
+                (_, _) => Task.CompletedTask, () => { }, PageBreakOffsets: [700]);
+            using var service = new TtsService(new FakeEngine(), new TtsCacheManager(root), player, () => document);
+            await service.StartAsync(new TtsSettings { AutoAdvance = false, MaxCharactersPerRequest = 120 });
+            Assert.Equal(text, await player.Started.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+            await service.StopAsync();
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
+    [Fact]
+    public async Task SkipDuringHighlightDoesNotStartObsoleteLiveUtterance()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var engine = new FakeEngine();
+            var player = new LivePlayer();
+            var highlighting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var document = new ReaderTtsDocument("chapter", "第一句。第二句。", 0,
+                async (start, _) => { if (start == 0) { highlighting.TrySetResult(); await release.Task; } }, () => { });
+            using var service = new TtsService(engine, new TtsCacheManager(root), player, () => document);
+            await service.StartAsync(new TtsSettings { AutoAdvance = false });
+            await highlighting.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await service.SkipSegmentAsync(1);
+            release.TrySetResult();
+            Assert.Equal("第二句。", await player.Started.Task.WaitAsync(TimeSpan.FromSeconds(3)));
+            Assert.Equal(0, engine.SynthesisCount);
+            await service.StopAsync();
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
     [Theory]
     [InlineData("edge-tts 7.2.8", false)]
     [InlineData("edge-tts 7.3.0", false)]
@@ -539,6 +725,54 @@ public sealed class TtsTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ServicePreservesLiteralMarkupAndMapsHighlightsToSource(bool startAtSecondSentence)
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            const string text = "前句 &amp; <tag>。下一句。";
+            var secondStart = text.IndexOf("下一", StringComparison.Ordinal);
+            // Model a source gap such as omitted ruby after the first character.
+            var offsets = Enumerable.Range(0, text.Length)
+                .Select(index => index == 0 ? index : index + 3)
+                .ToArray();
+            var snapshot = new ReaderTtsTextSnapshot(text, 0, offsets);
+            var engine = new FakeEngine();
+            var highlights = new List<(int Start, int Length)>();
+            var document = new ReaderTtsDocument(
+                "book:chapter", text, startAtSecondSentence ? secondStart : 0,
+                (start, length) =>
+                {
+                    highlights.Add((start, length));
+                    return Task.CompletedTask;
+                },
+                () => { }, snapshot.MapToSource,
+                PageBreakOffsets: [text.IndexOf("<tag>", StringComparison.Ordinal)]);
+            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = new TtsService(engine, new TtsCacheManager(root), new FakePlayer(), () => document);
+            service.StateChanged += (_, args) =>
+            {
+                if (args.State == TtsPlaybackState.Stopped) stopped.TrySetResult();
+            };
+
+            await service.StartAsync(new TtsSettings { AutoAdvance = false, PrefetchCount = 0 });
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+            var expectedTexts = startAtSecondSentence
+                ? new[] { "下一句。" }
+                : new[] { "前句 &amp; <tag>。", "下一句。" };
+            Assert.Equal(expectedTexts, engine.Requests.Select(request => request.Text));
+            var expectedHighlights = startAtSecondSentence
+                ? new[] { snapshot.MapToSource(secondStart, text.Length - secondStart) }
+                : new[] { snapshot.MapToSource(0, secondStart), snapshot.MapToSource(secondStart, text.Length - secondStart) };
+            Assert.Equal(expectedHighlights, highlights);
+        }
+        finally { DeleteTemporaryDirectory(root); }
+    }
+
     [Fact]
     public async Task ServiceKeepsCrossPageSentenceInOneAudioRequest()
     {
@@ -678,6 +912,7 @@ public sealed class TtsTests
         private int _synthesisCount;
         public System.Collections.Concurrent.ConcurrentQueue<(string Text, TtsOptions Options)> Requests { get; } = new();
         public bool BlockGeneration { get; set; }
+        public IReadOnlyList<TtsTimingMarker>? TimingMarkers { get; set; }
         public TaskCompletionSource GenerationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int SynthesisCount => Volatile.Read(ref _synthesisCount);
@@ -710,7 +945,7 @@ public sealed class TtsTests
                 Path.GetTempPath(),
                 "kkindle-fake-" + Guid.NewGuid().ToString("N") + ".mp3");
             await File.WriteAllBytesAsync(path, [1], cancellationToken);
-            return TtsResult.Success(path);
+            return TtsResult.Success(path) with { TimingMarkers = TimingMarkers };
         }
 
         public void Dispose()
@@ -791,6 +1026,64 @@ public sealed class TtsTests
         }
 
         public void Release() => _release.TrySetResult();
+    }
+
+    private sealed class LivePlayer : ITtsAudioPlayer, ITtsLiveSpeechPlayer
+    {
+        private readonly object _sync = new();
+        private TaskCompletionSource? _finished;
+        public TaskCompletionSource<string> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Position = -1;
+        public bool IsAvailable => true;
+        public string? UnavailableReason => null;
+        public bool IsPaused { get; private set; }
+        public bool TryGetSpeechPosition(out int offset)
+        {
+            lock (_sync)
+            {
+                offset = Volatile.Read(ref Position);
+                return _finished is not null && !IsPaused && offset >= 0;
+            }
+        }
+        public async Task SpeakAsync(string text, TtsOptions options, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TaskCompletionSource finished;
+            lock (_sync) { _finished = finished = new(TaskCreationOptions.RunContinuationsAsynchronously); Position = -1; }
+            Started.TrySetResult(text);
+            try { await finished.Task.WaitAsync(cancellationToken); }
+            finally { lock (_sync) if (ReferenceEquals(_finished, finished)) _finished = null; }
+        }
+        public Task PlayAsync(string audioPath, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Live speech must not play a cached file.");
+        public void Pause() { lock (_sync) IsPaused = true; }
+        public void Resume() { lock (_sync) IsPaused = false; }
+        public void Stop() { lock (_sync) _finished?.TrySetCanceled(); }
+        public void Dispose() => Stop();
+    }
+
+    private sealed class ClockPlayer : ITtsAudioPlayer, ITtsPlaybackClock
+    {
+        private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public double Seconds;
+        public bool IsAvailable => true;
+        public string? UnavailableReason => null;
+        public bool IsPaused { get; private set; }
+        public bool TryGetPosition(out TimeSpan position)
+        {
+            position = TimeSpan.FromSeconds(Volatile.Read(ref Seconds));
+            return !IsPaused && !_finished.Task.IsCompleted;
+        }
+        public async Task PlayAsync(string audioPath, CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await _finished.Task.WaitAsync(cancellationToken);
+        }
+        public void Pause() => IsPaused = true;
+        public void Resume() => IsPaused = false;
+        public void Stop() => _finished.TrySetCanceled();
+        public void Dispose() => Stop();
     }
 
     private sealed class FakePlayer : ITtsAudioPlayer

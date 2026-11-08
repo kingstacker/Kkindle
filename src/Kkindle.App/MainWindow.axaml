@@ -3145,7 +3145,14 @@
                                     <Button x:Name="ImportPluginButton" Content="{DynamicResource Ui.Plugins.Import}" Margin="0,0,8,0" Click="ImportPluginButton_Click" />
                                     <Button x:Name="OpenPluginsFolderButton" Content="{DynamicResource Ui.Plugins.OpenFolder}" Classes="quiet" Click="OpenPluginsFolderButton_Click" />
                                     <Button x:Name="InstallPluginFromFolderButton" Content="{DynamicResource Ui.Plugins.InstallFolder}" Margin="8,0,0,0" Classes="quiet" IsVisible="False" Click="InstallPluginFromFolderButton_Click" />
+                                    <Button x:Name="PluginCatalogButton" Content="{DynamicResource Ui.Plugins.Catalog}" Margin="8,0,0,0" Classes="quiet" Click="PluginCatalogButton_Click" />
                                 </WrapPanel>
+                                <ToggleSwitch x:Name="PluginBackgroundTasksCheck"
+                                              Content="{DynamicResource Ui.Plugins.BackgroundTasks}"
+                                              Classes="settingsToggle"
+                                              IsChecked="True"
+                                              AutomationProperties.Name="{DynamicResource Ui.Plugins.BackgroundTasks}" />
+                                <TextBlock Text="{DynamicResource Ui.Plugins.BackgroundTasksHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                 <ToggleSwitch x:Name="PluginDeveloperModeCheck"
                                               Content="{DynamicResource Ui.Plugins.DeveloperMode}"
                                               Classes="settingsToggle"
@@ -3153,6 +3160,13 @@
                                 <TextBlock Text="{DynamicResource Ui.Plugins.DeveloperModeHint}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                 <TextBlock x:Name="PluginsEmptyText" Text="{DynamicResource Ui.Plugins.Empty}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" IsVisible="False" />
                                 <StackPanel x:Name="PluginsPanel" Spacing="8" />
+                                <!-- Plugin market: entries from plugins/index.json, loaded
+                                     on demand by PluginCatalogButton. -->
+                                <StackPanel x:Name="PluginCatalogSection" Spacing="8" IsVisible="False">
+                                    <TextBlock Text="{DynamicResource Ui.Plugins.CatalogTitle}" FontSize="14" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="PluginCatalogStatusText" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                    <StackPanel x:Name="PluginCatalogPanel" Spacing="8" />
+                                </StackPanel>
                             </StackPanel>
                             <StackPanel Spacing="16" x:Name="SettingsAdvancedSection" IsVisible="False">
                                 <Expander x:Name="SettingsMcpExpander" IsExpanded="False" Classes="settingsExpander" Header="{DynamicResource Ui.Mcp.Title}" Tag="{DynamicResource Ui.Mcp.Description}" AutomationProperties.Name="{DynamicResource Ui.Mcp.Title}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
@@ -3345,19 +3359,7 @@
                                             <TextBlock Text="{DynamicResource Ui.Auto.52D25A9E30BA94F1}" Classes="settingsSectionTitle" TextWrapping="Wrap" />
                                             <TextBlock x:Name="AboutVersionText" Text="{DynamicResource Ui.Auto.DC730979055D9FEF}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <Button x:Name="AboutUserGroupButton" Content="{DynamicResource Ui.About.UserGroup}" Classes="quiet" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Left" MinWidth="0" MinHeight="0" Padding="0" BorderThickness="0" Cursor="Hand" ToolTip.Tip="{DynamicResource Ui.About.CopyUserGroup}" Click="AboutUserGroupButton_Click" />
-                                            <StackPanel Orientation="Horizontal" Spacing="20" Margin="0,4,0,0">
-                                                <Button x:Name="AboutUserManualButton" Content="{DynamicResource Ui.About.UserManual}" Classes="quiet" FontSize="12" MinWidth="0" MinHeight="0" Padding="0" BorderThickness="0" VerticalAlignment="Center" Click="OpenUserManualButton_Click" />
-                                                <TextBlock Text="{DynamicResource Ui.Auto.EF51FA34002047BB}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" HorizontalAlignment="Left" VerticalAlignment="Center" Cursor="Hand">
-                                                        <ToolTip.Tip>
-                                                            <StackPanel Spacing="8">
-                                                                <TextBlock Text="{DynamicResource Ui.Auto.2D1996A469BDAB92}" TextWrapping="Wrap" MaxWidth="236" />
-                                                                <Border Background="#FFFFFFFF" Padding="8">
-                                                                    <Image Source="avares://Kkindle.App/Assets/Images/SupportWechatQr.png" Width="220" Height="220" Stretch="Uniform" />
-                                                                </Border>
-                                                            </StackPanel>
-                                                        </ToolTip.Tip>
-                                                </TextBlock>
-                                            </StackPanel>
+                                            <Button x:Name="AboutUserManualButton" Content="{DynamicResource Ui.About.UserManual}" Classes="quiet" FontSize="12" MinWidth="0" MinHeight="0" Padding="0" BorderThickness="0" Margin="0,4,0,0" HorizontalAlignment="Left" Click="OpenUserManualButton_Click" />
                                         </StackPanel>
                                         <Button x:Name="AboutDeveloperButton" Grid.Column="1" Classes="quiet" Padding="12,9" MinWidth="0" MinHeight="0" BorderThickness="0" Background="{DynamicResource SoftHoverBrush}" CornerRadius="0" VerticalAlignment="Top" Margin="0,26,0,0" Cursor="Hand" ToolTip.Tip="https://github.com/kingstacker" AutomationProperties.Name="kingstacker GitHub" Click="AboutDeveloperButton_Click">
                                             <StackPanel Spacing="4">
@@ -6333,8 +6335,14 @@
                         BorderBrush="{DynamicResource ReaderBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="0">
-                    <Grid RowDefinitions="Auto,Auto,*,Auto"
+                    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto"
                           RowSpacing="9">
+                        <!-- Translators contributed by plugins
+                             (contributes.translators); hidden when none. -->
+                        <WrapPanel x:Name="ReaderTranslationPluginProviders"
+                                   Grid.Row="1"
+                                   IsVisible="False"
+                                   Orientation="Horizontal" />
                         <Grid ColumnDefinitions="*,Auto"
                               ColumnSpacing="8">
                             <TextBlock x:Name="ReaderTranslationProviderText"
@@ -6358,7 +6366,7 @@
                                       IsHitTestVisible="False" />
                             </Button>
                         </Grid>
-                        <Border Grid.Row="1"
+                        <Border Grid.Row="2"
                                 Padding="8"
                                 Background="{DynamicResource ReaderHoverBrush}"
                                 BorderBrush="{DynamicResource ReaderBorderBrush}"
@@ -6373,7 +6381,7 @@
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
-                        <ScrollViewer Grid.Row="2"
+                        <ScrollViewer Grid.Row="3"
                                       MaxHeight="220"
                                       VerticalScrollBarVisibility="Auto">
                             <StackPanel Spacing="4">
@@ -6384,7 +6392,7 @@
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </ScrollViewer>
-                        <Grid Grid.Row="3"
+                        <Grid Grid.Row="4"
                               ColumnDefinitions="*,Auto,Auto"
                               ColumnSpacing="8">
                             <TextBlock x:Name="ReaderTranslationStatusText"
@@ -6528,6 +6536,14 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Border>
+                                </ScrollViewer>
+                            </TabItem>
+                            <!-- Dictionary providers contributed by plugins
+                                 (contributes.dictionaries); hidden when none
+                                 are enabled. Filled by MainWindow.PluginProviders. -->
+                            <TabItem x:Name="ReaderDictionaryPluginTab" IsVisible="False" FontSize="13" MinHeight="24" Padding="9,0,9,2" Header="{DynamicResource Ui.Plugins.DictionaryTab}">
+                                <ScrollViewer Height="310" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="ReaderDictionaryPluginPanel" Margin="10" Spacing="12" />
                                 </ScrollViewer>
                             </TabItem>
                         </TabControl>

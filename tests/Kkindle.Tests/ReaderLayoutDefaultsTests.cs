@@ -17,6 +17,7 @@ public sealed class ReaderLayoutDefaultsTests
         Assert.False(defaults.VerticalWriting);
         Assert.False(defaults.TwoPageMode);
         Assert.False(defaults.ParagraphIndent);
+        Assert.Equal(0, defaults.ParagraphSpacing);
     }
 
     [Fact]
@@ -29,7 +30,7 @@ public sealed class ReaderLayoutDefaultsTests
             BodyPadding: 500,
             FlowMode: 7,
             VerticalWriting: true,
-            TwoPageMode: true);
+            TwoPageMode: true) { ParagraphSpacing = 9 };
 
         var normalized = ReaderLayoutDefaults.Normalize(corrupt);
 
@@ -37,6 +38,7 @@ public sealed class ReaderLayoutDefaultsTests
         Assert.Equal(ReaderLayoutDefaults.MinLineHeight, normalized.LineHeight);
         Assert.Equal(ReaderLayoutDefaults.MinMaxWidth, normalized.MaxWidth);
         Assert.Equal(ReaderLayoutDefaults.MaxBodyPadding, normalized.BodyPadding);
+        Assert.Equal(ReaderLayoutDefaults.MaxParagraphSpacing, normalized.ParagraphSpacing);
         Assert.Equal(1, normalized.FlowMode); // vertical writing always uses pagination
         Assert.True(normalized.VerticalWriting); // user choice is preserved
         Assert.False(normalized.TwoPageMode); // vertical writing only supports a single page
@@ -51,7 +53,7 @@ public sealed class ReaderLayoutDefaultsTests
             MaxWidth: double.NaN,
             BodyPadding: double.NaN,
             FlowMode: 0,
-            VerticalWriting: false);
+            VerticalWriting: false) { ParagraphSpacing = double.NaN };
 
         var normalized = ReaderLayoutDefaults.Normalize(bad);
 
@@ -59,6 +61,7 @@ public sealed class ReaderLayoutDefaultsTests
         Assert.Equal(ReaderLayoutDefaults.DefaultLineHeight, normalized.LineHeight);
         Assert.Equal(ReaderLayoutDefaults.DefaultMaxWidth, normalized.MaxWidth);
         Assert.Equal(ReaderLayoutDefaults.DefaultBodyPadding, normalized.BodyPadding);
+        Assert.Equal(ReaderLayoutDefaults.DefaultParagraphSpacing, normalized.ParagraphSpacing);
     }
 
     [Fact]

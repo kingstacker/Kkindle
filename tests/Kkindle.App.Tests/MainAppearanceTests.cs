@@ -77,7 +77,7 @@ public sealed partial class SettingsTests
         scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = true;
         var reader = new ReaderAppearanceSettings { Theme = ReaderTheme.Green, PaperEnabled = true, FibersEnabled = true };
         scope.Call("ChangeReaderAppearance", reader);
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => !scope.Window.IsVisible);
         var saved = await new AppSettingsStore(scope.Paths).LoadAsync();
         Assert.Equal(AppTheme.Green, saved.MainTheme);

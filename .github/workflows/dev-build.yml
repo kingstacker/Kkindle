@@ -186,6 +186,8 @@ jobs:
             runner: macos-15-intel
     env:
       DEV_VERSION: ${{ needs.prepare.outputs.version }}
+      # Icon Composer assets require Xcode 26; the runner defaults to Xcode 16.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -209,6 +211,8 @@ jobs:
           mkdir -p "$work"
           tar -xzf "artifacts/development-macos/Kkindle-${DEV_VERSION}-${{ matrix.rid }}.tar.gz" -C "$work"
           plutil -lint "$work/Kkindle.app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$work/Kkindle.app/Contents/Info.plist")" = Kkindle
+          xcrun assetutil -Z "$work/Kkindle.app/Contents/Resources/Assets.car"
           codesign --verify --deep --strict "$work/Kkindle.app"
           dmg="artifacts/development-macos/Kkindle-${DEV_VERSION}-${{ matrix.rid }}.dmg"
           hdiutil verify "$dmg"

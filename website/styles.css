@@ -292,15 +292,11 @@ a {
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   width: 26px;
   height: 26px;
-  place-items: center;
-  color: var(--surface);
-  background: var(--ink);
-  font-family: var(--serif);
-  font-size: 17px;
-  line-height: 1;
+  flex: none;
+  object-fit: contain;
 }
 
 .brand-name {

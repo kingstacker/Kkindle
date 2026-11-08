@@ -21,6 +21,8 @@ public partial class MainWindow
         if (!MacTrafficLights.IsSupported) return;
 
         MacDockIcon.Apply();
+        // Refresh the system-rendered icon if macOS switches appearance.
+        ActualThemeVariantChanged += (_, _) => MacDockIcon.Apply();
 
         WindowDecorations = Avalonia.Controls.WindowDecorations.Full;
         ExtendClientAreaToDecorationsHint = true;

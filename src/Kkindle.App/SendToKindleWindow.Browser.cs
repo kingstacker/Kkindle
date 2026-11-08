@@ -27,9 +27,10 @@ public partial class SendToKindleWindow
     /// <summary>
     /// True when this platform can hand the queued files to the Amazon page:
     /// Windows through the WebView2 file-input bridge, macOS and Linux by
-    /// streaming the same batch into the page as real File objects.
+    /// streaming the same batch into the page as real File objects. An injected
+    /// page implements staging itself and does not need a native browser.
     /// </summary>
-    private bool CanStageFiles => _fileInput is not null || (_useNativeBrowser && _webView is not null);
+    private bool CanStageFiles => !_useNativeBrowser || _fileInput is not null || _webView is not null;
 
     private void CreateBrowser(Uri? initialUri = null)
     {

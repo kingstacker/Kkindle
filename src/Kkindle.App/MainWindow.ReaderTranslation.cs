@@ -52,6 +52,7 @@ public partial class MainWindow
         // result. The next selection event will replace it naturally.
         HideReaderSelectionPopup();
         _readerTranslationProvider = provider;
+        _readerTranslationPluginTitle = null;
         _readerTranslationSource = source;
         ReaderTranslationResultText.Text = string.Empty;
         ReaderTranslationSourceText.Text = source;
@@ -239,7 +240,8 @@ public partial class MainWindow
     private void RefreshReaderTranslationLocalizedText()
     {
         if (ReaderTranslationHostPopup is null || !ReaderTranslationHostPopup.IsOpen) return;
-        ReaderTranslationProviderText.Text = GetReaderTranslationProviderLabel(_readerTranslationProvider);
+        ReaderTranslationProviderText.Text = _readerTranslationPluginTitle
+            ?? GetReaderTranslationProviderLabel(_readerTranslationProvider);
         if (_readerTranslationBusy)
             ReaderTranslationStatusText.Text = T("正在翻译…");
     }

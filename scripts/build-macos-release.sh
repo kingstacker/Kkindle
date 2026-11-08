@@ -144,22 +144,27 @@ fi
 cp "$repo_root/LICENSE" "$app_root/Contents/Resources/LICENSE"
 cp "$repo_root/src/Kkindle.App/Assets/Icons/Kkindle.ico" "$app_root/Contents/Resources/Kkindle.ico"
 
-# macOS uses .icns for the bundle/Dock icon. Build one from the rounded
-# macOS-style PNG so the Finder and Dock show the Kkindle icon instead of the
-# generic app icon.
-icon_source="$repo_root/src/Kkindle.App/Assets/Icons/kkindle-dock.png"
-if [[ ! -f "$icon_source" ]]; then
-  echo "Missing app icon source: $icon_source" >&2
+# Compile the layered Icon Composer artwork for Liquid Glass appearances and
+# a complete .icns fallback for older macOS releases. Both must be generated
+# together so their name and geometry match. This requires Xcode 26 or newer.
+icon_source="$repo_root/scripts/macos/Kkindle.icon"
+icon_output="$work_root/compiled-icon"
+if [[ ! -f "$icon_source/icon.json" ]]; then
+  echo "Missing Icon Composer source: $icon_source" >&2
   exit 2
 fi
-iconset="$work_root/Kkindle.iconset"
-mkdir -p "$iconset"
-for size in 16 32 128 256 512; do
-  sips -z "$size" "$size" "$icon_source" --out "$iconset/icon_${size}x${size}.png" >/dev/null
-  double=$((size * 2))
-  sips -z "$double" "$double" "$icon_source" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
-done
-iconutil -c icns "$iconset" -o "$app_root/Contents/Resources/Kkindle.icns"
+mkdir -p "$icon_output"
+xcrun actool --compile "$icon_output" \
+  --platform macosx --target-device mac --minimum-deployment-target 12.0 \
+  --app-icon Kkindle --standalone-icon-behavior all \
+  --output-partial-info-plist "$icon_output/partial.plist" \
+  --warnings --notices --errors "$icon_source"
+if [[ ! -s "$icon_output/Assets.car" || ! -s "$icon_output/Kkindle.icns" ]]; then
+  echo "Icon compilation did not produce both Assets.car and Kkindle.icns; use Xcode 26 or newer." >&2
+  exit 2
+fi
+cp "$icon_output/Assets.car" "$app_root/Contents/Resources/Assets.car"
+cp "$icon_output/Kkindle.icns" "$app_root/Contents/Resources/Kkindle.icns"
 
 # The bundled MTP libraries and their licences are copied with each payload.
 mtp_deps="$repo_root/artifacts/macos-deps/$(payload_arch "${payload_rids[0]}")"
@@ -177,7 +182,8 @@ cat > "$app_root/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>Kkindle</string>
   <key>CFBundleExecutable</key><string>Kkindle</string>
   <key>CFBundleIdentifier</key><string>io.github.kingstacker.kkindle</string>
-  <key>CFBundleIconFile</key><string>Kkindle.icns</string>
+  <key>CFBundleIconFile</key><string>Kkindle</string>
+  <key>CFBundleIconName</key><string>Kkindle</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>

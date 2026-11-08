@@ -55,6 +55,9 @@ public sealed class TtsService : IDisposable
     private TtsSettings _settings = new();
     private TtsAvailability? _availability;
     private CancellationTokenSource? _startCancellation;
+    private CancellationTokenSource? _navigationCancellation;
+    private CancellationTokenSource? _playbackCancellation;
+    private long _navigationVersion;
     private Task? _loopTask;
     private readonly List<Task> _loopTasks = [];
     private Task? _startupTask;
@@ -661,6 +664,7 @@ public sealed class TtsService : IDisposable
         if (state == TtsPlaybackState.Playing)
         {
             _player.Pause();
+            CancelPendingNavigation();
             SetState(
                 TtsPlaybackState.Paused,
                 null,
@@ -698,8 +702,11 @@ public sealed class TtsService : IDisposable
                 _currentSegments.Count - 1);
             if (target == _currentSegmentIndex) return Task.CompletedTask;
             _requestedSegmentIndex = target;
+            try { _playbackCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
         }
 
+        CancelPendingNavigation();
         // Stop only the audio. The session token stays alive so the loop can
         // continue with the requested segment and prefetching is preserved.
         _player.Stop();
@@ -725,8 +732,11 @@ public sealed class TtsService : IDisposable
             _loopTask = null;
             _requestedSegmentIndex = -1;
             stopGeneration = ++_generation;
+            try { _playbackCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
         }
 
+        CancelPendingNavigation();
         try { startup?.Cancel(); }
         catch { }
 
@@ -776,6 +786,102 @@ public sealed class TtsService : IDisposable
             0,
             stopGeneration,
             stopStartGeneration);
+    }
+
+    /// <summary>Call when the user navigates manually, before changing the visible page.</summary>
+    public void NotifyManualNavigation()
+    {
+        Interlocked.Increment(ref _navigationVersion);
+        CancelPendingNavigation();
+    }
+
+    private void CancelPendingNavigation()
+    {
+        lock (_gate)
+        {
+            try { _navigationCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task FollowSpeechPositionAsync(
+        ReaderTtsDocument document, TtsTextSegment segment,
+        IReadOnlyList<TtsTimingMarker>? markers, int generation, long navigationVersion, CancellationToken token)
+    {
+        var livePlayer = _player as ITtsLiveSpeechPlayer;
+        var clock = _player as ITtsPlaybackClock;
+        if (document.NavigateToSpeechOffset is null
+            || document.PageBreakOffsets is not { Count: > 0 } breaks
+            || (livePlayer is null && (clock is null || markers is not { Count: > 0 }))) return;
+
+        if (livePlayer is null)
+        {
+            // Reject corrupt or ambiguous metadata rather than guessing a position.
+            var previousStart = -1;
+            var previousTime = -1d;
+            foreach (var marker in markers!)
+            {
+                if (marker.Start < previousStart || marker.Start < 0 || marker.Length <= 0
+                    || (long)marker.Start + marker.Length > segment.Text.Length
+                    || !double.IsFinite(marker.Seconds) || marker.Seconds < previousTime || marker.Seconds < 0)
+                    return;
+                previousStart = marker.Start;
+                previousTime = marker.Seconds;
+            }
+        }
+
+        var targets = breaks.Where(offset => offset > segment.Start && offset < segment.End)
+            .Distinct().OrderBy(offset => offset)
+            .Select(offset => (Offset: offset, Marker: livePlayer is null
+                ? markers!.FirstOrDefault(m => m.Start >= offset - segment.Start) : null))
+            .Where(target => livePlayer is not null || target.Marker is not null).ToArray();
+        for (var targetIndex = 0; targetIndex < targets.Length; targetIndex++)
+        {
+            var target = targets[targetIndex];
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!IsGenerationCurrent(generation) || HasPendingSegmentRequest(generation)
+                    || navigationVersion != Volatile.Read(ref _navigationVersion)) return;
+                if (livePlayer is not null
+                    ? livePlayer.TryGetSpeechPosition(out var offset) && offset >= target.Offset - segment.Start
+                    : clock!.TryGetPosition(out var position) && position.TotalSeconds >= target.Marker!.Seconds)
+                    break;
+                await Task.Delay(40, token).ConfigureAwait(false);
+            }
+
+            var current = _documentAccessor();
+            if (current is null || current.Key != document.Key) return;
+            var mapped = document.MapHighlight?.Invoke(target.Offset, 1) ?? (target.Offset, 1);
+            using var request = CancellationTokenSource.CreateLinkedTokenSource(token);
+            lock (_gate)
+            {
+                if (_disposed || generation != _generation || _requestedSegmentIndex >= 0
+                    || navigationVersion != Volatile.Read(ref _navigationVersion)) return;
+                if (_state == TtsPlaybackState.Paused)
+                {
+                    targetIndex--;
+                    continue;
+                }
+                if (_state != TtsPlaybackState.Playing) return;
+                _navigationCancellation = request;
+            }
+            try
+            {
+                await document.NavigateToSpeechOffset(mapped.Item1, request.Token).WaitAsync(request.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (request.IsCancellationRequested)
+            {
+                if (token.IsCancellationRequested) throw;
+                targetIndex--; // A pause can cancel a UI dispatch; retry after resume.
+            }
+            catch { return; }
+            finally
+            {
+                lock (_gate)
+                    if (ReferenceEquals(_navigationCancellation, request)) _navigationCancellation = null;
+            }
+        }
     }
 
     private bool IsStartupCurrent(
@@ -848,10 +954,10 @@ public sealed class TtsService : IDisposable
                     throw new InvalidOperationException("当前阅读位置之后没有可朗读的正文。");
                 }
 
-                var segments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
+                var segments = TtsTextSegmenter.SplitPlainTextSentences(
                     document.Text,
-                    document.PageBreakOffsets,
-                    settings.MaxCharactersPerRequest);
+                    settings.MaxCharactersPerRequest,
+                    preserveLongSentences: _player is ITtsLiveSpeechPlayer);
                 if (segments.Count == 0)
                     throw new InvalidOperationException("当前阅读位置之后没有可朗读的正文。");
 
@@ -877,6 +983,7 @@ public sealed class TtsService : IDisposable
 
                     SetCurrentSegment(index, segments.Count, generation);
                     var segment = segments[index];
+                    var navigationVersion = Volatile.Read(ref _navigationVersion);
                     var options = settings.ToOptions();
                     var item = new TtsQueueItem(
                         document.BookKey ?? document.Key,
@@ -890,42 +997,48 @@ public sealed class TtsService : IDisposable
                         index + 1,
                         segments.Count,
                         generation);
-                    var audioTask = _queue!.GetOrCreateAsync(
-                        item,
-                        cancellationToken);
-                    _queue.Prefetch(
-                        segments
-                            .Skip(index + 1)
-                            .Take(settings.PrefetchCount)
-                            .Select(next => new TtsQueueItem(
-                                document.BookKey ?? document.Key,
-                                document.ChapterKey ?? document.Key,
-                                next,
-                                options)),
-                        cancellationToken);
-
-                    // Start the next-chapter request after the current item
-                    // and its local look-ahead have entered the queue. This
-                    // preserves first-sentence latency while allowing the
-                    // next chapter to be ready when the transition arrives.
-                    if (!nextChapterPrefetchStarted
-                        && selection is null
-                        && settings.PrefetchCount > 0
-                        && _prefetchDocumentAccessor is not null)
+                    TtsResult? result = null;
+                    var livePlayer = _player as ITtsLiveSpeechPlayer;
+                    if (livePlayer is null)
                     {
-                        nextChapterPrefetchStarted = true;
-                        _ = ObserveNextChapterPrefetchAsync(
-                            document,
-                            settings,
+                        var audioTask = _queue!.GetOrCreateAsync(
+                            item,
                             cancellationToken);
-                    }
+                        _queue.Prefetch(
+                            segments
+                                .Skip(index + 1)
+                                .Take(settings.PrefetchCount)
+                                .Select(next => new TtsQueueItem(
+                                    document.BookKey ?? document.Key,
+                                    document.ChapterKey ?? document.Key,
+                                    next,
+                                    options)),
+                            cancellationToken);
 
-                    var result = await audioTask.ConfigureAwait(false);
-                    if (!IsGenerationCurrent(generation)) return;
-                    if (!result.IsSuccess || string.IsNullOrWhiteSpace(result.AudioPath))
-                    {
-                        throw new InvalidOperationException(
-                            result.ErrorMessage ?? "TTS 没有生成音频。");
+                        // Start the next-chapter request after the current item
+                        // and its local look-ahead have entered the queue. This
+                        // preserves first-sentence latency while allowing the
+                        // next chapter to be ready when the transition arrives.
+                        if (!nextChapterPrefetchStarted
+                            && selection is null
+                            && settings.PrefetchCount > 0
+                            && _prefetchDocumentAccessor is not null)
+                        {
+                            nextChapterPrefetchStarted = true;
+                            _ = ObserveNextChapterPrefetchAsync(
+                                document,
+                                settings,
+                                cancellationToken);
+                        }
+
+                        result = await audioTask.ConfigureAwait(false);
+                        if (!IsGenerationCurrent(generation)) return;
+                        if (!result.IsSuccess || string.IsNullOrWhiteSpace(result.AudioPath))
+                        {
+                            throw new InvalidOperationException(
+                                result.ErrorMessage ?? "TTS 没有生成音频。");
+                        }
+
                     }
 
                     if (TryTakeRequestedSegment(generation, out var requestedIndex))
@@ -954,25 +1067,43 @@ public sealed class TtsService : IDisposable
                             highlight.Length)
                         .ConfigureAwait(false);
 
+                    using var playbackCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    lock (_gate)
+                    {
+                        if (_disposed || generation != _generation) return;
+                        if (_requestedSegmentIndex >= 0) playbackCancellation.Cancel();
+                        else _playbackCancellation = playbackCancellation;
+                    }
                     SetState(
                         TtsPlaybackState.Playing,
                         null,
                         index + 1,
                         segments.Count,
                         generation);
+                    using var positionCancellation = CancellationTokenSource.CreateLinkedTokenSource(playbackCancellation.Token);
+                    var positionTask = FollowSpeechPositionAsync(
+                        highlightDocument, segment, result?.TimingMarkers, generation, navigationVersion, positionCancellation.Token);
                     try
                     {
-                        await _player!.PlayAsync(
-                                result.AudioPath,
-                                cancellationToken)
-                            .ConfigureAwait(false);
+                        if (livePlayer is not null)
+                            await livePlayer.SpeakAsync(segment.Text, options, playbackCancellation.Token).ConfigureAwait(false);
+                        else
+                            await _player!.PlayAsync(result!.AudioPath!, playbackCancellation.Token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
-                        when (!cancellationToken.IsCancellationRequested
-                            && HasPendingSegmentRequest(generation))
+                    catch (OperationCanceledException) when (playbackCancellation.IsCancellationRequested)
                     {
-                        // SkipSegmentAsync intentionally stops only the
-                        // current player, leaving the service session alive.
+                        if (!IsGenerationCurrent(generation)) return;
+                        if (cancellationToken.IsCancellationRequested || !HasPendingSegmentRequest(generation)) throw;
+                        // SkipSegmentAsync intentionally stops only the current player.
+                    }
+                    finally
+                    {
+                        positionCancellation.Cancel();
+                        CancelPendingNavigation();
+                        lock (_gate)
+                            if (ReferenceEquals(_playbackCancellation, playbackCancellation)) _playbackCancellation = null;
+                        try { await positionTask.ConfigureAwait(false); }
+                        catch (OperationCanceledException) { }
                     }
 
                     if (TryTakeRequestedSegment(generation, out requestedIndex))
@@ -1099,9 +1230,8 @@ public sealed class TtsService : IDisposable
                 return;
             }
 
-            var nextSegments = TtsTextSegmenter.SplitSentencesAtPageBreaks(
+            var nextSegments = TtsTextSegmenter.SplitPlainTextSentences(
                 nextDocument.Text,
-                nextDocument.PageBreakOffsets,
                 settings.MaxCharactersPerRequest);
             var options = settings.ToOptions();
             _queue?.Prefetch(
@@ -1301,6 +1431,8 @@ public sealed class TtsService : IDisposable
             _generation++;
             _loopTask = null;
             _requestedSegmentIndex = -1;
+            try { _playbackCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
 
             pendingOperations = _loopTasks
                 .Concat(_startupTask is null ? [] : [_startupTask])

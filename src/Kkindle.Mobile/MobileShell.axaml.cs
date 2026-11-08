@@ -42,7 +42,7 @@ public partial class MobileShell : UserControl
         public static readonly TimeSpan AfterReading = TimeSpan.Zero;
     }
 
-    private static readonly TimeSpan SheetCloseDelay = TimeSpan.FromMilliseconds(230);
+    private static readonly TimeSpan SheetCloseDelay = TimeSpan.FromMilliseconds(380);
     private static readonly TimeSpan ToastDuration = TimeSpan.FromSeconds(2);
 
     private readonly ApplicationModules _modules;
@@ -55,6 +55,7 @@ public partial class MobileShell : UserControl
     private Action? _sheetDismissed;
     private bool _sheetFillsHeight;
     private bool _backupBlocked;
+    private DispatcherTimer? _sheetControlTimer;
 
     /// <summary>Design-time only: keeps the XAML previewer and runtime loader working.</summary>
     public MobileShell()
@@ -81,7 +82,10 @@ public partial class MobileShell : UserControl
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (SheetScope.IsVisible && SheetPanel.Classes.Contains("open"))
+                    {
                         SetPageNativeControlsObscured(true, checkCoverage: true);
+                        UpdateSheetNativeControlClipping();
+                    }
                 }, DispatcherPriority.Render);
         };
         if (_services.TabBar is { } tabBar)
@@ -103,6 +107,14 @@ public partial class MobileShell : UserControl
     public MobilePreferencesStore Preferences { get; }
 
     public MobileServices Services => _services;
+
+    /// <summary>Shared services for platform frontends that own their own view hierarchy.</summary>
+    public ApplicationModules Modules => _modules;
+
+    public Func<string, string, string, Task<bool>>? NativeConfirmation { get; set; }
+    public Action<string>? NativeToast { get; set; }
+    public Action? NativeRestartRequired { get; set; }
+    public Action? NativeLibraryChanged { get; set; }
 
     /// <summary>
     /// Developer mode holds features outside the normal product.
@@ -137,6 +149,13 @@ public partial class MobileShell : UserControl
         IsDeveloperMode = enabled;
         DeveloperModeChanged?.Invoke(this, EventArgs.Empty);
         ShowToast(enabled ? "已进入开发者模式" : "已退出开发者模式");
+    }
+
+    public bool TryToggleDeveloperMode(string? password)
+    {
+        if (!IsDeveloperMode && password != BookDetailEditing.DeveloperPassword) return false;
+        SetDeveloperMode(!IsDeveloperMode);
+        return true;
     }
 
     public CoverCache Covers { get; }
@@ -213,9 +232,25 @@ public partial class MobileShell : UserControl
     {
         foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSegmentGroup>())
             group.SetObscured(blocked);
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSwitchGroup>())
+            group.SetObscured(blocked);
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSliderGroup>())
+            group.SetObscured(blocked);
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeMenuButton>())
+            group.SetObscured(blocked);
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeActionButton>())
+            group.SetObscured(blocked);
         if (blocked)
         {
             foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSegmentGroup>())
+                group.SetObscured(true);
+            foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSwitchGroup>())
+                group.SetObscured(true);
+            foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSliderGroup>())
+                group.SetObscured(true);
+            foreach (var group in PageHost.GetVisualDescendants().OfType<NativeMenuButton>())
+                group.SetObscured(true);
+            foreach (var group in PageHost.GetVisualDescendants().OfType<NativeActionButton>())
                 group.SetObscured(true);
         }
         else
@@ -226,6 +261,7 @@ public partial class MobileShell : UserControl
 
     private void ShowRestartRequired(bool recoveryIncomplete = false)
     {
+        NativeRestartRequired?.Invoke();
         _backupBlocked = true;
         BackupBlockerTitle.Text = recoveryIncomplete ? "恢复未完成" : "需要重新启动";
         BackupBlockerText.Text = recoveryIncomplete
@@ -296,7 +332,11 @@ public partial class MobileShell : UserControl
             if (stored.Settings is not { Enabled: true, AutomaticSyncEnabled: true, IsConfigured: true }) return;
             var result = await Sync.RunAsync(stored, null, (_, _) => Task.FromResult(false), CancellationToken.None, operation);
             if (result is null) ShowToast("同步发现待确认的删除，请到 S3 同步页处理");
-            else if (result.Changed && CurrentPage is LibraryPage library) await library.ReloadAsync();
+            else if (result.Changed)
+            {
+                NativeLibraryChanged?.Invoke();
+                if (CurrentPage is LibraryPage library) await library.ReloadAsync();
+            }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -360,27 +400,57 @@ public partial class MobileShell : UserControl
         _sheetDismissed = onDismissed;
         var version = ++_sheetVersion;
         SheetTitle.Text = title;
+        SheetScrim.Classes.Set("reader-preview", content is ReaderSettingsSheet);
         SheetBody.Content = content;
         SheetScope.RequestedThemeVariant = variant ?? ThemeVariant.Default;
-        SheetPanel.MaxHeight = Math.Max(320, Bounds.Height * 0.82);
+        SheetPanel.MaxHeight = content is ReaderSettingsSheet
+            ? Math.Max(200, Bounds.Height * 0.45)
+            : Math.Max(320, Bounds.Height * 0.82);
         _sheetFillsHeight = content is IFullHeightSheet { FillsHeight: true };
         SheetPanel.Height = _sheetFillsHeight ? SheetPanel.MaxHeight : double.NaN;
         // The shell is inset by the safe area; the scrim and sheet reach the screen edges.
         var safe = Padding;
         SheetScope.Margin = new Thickness(-safe.Left, -safe.Top, -safe.Right, -safe.Bottom);
         SheetPanel.Padding = new Thickness(0, 0, 0, safe.Bottom);
-        _services.TabBar?.Update(false, (int)_tab);
+        if (_services.TabBar is not ISheetOccludingTabBar || _history.Count != 1)
+            _services.TabBar?.Update(false, (int)_tab);
         SetPageNativeControlsObscured(true);
         SheetScope.IsVisible = true;
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (version != _sheetVersion || !SheetScope.IsVisible) return;
-            SetPageNativeControlsScrim(true);
-            SheetScrim.Classes.Add("open");
-            SheetPanel.Classes.Add("open");
-        }, DispatcherPriority.Render);
+        StartSheetControlTracking();
+        AnimateSheetOpenSoon(version);
+        RevealSheetCoverageSoon(version);
         RefreshVirtualizedListsAfterOpen(version);
     }
+
+    /// <summary>
+    /// Adds the open classes only after the closed state has painted once.
+    /// Applying them in the same frame the scope becomes visible leaves the
+    /// transition with no starting value, so the sheet snapped into place.
+    /// </summary>
+    private async void AnimateSheetOpenSoon(int version)
+    {
+        await Task.Delay(24);
+        if (version != _sheetVersion || !SheetScope.IsVisible) return;
+        SheetScrim.Classes.Add("open");
+        SheetPanel.Classes.Add("open");
+        SetPageNativeControlsScrim(true);
+    }
+
+    /// <summary>
+    /// The sheet panel slides over native page controls, which are drawn above
+    /// everything Avalonia paints. Hide exactly the ones the settled panel
+    /// covers as soon as its layout exists, before the slide reaches them.
+    /// </summary>
+    private async void RevealSheetCoverageSoon(int version)
+    {
+        await Task.Delay(60);
+        if (version != _sheetVersion || !SheetScope.IsVisible) return;
+        SetPageNativeControlsObscured(true, checkCoverage: true);
+    }
+
+    /// <summary>Updates a live sheet's theme without recreating its contents.</summary>
+    public void SetSheetTheme(ThemeVariant? variant) =>
+        SheetScope.RequestedThemeVariant = variant ?? ThemeVariant.Default;
 
     /// <summary>
     /// A virtualized list measures what is visible while the sheet is still
@@ -392,6 +462,8 @@ public partial class MobileShell : UserControl
         await Task.Delay(SheetCloseDelay);
         if (version != _sheetVersion) return;
         SetPageNativeControlsObscured(true, checkCoverage: true);
+        UpdateSheetNativeControlClipping();
+        _sheetControlTimer?.Stop();
         foreach (var panel in SheetBody.GetVisualDescendants().OfType<VirtualizingStackPanel>())
             panel.InvalidateMeasure();
     }
@@ -399,6 +471,8 @@ public partial class MobileShell : UserControl
     /// <summary>Resolves false when the sheet is closed any way other than confirming.</summary>
     public Task<bool> ConfirmAsync(string title, string message, string confirmText)
     {
+        if (NativeConfirmation is { } native)
+            return native(title, message, confirmText);
         var decision = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         ShowSheet(title, new PromptSheet(message, confirmText, _ =>
         {
@@ -423,6 +497,11 @@ public partial class MobileShell : UserControl
         var version = ++_sheetVersion;
         foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSegmentGroup>())
             group.SetObscured(true);
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSwitchGroup>())
+            group.SetObscured(true);
+        foreach (var group in SheetBody.GetVisualDescendants().OfType<NativeSliderGroup>())
+            group.SetObscured(true);
+        StartSheetControlTracking();
         SetPageNativeControlsScrim(false);
         SheetScrim.Classes.Remove("open");
         SheetPanel.Classes.Remove("open");
@@ -431,6 +510,15 @@ public partial class MobileShell : UserControl
         SheetScope.IsVisible = false;
         SheetBody.Content = null;
         SetPageNativeControlsObscured(false);
+        _sheetControlTimer?.Stop();
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSliderGroup>())
+            group.SetSheetClipRect(null);
+        if (_services.TabBar is ISheetOccludingTabBar occludingTabBar)
+        {
+            occludingTabBar.SetSheetOcclusion(null);
+            _services.TabBar.Update(!_backupBlocked && _history.Count == 1, (int)_tab);
+            return;
+        }
         // Let the rendered page replace the sheet before showing the native
         // glass bar, whose backdrop samples the last composited frame.
         await Task.Delay(50);
@@ -438,16 +526,53 @@ public partial class MobileShell : UserControl
         _services.TabBar?.Update(!_backupBlocked && _history.Count == 1, (int)_tab);
     }
 
+    private void StartSheetControlTracking()
+    {
+        var trackTabBar = _services.TabBar is ISheetOccludingTabBar && _history.Count == 1;
+        if (!trackTabBar && !PageHost.GetVisualDescendants().OfType<NativeSliderGroup>()
+                .Any(group => group.SupportsSheetClipping)) return;
+        _sheetControlTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _sheetControlTimer.Tick -= OnSheetControlTick;
+        _sheetControlTimer.Tick += OnSheetControlTick;
+        _sheetControlTimer.Start();
+    }
+
+    private void OnSheetControlTick(object? sender, EventArgs e)
+    {
+        if (!SheetScope.IsVisible) return;
+        UpdateSheetNativeControlClipping();
+    }
+
+    private void UpdateSheetNativeControlClipping()
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null || SheetPanel.TranslatePoint(default, topLevel) is not { } origin) return;
+        if (_history.Count == 1 && _services.TabBar is ISheetOccludingTabBar tabBar)
+            tabBar.SetSheetOcclusion(new Rect(origin, SheetPanel.Bounds.Size));
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSliderGroup>())
+        {
+            if (!group.SupportsSheetClipping || SheetPanel.TranslatePoint(default, group) is not { } relative)
+                continue;
+            var height = Math.Clamp(relative.Y, 0, group.Bounds.Height);
+            group.SetSheetClipRect(height >= group.Bounds.Height
+                ? null
+                : new Rect(0, 0, group.Bounds.Width, height));
+        }
+    }
+
     /// <summary>
-    /// A hosted native segment is a platform view above the sheet. Block its
-    /// interaction while the sheet is open and swap covered controls for the
-    /// Avalonia fallback. Coverage is trusted once the sheet has been laid out.
+    /// Hosted native controls sit above the Avalonia sheet. Controls above the
+    /// panel keep their native look and get a matching dimming overlay; only
+    /// controls the settled panel actually covers are hidden.
     /// </summary>
     private void SetPageNativeControlsObscured(bool obscured, bool checkCoverage = false)
     {
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeMenuButton>())
+            group.SetObscured(obscured);
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeActionButton>())
+            group.SetObscured(obscured);
         Rect? sheetBounds = null;
-        if (checkCoverage && SheetPanel.TranslatePoint(default, this) is { } origin)
-            sheetBounds = new Rect(origin, SheetPanel.Bounds.Size);
+        if (checkCoverage) sheetBounds = SettledSheetBounds();
 
         foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSegmentGroup>())
         {
@@ -456,6 +581,36 @@ public partial class MobileShell : UserControl
                 && sheet.Intersects(new Rect(groupOrigin, group.Bounds.Size));
             group.SetSheetObscured(obscured, covered);
         }
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSwitchGroup>())
+        {
+            var covered = sheetBounds is { } sheet
+                && group.TranslatePoint(default, this) is { } groupOrigin
+                && sheet.Intersects(new Rect(groupOrigin, group.Bounds.Size));
+            group.SetSheetObscured(obscured, covered);
+        }
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSliderGroup>())
+        {
+            var covered = sheetBounds is { } sheet
+                && group.TranslatePoint(default, this) is { } groupOrigin
+                && sheet.Intersects(new Rect(groupOrigin, group.Bounds.Size));
+            group.SetSheetObscured(obscured, covered);
+        }
+    }
+
+    /// <summary>
+    /// The sheet's resting rectangle. During the slide the render transform
+    /// still points off-screen, but coverage must use where it will land so a
+    /// hosted native control never floats over the rising panel.
+    /// </summary>
+    private Rect? SettledSheetBounds()
+    {
+        var height = SheetPanel.Bounds.Height;
+        if (height <= 0)
+            return SheetPanel.TranslatePoint(default, this) is { } origin
+                ? new Rect(origin, SheetPanel.Bounds.Size)
+                : null;
+        var bottom = Bounds.Height + Padding.Bottom;
+        return new Rect(0, bottom - height, Bounds.Width, height);
     }
 
     private void SetPageNativeControlsScrim(bool visible)
@@ -464,12 +619,41 @@ public partial class MobileShell : UserControl
         var color = brush?.Color ?? Color.FromArgb(0x59, 0, 0, 0);
         if (brush is not null && brush.Opacity < 1)
             color = Color.FromArgb((byte)Math.Round(color.A * brush.Opacity), color.R, color.G, color.B);
+        // The scrim border fades as a whole and is lighter behind the reader
+        // settings sheet; the hosted overlay must match it exactly.
+        var elementOpacity = SheetScrim.Classes.Contains("open")
+            ? (SheetScrim.Classes.Contains("reader-preview") ? 0.2 : 1)
+            : 0;
+        color = Color.FromArgb((byte)Math.Round(color.A * elementOpacity), color.R, color.G, color.B);
+        // A single overlay above the hosted view dims its opaque parts (the
+        // selected pill); the backdrop keeps the glass sample undimmed so the
+        // same overlay does not darken the translucent track a second time.
+        var backdrop = PageBackdropColor();
         foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSegmentGroup>())
-            group.SetSheetScrim(visible ? color : null);
+            group.SetSheetScrim(visible ? color : null, backdrop);
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSwitchGroup>())
+            group.SetSheetScrim(visible ? color : null, backdrop);
+        foreach (var group in PageHost.GetVisualDescendants().OfType<NativeSliderGroup>())
+            group.SetSheetScrim(visible ? color : null, backdrop);
+    }
+
+    private Color PageBackdropColor()
+    {
+        if (this.TryFindResource(PageBackgroundKey, ActualThemeVariant, out var value)
+            && value is ISolidColorBrush brush && brush.Color.A > 0)
+            return brush.Color;
+        return ActualThemeVariant == ThemeVariant.Dark
+            ? Color.FromRgb(0x12, 0x12, 0x12)
+            : Colors.White;
     }
 
     public async void ShowToast(string message)
     {
+        if (NativeToast is { } native)
+        {
+            native(message);
+            return;
+        }
         var version = ++_toastVersion;
         ToastText.Text = message;
         Toast.IsVisible = true;

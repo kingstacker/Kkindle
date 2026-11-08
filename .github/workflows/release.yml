@@ -218,6 +218,8 @@ jobs:
             runner: macos-15-intel
     env:
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      # Icon Composer assets require Xcode 26; the runner defaults to Xcode 16.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -312,6 +314,8 @@ jobs:
           mkdir -p "$work"
           tar -xzf "artifacts/macos/Kkindle-${{ steps.version.outputs.version }}-${{ matrix.rid }}.tar.gz" -C "$work"
           plutil -lint "$work/Kkindle.app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$work/Kkindle.app/Contents/Info.plist")" = Kkindle
+          xcrun assetutil -Z "$work/Kkindle.app/Contents/Resources/Assets.car"
           codesign --verify --deep --strict "$work/Kkindle.app"
           dmg="artifacts/macos/Kkindle-${{ steps.version.outputs.version }}-${{ matrix.rid }}.dmg"
           hdiutil verify "$dmg"

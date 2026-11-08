@@ -62,7 +62,10 @@ internal sealed class PluginWindow : Window, IPluginUiHost
         Func<bool> networkEnabled,
         bool enableDevTools,
         IPluginBookTaskHost? bookTasks = null,
-        ReaderDataService? readerData = null)
+        ReaderDataService? readerData = null,
+        IPluginContentHost? content = null,
+        IPluginAiHost? ai = null,
+        IPluginReaderHost? reader = null)
     {
         _plugin = plugin;
         _pagePath = pagePath;
@@ -81,7 +84,10 @@ internal sealed class PluginWindow : Window, IPluginUiHost
             this,
             plugin.Manifest.UsesSecrets ? new PluginSecrets(dataDirectory, secretProtector) : null,
             bookTasks: bookTasks,
-            readerData: readerData);
+            readerData: readerData,
+            content: content,
+            ai: ai,
+            reader: reader);
 
         _baseTitle = string.IsNullOrWhiteSpace(pageTitle) || pageTitle == plugin.Manifest.Name
             ? plugin.Manifest.Name

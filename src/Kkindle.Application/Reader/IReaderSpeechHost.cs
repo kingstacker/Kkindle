@@ -9,4 +9,5 @@ public interface IReaderSpeechHost : IReaderHost
     ReaderTtsTextSnapshot? GetSpeechText();
     void SetSpeechHighlight(int start, int length);
     void ClearSpeechHighlight();
+    void NavigateToSpeechOffset(int offset) { }
 }

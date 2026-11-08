@@ -247,14 +247,27 @@ public partial class LibraryPage : UserControl
 
     private void OnSearchClick(object? sender, RoutedEventArgs e)
     {
-        SearchRow.IsVisible = true;
+        if (SearchBox.IsVisible)
+        {
+            OnCloseSearchClick(sender, e);
+            return;
+        }
+        MastheadTabs.IsVisible = false;
+        SearchBox.IsVisible = true;
+        SearchBox.Classes.Add("search-expand");
+        if (this.TryFindResource("IconClose", out var icon) && icon is Geometry geometry)
+            SearchIcon.Data = geometry;
         SearchBox.Focus();
     }
 
     private void OnCloseSearchClick(object? sender, RoutedEventArgs e)
     {
         SearchBox.Text = string.Empty;
-        SearchRow.IsVisible = false;
+        SearchBox.Classes.Remove("search-expand");
+        SearchBox.IsVisible = false;
+        MastheadTabs.IsVisible = true;
+        if (this.TryFindResource("IconSearch", out var icon) && icon is Geometry geometry)
+            SearchIcon.Data = geometry;
     }
 
     private void OnFilterClick(object? sender, RoutedEventArgs e)
@@ -316,7 +329,7 @@ public partial class LibraryPage : UserControl
         CollectionsPanel.IsVisible = collections;
         // Search filters books; in the folder view it would have nothing to act on.
         SearchButton.IsVisible = !collections;
-        if (collections && SearchRow.IsVisible) OnCloseSearchClick(null, new RoutedEventArgs());
+        if (collections && SearchBox.IsVisible) OnCloseSearchClick(null, new RoutedEventArgs());
     }
 
     private void OnCollectionTapped(object? sender, TappedEventArgs e)
@@ -368,7 +381,6 @@ public partial class LibraryPage : UserControl
         try
         {
             ImportButton.IsEnabled = false;
-            Status("请选择书籍文件，正在读取所选文件…");
             files = await _services.ImportSource.PickFilesAsync();
             if (files.Count == 0)
             {

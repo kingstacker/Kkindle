@@ -1,6 +1,6 @@
 namespace Kkindle.Mobile;
 
-internal static class MobileFormat
+public static class MobileFormat
 {
     public static string Size(long bytes)
     {

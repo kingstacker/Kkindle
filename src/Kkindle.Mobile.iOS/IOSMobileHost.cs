@@ -24,7 +24,7 @@ internal static class IOSMobileHost
             // until replaced by an in-process converter.
             new UnavailableBookFormatConverter(),
             new IOSFileImportSource(),
-            CreateTtsEngine: () => new IOSTtsEngine(Path.Combine(root, "tts")),
+            CreateTtsEngine: () => new IOSTtsEngine(Path.Combine(Path.GetTempPath(), "Kkindle", "tts")),
             CreateTtsPlayer: () => new IOSTtsAudioPlayer(),
             TabBar: tabBar,
             BackgroundWork: new IOSBackgroundWork(),

@@ -109,4 +109,6 @@ public sealed record ReaderTtsDocument(
     /// retained for reader synchronization; TTS must not split a sentence at
     /// these visual boundaries.
     /// </summary>
-    IReadOnlyList<int>? PageBreakOffsets = null);
+    IReadOnlyList<int>? PageBreakOffsets = null,
+    // The callback must check the token on the UI thread before navigating.
+    Func<int, CancellationToken, Task>? NavigateToSpeechOffset = null);

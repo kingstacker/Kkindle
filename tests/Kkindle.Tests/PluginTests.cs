@@ -319,6 +319,85 @@ public sealed class PluginTests
         Assert.Throws<PluginPackageException>(() => manager.InstallFromDirectory(empty));
     }
 
+    private static string WriteBundledPlugin(string bundledRoot, string version, string page)
+    {
+        var folder = Path.Combine(bundledRoot, "test-plugin");
+        if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        Directory.CreateDirectory(Path.Combine(folder, "ui"));
+        File.WriteAllText(
+            Path.Combine(folder, "manifest.json"),
+            ValidManifest.Replace("\"1.2.0\"", $"\"{version}\""));
+        File.WriteAllText(Path.Combine(folder, "ui", "app.html"), page);
+        File.WriteAllText(Path.Combine(folder, "ui", "settings.html"), "<p>settings</p>");
+        return folder;
+    }
+
+    [Fact]
+    public void BundledPluginsInstallOnceAndUpdateOnlyWhileKept()
+    {
+        using var scope = new TempPluginScope();
+        var manager = new PluginManager(new AppPaths(Path.Combine(scope.Root, "app")));
+        var bundled = Path.Combine(scope.Root, PluginManager.BundledDirectoryName);
+        WriteBundledPlugin(bundled, "1.2.0", "v1");
+
+        var first = Assert.Single(manager.InstallBundled(bundled));
+        Assert.Equal("com.example.test", first.Id);
+        Assert.True(first.Enabled);
+        Assert.Empty(manager.InstallBundled(bundled));
+
+        // A newer release refreshes the copy the user kept, and keeps it disabled if it was.
+        manager.SetEnabled("com.example.test", false);
+        WriteBundledPlugin(bundled, "1.3.0", "v2");
+        var updated = Assert.Single(manager.InstallBundled(bundled));
+        Assert.Equal("1.3.0", updated.Manifest.Version);
+        Assert.False(updated.Enabled);
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(updated.Directory, "ui", "app.html")));
+
+        // Once removed, neither the same nor a newer bundled version comes back.
+        manager.Uninstall("com.example.test");
+        Assert.Empty(manager.InstallBundled(bundled));
+        WriteBundledPlugin(bundled, "1.4.0", "v3");
+        Assert.Empty(manager.InstallBundled(bundled));
+        Assert.Null(manager.Find("com.example.test"));
+    }
+
+    [Fact]
+    public void BundledPluginDoesNotDowngradeANewerManualInstall()
+    {
+        using var scope = new TempPluginScope();
+        var manager = new PluginManager(new AppPaths(Path.Combine(scope.Root, "app")));
+        var bundled = Path.Combine(scope.Root, PluginManager.BundledDirectoryName);
+        manager.InstallFromDirectory(WriteBundledPlugin(Path.Combine(scope.Root, "manual"), "2.0.0", "manual"));
+        WriteBundledPlugin(bundled, "1.2.0", "bundled");
+
+        Assert.Empty(manager.InstallBundled(bundled));
+        Assert.Equal("2.0.0", manager.Find("com.example.test")!.Manifest.Version);
+        Assert.Empty(manager.InstallBundled(Path.Combine(scope.Root, "missing")));
+    }
+
+    [Fact]
+    public void BookTranslationPluginInstallsFromTheBundledSource()
+    {
+        var root = FindRepositoryRoot();
+        if (root is null) return;
+
+        using var scope = new TempPluginScope();
+        var bundled = Path.Combine(scope.Root, PluginManager.BundledDirectoryName);
+        Directory.CreateDirectory(bundled);
+        var source = Path.Combine(root, "plugins", "book-translation");
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(bundled, "book-translation", Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
+        var manager = new PluginManager(new AppPaths(Path.Combine(scope.Root, "app")));
+
+        var installed = Assert.Single(manager.InstallBundled(bundled));
+        Assert.Equal("com.kkindle.book-translation", installed.Id);
+        Assert.True(installed.Enabled);
+    }
+
     [Fact]
     public async Task BridgeWritesACoverFromBase64()
     {

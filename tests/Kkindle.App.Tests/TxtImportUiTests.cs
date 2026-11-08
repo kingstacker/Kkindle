@@ -14,7 +14,7 @@ public sealed partial class SettingsTests
         await using var scope = await TestWindow.Create();
         scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
         var center = scope.Field<Kkindle.Infrastructure.BackgroundTaskCenterService>("_backgroundTasks");
-        var clear = scope.Field<Button>("_clearCompletedTasksButton");
+        var clear = scope.Field<MenuItem>("_deleteAllTaskRecordsItem");
         Assert.False(clear.IsEnabled);
         var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var running = center.Start("进行中", BackgroundTaskKind.Other, async (_, _) => await finish.Task);
@@ -22,17 +22,48 @@ public sealed partial class SettingsTests
         var failed = center.Start("失败", BackgroundTaskKind.Other, (_, _) => Task.FromException(new IOException("test")));
         await Task.WhenAll(succeeded.Completion, failed.Completion);
         await Until(() => clear.IsEnabled);
-        clear.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        clear.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         await Until(() => center.GetSnapshot().Count == 1 && !clear.IsEnabled);
         Assert.Equal(running.Id, Assert.Single(center.GetSnapshot()).Id);
         Assert.Equal(BackgroundTaskStatus.Running, Assert.Single(center.GetSnapshot()).Status);
         finish.SetResult();
         await running.Completion;
         await Until(() => clear.IsEnabled);
-        clear.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        clear.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         await Until(() => center.GetSnapshot().Count == 0 && !clear.IsEnabled);
         Assert.True(scope.Field<Flyout>("_backgroundTaskFlyout").IsOpen);
         scope.Field<Flyout>("_backgroundTaskFlyout").Hide();
+    });
+
+    [Fact]
+    public Task ClearCompletedTaskHistoryKeepsFailedAndRunningTasks() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        scope.Call("BackgroundTasksButton_Click", null, new RoutedEventArgs());
+        var center = scope.Field<Kkindle.Infrastructure.BackgroundTaskCenterService>("_backgroundTasks");
+        var clear = scope.Field<MenuItem>("_clearCompletedTaskRecordsItem");
+        var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = center.Start("进行中", BackgroundTaskKind.Other, async (_, _) => await finish.Task);
+        try
+        {
+            var succeeded = center.Start("完成", BackgroundTaskKind.Other, (_, _) => Task.CompletedTask);
+            var failed = center.Start("失败", BackgroundTaskKind.Other, (_, _) => Task.FromException(new IOException("test")));
+            await Task.WhenAll(succeeded.Completion, failed.Completion);
+            await Until(() => clear.IsEnabled);
+
+            clear.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            await Until(() => center.GetSnapshot().Count == 2 && !clear.IsEnabled);
+
+            var records = center.GetSnapshot();
+            Assert.Contains(records, task => task.Id == running.Id && task.Status == BackgroundTaskStatus.Running);
+            Assert.Contains(records, task => task.Id == failed.Id && task.Status == BackgroundTaskStatus.Failed);
+            Assert.DoesNotContain(records, task => task.Id == succeeded.Id);
+        }
+        finally
+        {
+            finish.TrySetResult();
+            await running.Completion;
+        }
     });
 
     [Fact]

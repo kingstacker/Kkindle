@@ -8,6 +8,14 @@ public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, 
 {
     public string Id => Manifest.Id;
 
+    /// <summary>Where the installed copy came from, recorded at install time.</summary>
+    public PluginTrustLevel Trust { get; init; }
+
+    /// <summary>Key that signed the installed copy; updates signed by another key are flagged.</summary>
+    public string? SignerKeyId { get; init; }
+
+    public string? Publisher { get; init; }
+
     public string ResolveFile(string relativePath)
     {
         var normalized = PluginPackage.NormalizeEntryPath(relativePath);
@@ -22,7 +30,17 @@ public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, 
 /// <summary>Result of inspecting a package before the user confirms installation.</summary>
 public sealed record PluginInstallPreview(PluginManifest Manifest, InstalledPlugin? Existing)
 {
+    public PluginSignatureInfo Signature { get; init; } = PluginSignatureInfo.Unsigned;
+
     public bool IsUpdate => Existing is not null;
+
+    /// <summary>
+    /// True when the installed copy was signed and this package is unsigned or
+    /// signed by a different key: a likely impersonation, shown as a warning.
+    /// </summary>
+    public bool SignerChanged =>
+        Existing?.SignerKeyId is { } previous
+        && !string.Equals(previous, Signature.KeyId, StringComparison.Ordinal);
 
     public bool IsDowngrade =>
         Existing is not null
@@ -39,6 +57,10 @@ public sealed record PluginInstallPreview(PluginManifest Manifest, InstalledPlug
 public sealed class PluginManager
 {
     private const string StateFileName = "plugins.json";
+    private const string BundledStateFileName = "bundled-plugins.json";
+
+    /// <summary>Folder next to the executable that holds plugins shipped with the app.</summary>
+    public const string BundledDirectoryName = "bundled-plugins";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly object _gate = new();
     private readonly string _pluginsDirectory;
@@ -75,10 +97,13 @@ public sealed class PluginManager
                     if (!File.Exists(manifestPath)) continue;
                     var manifest = PluginManifest.Parse(File.ReadAllText(manifestPath));
                     if (!string.Equals(manifest.Id, name, StringComparison.Ordinal)) continue;
-                    plugins.Add(new InstalledPlugin(
-                        manifest,
-                        directory,
-                        !state.TryGetValue(manifest.Id, out var entry) || entry.Enabled));
+                    var known = state.TryGetValue(manifest.Id, out var entry);
+                    plugins.Add(new InstalledPlugin(manifest, directory, !known || entry!.Enabled)
+                    {
+                        Trust = known ? entry!.Trust : PluginTrustLevel.Unsigned,
+                        SignerKeyId = known ? entry!.SignerKeyId : null,
+                        Publisher = known ? entry!.Publisher : null
+                    });
                 }
                 catch (Exception exception) when (exception is PluginPackageException or IOException or UnauthorizedAccessException)
                 {
@@ -94,8 +119,11 @@ public sealed class PluginManager
 
     public PluginInstallPreview Inspect(string packagePath)
     {
-        var manifest = PluginPackage.ReadManifest(packagePath);
-        return new PluginInstallPreview(manifest, Find(manifest.Id));
+        using var archive = PluginPackage.Open(packagePath);
+        var manifest = PluginPackage.Validate(archive);
+        PluginHostInfo.EnsureCompatible(manifest);
+        var signature = PluginSignature.Verify(archive, manifest);
+        return new PluginInstallPreview(manifest, Find(manifest.Id)) { Signature = signature };
     }
 
     /// <summary>
@@ -113,8 +141,14 @@ public sealed class PluginManager
             if (!File.Exists(ToDirectoryPath(root, page)))
                 throw new PluginPackageException($"插件缺少页面文件“{page}”。");
         }
+        foreach (var script in manifest.ScriptPaths)
+        {
+            if (!File.Exists(ToDirectoryPath(root, script)))
+                throw new PluginPackageException($"插件缺少脚本文件“{script}”。");
+        }
         if (manifest.Icon is { } icon && !File.Exists(ToDirectoryPath(root, icon)))
             throw new PluginPackageException($"插件缺少图标文件“{icon}”。");
+        PluginHostInfo.EnsureCompatible(manifest);
         return new PluginInstallPreview(manifest, Find(manifest.Id));
     }
 
@@ -123,7 +157,10 @@ public sealed class PluginManager
     /// packed into a temporary archive so it passes the same validation and
     /// staging path as a regular package.
     /// </summary>
-    public InstalledPlugin InstallFromDirectory(string directory)
+    public InstalledPlugin InstallFromDirectory(string directory) =>
+        InstallFromDirectory(directory, trustOverride: null);
+
+    private InstalledPlugin InstallFromDirectory(string directory, PluginTrustLevel? trustOverride)
     {
         var root = ResolvePluginDirectory(directory);
         var temporary = Path.Combine(
@@ -147,7 +184,7 @@ public sealed class PluginManager
                     archive.CreateEntryFromFile(file, relative, CompressionLevel.Fastest);
                 }
             }
-            return Install(temporary);
+            return Install(temporary, trustOverride);
         }
         finally
         {
@@ -196,10 +233,15 @@ public sealed class PluginManager
     /// Installs or replaces a plugin. The package is extracted into a staging
     /// folder first, so a failed import leaves any existing version intact.
     /// </summary>
-    public InstalledPlugin Install(string packagePath)
+    public InstalledPlugin Install(string packagePath) => Install(packagePath, trustOverride: null);
+
+    private InstalledPlugin Install(string packagePath, PluginTrustLevel? trustOverride)
     {
         using var archive = PluginPackage.Open(packagePath);
         var manifest = PluginPackage.Validate(archive);
+        PluginHostInfo.EnsureCompatible(manifest);
+        var signature = PluginSignature.Verify(archive, manifest);
+        var trust = trustOverride ?? signature.Trust;
         lock (_gate)
         {
             Directory.CreateDirectory(_pluginsDirectory);
@@ -228,9 +270,21 @@ public sealed class PluginManager
 
             var state = LoadState();
             var enabled = !state.TryGetValue(manifest.Id, out var entry) || entry.Enabled;
-            state[manifest.Id] = new PluginStateEntry { Enabled = enabled, InstalledAt = DateTimeOffset.UtcNow };
+            state[manifest.Id] = new PluginStateEntry
+            {
+                Enabled = enabled,
+                InstalledAt = DateTimeOffset.UtcNow,
+                Trust = trust,
+                SignerKeyId = signature.KeyId,
+                Publisher = signature.Publisher
+            };
             SaveState(state);
-            var installed = new InstalledPlugin(manifest, target, enabled);
+            var installed = new InstalledPlugin(manifest, target, enabled)
+            {
+                Trust = trust,
+                SignerKeyId = signature.KeyId,
+                Publisher = signature.Publisher
+            };
             Changed?.Invoke(this, EventArgs.Empty);
             return installed;
         }
@@ -267,6 +321,84 @@ public sealed class PluginManager
             if (state.Remove(pluginId)) SaveState(state);
         }
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Installs the plugins shipped with the application. Each folder under
+    /// <paramref name="bundledDirectory"/> is a plugin source tree. A bundled
+    /// plugin is installed the first time this installation sees it; later
+    /// releases with a higher version update it only while it is still
+    /// installed, so a plugin the user removed stays removed. Returns the
+    /// plugins that were installed or updated.
+    /// </summary>
+    public IReadOnlyList<InstalledPlugin> InstallBundled(string bundledDirectory)
+    {
+        if (!Directory.Exists(bundledDirectory)) return [];
+        var installed = new List<InstalledPlugin>();
+        var seeded = LoadBundledState();
+        var changed = false;
+        foreach (var directory in Directory.EnumerateDirectories(bundledDirectory).Order(StringComparer.Ordinal))
+        {
+            if (Path.GetFileName(directory).StartsWith('.')) continue;
+            try
+            {
+                var preview = InspectDirectory(directory);
+                var manifest = preview.Manifest;
+                if (!PluginManifest.TryParseVersion(manifest.Version, out var bundledVersion)) continue;
+                var known = seeded.TryGetValue(manifest.Id, out var seededText)
+                    && PluginManifest.TryParseVersion(seededText, out var seededVersion)
+                        ? seededVersion
+                        : null;
+                if (known is not null && bundledVersion <= known) continue;
+
+                var existing = preview.Existing;
+                var existingVersion = existing is not null
+                    && PluginManifest.TryParseVersion(existing.Manifest.Version, out var current)
+                        ? current
+                        : null;
+                // First sighting: install unless a same or newer copy is already there.
+                // Later releases: only refresh a copy the user kept.
+                var shouldInstall = known is null
+                    ? existingVersion is null || existingVersion < bundledVersion
+                    : existingVersion is not null && existingVersion < bundledVersion;
+                if (shouldInstall) installed.Add(InstallFromDirectory(directory, PluginTrustLevel.Bundled));
+                seeded[manifest.Id] = manifest.Version;
+                changed = true;
+            }
+            catch (Exception exception) when (exception is PluginPackageException or IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                // A broken bundled plugin must not block startup or the others.
+            }
+        }
+        if (changed) SaveBundledState(seeded);
+        return installed;
+    }
+
+    private Dictionary<string, string> LoadBundledState()
+    {
+        var path = Path.Combine(_pluginsDirectory, BundledStateFileName);
+        try
+        {
+            if (File.Exists(path))
+                return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path), JsonOptions)
+                    ?? new(StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is JsonException or IOException)
+        {
+        }
+        return new(StringComparer.Ordinal);
+    }
+
+    private void SaveBundledState(Dictionary<string, string> state)
+    {
+        lock (_gate)
+        {
+            Directory.CreateDirectory(_pluginsDirectory);
+            var path = Path.Combine(_pluginsDirectory, BundledStateFileName);
+            var temporary = path + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(state, JsonOptions));
+            File.Move(temporary, path, overwrite: true);
+        }
     }
 
     private Dictionary<string, PluginStateEntry> LoadState()
@@ -307,5 +439,8 @@ public sealed class PluginManager
     {
         public bool Enabled { get; set; } = true;
         public DateTimeOffset InstalledAt { get; set; } = DateTimeOffset.UtcNow;
+        public PluginTrustLevel Trust { get; set; }
+        public string? SignerKeyId { get; set; }
+        public string? Publisher { get; set; }
     }
 }

@@ -31,6 +31,7 @@ public partial class MainWindow
         ReaderDictionaryWikipediaStatusText.IsVisible = true;
         ReaderDictionaryWikipediaResultPanel.IsVisible = false;
         ReaderDictionaryWikipediaOpenButton.IsEnabled = false;
+        StartReaderPluginDictionaryLookup(term);
 
         var canSearchWikipedia = _appSettings.NetworkEnabled
             && term.Length <= MaximumWikipediaSelectionLength;
@@ -193,6 +194,7 @@ public partial class MainWindow
         _readerDictionaryRequestSequence++;
         _readerDictionaryCancellation?.Cancel();
         _readerDictionaryCancellation = null;
+        CancelReaderPluginDictionaryLookup();
     }
 
     private void ClearReaderSelectionAfterDictionary()

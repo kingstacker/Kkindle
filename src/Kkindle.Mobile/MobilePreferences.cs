@@ -38,6 +38,7 @@ public sealed record MobilePreferences
     public ReaderTheme ReaderTheme { get; init; }
     public double ReaderFontScale { get; init; } = 1.35;
     public double ReaderLineHeight { get; init; } = 1.75;
+    public double ReaderParagraphSpacing { get; init; } = ReaderLayoutDefaults.DefaultParagraphSpacing;
     /// <summary>Side margin of the reading column, in device-independent pixels.</summary>
     public double ReaderBodyPadding { get; init; } = ReaderLayoutDefaults.DefaultBodyPadding;
     /// <summary>Indent the first line of each paragraph by two characters.</summary>

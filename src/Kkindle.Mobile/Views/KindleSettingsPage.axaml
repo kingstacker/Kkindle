@@ -60,7 +60,9 @@
         </StackPanel>
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Text="使用加密连接" VerticalAlignment="Center" />
-          <ToggleSwitch Grid.Column="1" Name="SslSwitch" OnContent="" OffContent="" MinWidth="0" />
+          <c:NativeSwitchGroup Grid.Column="1" AccessibilityLabel="使用加密连接">
+            <ToggleSwitch Name="SslSwitch" OnContent="" OffContent="" MinWidth="0" />
+          </c:NativeSwitchGroup>
         </Grid>
       </StackPanel>
     </ScrollViewer>

@@ -6,24 +6,30 @@
              Background="{DynamicResource PageBackgroundBrush}">
   <Grid RowDefinitions="Auto,*,Auto">
     <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Margin="8,6,8,0">
-      <Button Grid.Column="0" Classes="icon" Name="BackButton" Click="OnBackClick">
+      <c:NativeActionButton Grid.Column="0">
+      <Button Classes="icon" Name="BackButton" Tag="chevron.left" Click="OnBackClick">
         <c:LineIcon Data="{StaticResource IconBack}" StrokeThickness="1.4" />
       </Button>
-      <Button Grid.Column="2" Classes="icon" Name="FavoriteButton" Click="OnFavoriteClick">
+      </c:NativeActionButton>
+      <c:NativeActionButton Grid.Column="2">
+      <Button Classes="icon" Name="FavoriteButton" Tag="star" Click="OnFavoriteClick">
         <c:LineIcon Name="FavoriteIcon" Data="{StaticResource IconStar}" StrokeThickness="1.4" />
       </Button>
-      <Button Grid.Column="3" Classes="icon" Name="MoreButton">
+      </c:NativeActionButton>
+      <c:NativeMenuButton Grid.Column="3">
+      <Button Classes="icon" Name="MoreButton">
         <Button.Flyout>
           <MenuFlyout Placement="BottomEdgeAlignedRight">
-            <MenuItem Header="编辑书籍信息" Click="OnEditClick" />
-            <MenuItem Header="发送到 Kindle" Click="OnSendToKindleClick" />
-            <MenuItem Header="加入收藏夹" Click="OnAddToShelfClick" />
-            <MenuItem Header="重命名" Click="OnRenameClick" />
-            <MenuItem Header="删除" Click="OnDeleteClick" />
+            <MenuItem Header="编辑书籍信息" Tag="square.and.pencil" Click="OnEditClick" />
+            <MenuItem Header="发送到 Kindle" Tag="paperplane" Click="OnSendToKindleClick" />
+            <MenuItem Header="加入收藏夹" Tag="folder.badge.plus" Click="OnAddToShelfClick" />
+            <MenuItem Header="重命名" Tag="pencil" Click="OnRenameClick" />
+            <MenuItem Header="删除" Tag="trash" Classes="destructive" Click="OnDeleteClick" />
           </MenuFlyout>
         </Button.Flyout>
         <c:LineIcon Data="{StaticResource IconMore}" StrokeThickness="2.2" />
       </Button>
+      </c:NativeMenuButton>
     </Grid>
 
     <ScrollViewer Grid.Row="1">
@@ -49,12 +55,16 @@
         <StackPanel Name="DescriptionPanel" Spacing="8" Margin="0,32,0,0">
           <TextBlock Name="DescriptionText" Classes="secondary" TextWrapping="Wrap" LineHeight="24"
                      MaxLines="5" TextTrimming="CharacterEllipsis" />
-          <Button Name="ExpandButton" Classes="ghost" Content="展开全部" Click="OnExpandClick" />
+          <c:NativeActionButton>
+            <Button Name="ExpandButton" Classes="ghost" Content="展开全部" Click="OnExpandClick" />
+          </c:NativeActionButton>
         </StackPanel>
 
         <Grid ColumnDefinitions="*,Auto" Margin="0,24,0,4">
           <TextBlock Classes="label" Text="书籍信息" VerticalAlignment="Center" />
-          <Button Grid.Column="1" Classes="ghost" Content="编辑" Click="OnEditClick" />
+          <c:NativeActionButton Grid.Column="1">
+            <Button Classes="ghost" Content="编辑" Click="OnEditClick" />
+          </c:NativeActionButton>
         </Grid>
         <ItemsControl Name="FactsList">
           <ItemsControl.ItemTemplate>
@@ -72,7 +82,9 @@
     </ScrollViewer>
 
     <Border Grid.Row="2" Padding="28,8,28,14">
-      <Button Classes="primary" Name="StartReadButton" Content="开始阅读" Click="OnStartReadClick" />
+      <c:NativeActionButton>
+        <Button Classes="primary" Name="StartReadButton" Content="开始阅读" Click="OnStartReadClick" />
+      </c:NativeActionButton>
     </Border>
   </Grid>
 </UserControl>

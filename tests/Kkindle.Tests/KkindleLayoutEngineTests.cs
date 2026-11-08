@@ -156,6 +156,68 @@ public sealed class KkindleLayoutEngineTests : IDisposable
         Assert.Equal(4, content.Blocks.Count);
     }
 
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb)]
+    [InlineData(TypesetWritingMode.VerticalRl)]
+    public void ParagraphSpacingChangesOnlyTheGapAndPreservesTextOffsets(TypesetWritingMode mode)
+    {
+        var content = new XhtmlChapterLoader(paragraphIndent: false).Load(WriteChapter(
+            "<p>甲甲<br/>甲甲</p><p>甲甲</p>"));
+        using var engine = CreateEngine();
+        (int Start, int Length)[]? initialOffsets = null;
+        foreach (var spacing in new[] { 0f, 0.5f, 1f })
+        {
+            var options = new TypesetLayoutOptions
+            {
+                WritingMode = mode,
+                BaseFontSize = 17f,
+                LineHeight = 1.8f,
+                ParagraphSpacingEm = spacing,
+                ViewportWidth = 400f,
+                ViewportHeight = 600f
+            };
+            var layout = engine.Compose(content, options);
+            var page = Assert.Single(layout.Pages);
+            var positions = page.Runs.Select(run => mode == TypesetWritingMode.HorizontalTb ? run.OriginY : -run.OriginX)
+                .Distinct().Order().ToArray();
+            Assert.Equal(3, positions.Length);
+            var linePitch = positions[1] - positions[0];
+            var paragraphPitch = positions[2] - positions[1];
+            Assert.InRange(Math.Abs(linePitch - options.BodyLineHeight), 0, 0.02f);
+            Assert.InRange(Math.Abs(paragraphPitch - linePitch - spacing * options.BaseFontSize), 0, 0.02f);
+            Assert.Equal(content.BodyText.Length, layout.BodyTextLength);
+            var offsets = page.Runs.Select(run => (run.TextStart, run.TextLength)).OrderBy(item => item.TextStart).ToArray();
+            initialOffsets ??= offsets;
+            Assert.Equal(initialOffsets, offsets);
+        }
+    }
+
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb)]
+    [InlineData(TypesetWritingMode.VerticalRl)]
+    public void ParagraphSpacingRepaginatesWithoutDroppingText(TypesetWritingMode mode)
+    {
+        var content = new XhtmlChapterLoader(paragraphIndent: false).Load(WriteChapter(
+            string.Concat(Enumerable.Repeat("<p>甲甲</p>", 10))));
+        using var engine = CreateEngine();
+        ChapterLayout Compose(float spacing) => engine.Compose(content, new TypesetLayoutOptions
+        {
+            WritingMode = mode,
+            BaseFontSize = 17f,
+            LineHeight = 1.8f,
+            ParagraphSpacingEm = spacing,
+            ViewportWidth = 120f,
+            ViewportHeight = 120f
+        });
+        var compact = Compose(0);
+        var loose = Compose(1);
+        Assert.True(loose.Pages.Count > compact.Pages.Count);
+        var compactOffsets = compact.Pages.SelectMany(page => page.Runs).Select(run => (run.TextStart, run.TextLength)).ToArray();
+        var looseOffsets = loose.Pages.SelectMany(page => page.Runs).Select(run => (run.TextStart, run.TextLength)).ToArray();
+        Assert.Equal(compactOffsets, looseOffsets);
+        Assert.Equal(compact.BodyTextLength, loose.BodyTextLength);
+    }
+
     [Fact]
     public void Horizontal_PaginationCoversTextWithoutOverflow()
     {
@@ -1528,6 +1590,26 @@ public sealed class KkindleLayoutEngineTests : IDisposable
                 rect!.Value.Width,
                 options.BaseFontSize * 0.45f,
                 options.BaseFontSize * 0.55f);
+        }
+    }
+
+    [Fact]
+    public void CenteredSentenceMarksKeepTheirCellBeforeClosingQuotes()
+    {
+        var content = new XhtmlChapterLoader().Load(WriteChapter("<p>他说“好吗？”接着说“好！”</p>"));
+        using var engine = CreateEngine();
+        var options = Options(TypesetWritingMode.HorizontalTb);
+        var layout = engine.Compose(content, options);
+
+        foreach (var mark in new[] { '？', '！' })
+        {
+            var offset = content.BodyText.IndexOf(mark);
+            var pageIndex = layout.GetPageIndexOfOffset(offset);
+            var rect = layout.GetCharRect(pageIndex, offset);
+            var quote = layout.GetCharRect(pageIndex, offset + 1);
+            Assert.True(rect.HasValue && quote.HasValue);
+            Assert.InRange(rect.Value.Width, options.BaseFontSize * 0.97f, options.BaseFontSize * 1.03f);
+            Assert.True(quote.Value.Left >= rect.Value.Right - 0.01f);
         }
     }
 

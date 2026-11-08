@@ -1,4 +1,7 @@
 using System.Runtime.Versioning;
+using Avalonia;
+using CoreAnimation;
+using CoreGraphics;
 using Kkindle.Mobile;
 using UIKit;
 
@@ -6,12 +9,13 @@ namespace Kkindle.iOSHead;
 
 /// <summary>System tab bar: UIKit supplies the iOS 26 Liquid Glass appearance.</summary>
 [SupportedOSPlatform("ios26.0")]
-internal sealed class IOSGlassTabBar : IMobileTabBar
+internal sealed class IOSGlassTabBar : IMobileTabBar, ISheetOccludingTabBar
 {
     private static readonly string[] Titles = ["书库", "阅读资料", "阅读数据", "我的"];
     private static readonly string[] Symbols = ["book", "note.text", "chart.bar", "person"];
     private readonly UITabBar _bar;
     private readonly UITabBarItem[] _items;
+    private CALayer? _sheetMask;
     private bool _visible;
     private int _selected;
 
@@ -56,6 +60,27 @@ internal sealed class IOSGlassTabBar : IMobileTabBar
                 _bar.SelectedItem = _items[_selected];
             _bar.Hidden = !_visible;
         });
+    }
+
+    public void SetSheetOcclusion(Rect? sheetBounds)
+    {
+        _bar.UserInteractionEnabled = sheetBounds is null;
+        if (sheetBounds is not { } sheet)
+        {
+            _bar.Layer.Mask = null;
+            return;
+        }
+
+        _sheetMask ??= new CALayer { BackgroundColor = UIColor.Black.CGColor };
+        const double shadowInset = 64;
+        var visibleHeight = Math.Clamp(sheet.Top - (double)_bar.Frame.Top + shadowInset,
+            0, (double)_bar.Bounds.Height + 2 * shadowInset);
+        CATransaction.Begin();
+        CATransaction.DisableActions = true;
+        _sheetMask.Frame = new CGRect(-shadowInset, -shadowInset,
+            (double)_bar.Bounds.Width + 2 * shadowInset, visibleHeight);
+        _bar.Layer.Mask = _sheetMask;
+        CATransaction.Commit();
     }
 
     public void SetDarkAppearance(bool dark) =>

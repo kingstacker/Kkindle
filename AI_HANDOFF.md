@@ -54,6 +54,12 @@
 - Windows WebView2 指针由 Avalonia 管理，不得手动释放或反射操作 COM 类型。
 - AXAML 初始化期间可能触发 UI 事件，保留空值和就绪状态守卫。
 - UI 保持现有黑白灰、直角细线和低干扰视觉风格。新增可操作控件应补充 `AutomationProperties.Name`。
+- 随包插件：`plugins/book-translation` 由 `src/Kkindle.App/Kkindle.App.csproj` 复制到输出目录的 `bundled-plugins/`，桌面端启动时由 `PluginManager.InstallBundled` 装进数据根目录的 `plugins/`。不要直接放进程序目录的 `plugins/`，因为 macOS/Linux 的数据根目录不在程序目录。修改插件源码后必须递增它的 `manifest.json` 版本号，否则已安装的用户收不到更新。用户卸载过的随包插件不会被自动装回，这个行为依赖 `bundled-plugins.json`，不要删掉。新增随包插件时，在 csproj 中照同样方式加一组 `Content`。UI 测试窗口（`SettingsTests.TestWindow.Create`）把 `_bundledPluginsDirectory` 设为 null，否则随包插件会被自动装进测试数据目录，干扰插件相关断言。
+- 插件接口（`apiVersion` 1）只做增量：新增方法要同时加进 `PluginBridge.Methods`（`kkindle.capabilities.methods` / `kkindle.has()` 依赖它）、`PluginPageComposer` 的桥接模板、`sdk/kkindle.d.ts` 和 `sdk/kkindle-mock.js`，并更新 `docs/plugins.md`。不要删改已有方法的参数和返回字段；不兼容改动只能放到 apiVersion 2。新增权限要在 `MainWindow.Plugins.cs` 的权限说明、`kkplugin validate` 的输出和 `BuildCapabilities` 中同步。
+- 插件签名：官方私钥在维护者机器的 `~/.config/kkindle/plugin-signing/official-p256.pem`（密钥 ID `f0ea42f21080a2fb`），公钥写在 `PluginSignature.OfficialKeys`。私钥绝不能进仓库；丢失后只能换新钥并发版更新 `OfficialKeys`，已装用户升级时会看到“签名者变了”的警告。CI 若要发布插件，把私钥存为 secret，写到临时文件后用环境变量 `KKINDLE_PLUGIN_SIGNING_KEY` 指向它。
+- 插件市场：`scripts/publish-plugins.sh` 用官方私钥把 `plugins/` 打包签名到 `website/plugins/` 并生成 `index.json`，随 `scripts/build_website.sh` 部署到 `https://kkindle.stacker.beauty/plugins/`（`PluginCatalogService.DefaultIndexUrl`）。改了插件就递增版本号并重跑这个脚本，否则市场和更新检查看不到新版本。开发时用环境变量 `KKINDLE_PLUGIN_CATALOG` 指向本地索引。
+- 插件脚本（词典/翻译/后台）在 `PluginScriptRuntime` 的 Jint 沙箱里运行，每次调用新建引擎，经同一个 `PluginBridge` 做权限检查；不要给它开放 CLR 访问或任何需要弹窗的宿主接口。后台调度在 `PluginBackgroundScheduler`，状态文件 `plugin-data/background-state.json`。
+- `Strings.zh-CN.axaml` / `Strings.en-US.axaml` 不能有重复键（曾在 820df2e 引入过 `Ui.Auto.39932F24FE11A6BA` 重复，已删除）；新增文案前先搜索键是否已存在。
 - 内置字体兼容层依赖 Avalonia 12.1.1 私有字体 API。升级 Avalonia 或更换内置字体时必须重跑字体生命周期、样式组合和完整 UI 回归。
 
 ## 构建与验证

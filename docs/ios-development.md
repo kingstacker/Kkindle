@@ -4,6 +4,11 @@
 默认目标是从仓库直接生成可安装到已连接 iPhone 的 Debug 包，并使用真实触摸
 验证界面，不使用 iPhone 镜像。
 
+从 2026-11-07 起默认前端是 SwiftUI，构建、架构和仓库内的原生界面测试见
+[ios-native-frontend.md](ios-native-frontend.md)。下文 2026-11-06 的真机测试记录
+对应原有 Avalonia/UIKit 界面。2026-11-08 已在 iPhone 16 上完成新 SwiftUI 前端的
+Debug 签名构建、保数据覆盖安装和启动检查；完整真机交互回归仍需单独执行。
+
 ## 当前验证环境
 
 以下是 2026-11-06 在 iPhone 16 + Xcode 26.5 上验证通过的流程。设备 ID、
@@ -70,7 +75,9 @@ iOS Team Provisioning Profile: <BUNDLE_ID>.uitests.xctrunner
 
 ## 构建真机包
 
-本仓库当前只在 Debug 真机构建上完整验证过。使用静态 Registrar，并显式指定
+原有界面和新 SwiftUI 前端均已完成 Debug 真机构建；SwiftUI 前端已于 2026-11-08
+使用同一正式 Bundle 覆盖安装并启动。
+使用静态 Registrar，并显式指定
 `ios-arm64` 和真机 SDK：
 
 ```bash
@@ -110,8 +117,8 @@ BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")"
 printf '%s\n' "$BUNDLE_ID"
 ```
 
-构建成功时命令以 `0` 退出。当前项目会报告约 219 个既有编译警告；判断是否成功
-应以退出码和错误数为准。
+构建成功时命令以 `0` 退出。项目存在既有编译和裁剪警告，数量会随前端配置变化；
+判断是否成功应以退出码和错误数为准。
 
 ## 安装、启动和查看日志
 
@@ -156,7 +163,8 @@ xcrun devicectl device info apps --device "$DEVICE_ID" \
 ```bash
 APP="src/Kkindle.Mobile.iOS/bin/Debug/net10.0-ios/ios-arm64/Kkindle.Mobile.iOS.app"
 plutil -p "$APP/Info.plist" | rg 'CFBundleIcon|CFBundleDisplayName' -C 1
-find "$APP" -maxdepth 1 \( -iname 'AppIcon*' -o -name 'Assets.car' \) -print
+find "$APP" -maxdepth 1 \( -iname 'Kkindle*png' -o -name 'Assets.car' \) -print
+xcrun assetutil --info "$APP/Assets.car" | rg 'IconImageStack|IconGroup|Kkindle_Assets/(Page|Spine)'
 ```
 
 如果本机安装了 `pymobiledevice3`，还可以确认 SpringBoard 已登记图标：
@@ -166,25 +174,29 @@ pymobiledevice3 springboard state get --userspace \
   | rg -n -C 3 "$BUNDLE_ID"
 ```
 
-当前图标是黑底白 K。图标文件存在但看起来“没有图标”时，也要检查是否位于
-App 资源库、主屏下一页，或黑色图标与深色壁纸混在一起。
+当前图标与 macOS 共用 `scripts/macos/Kkindle.icon` 的分层书页图标。
+`CFBundleIconName` 应为 `Kkindle`，`Assets.car` 应包含 `IconImageStack`、`IconGroup`
+及 Page/Spine 图层；只检查 PNG 存在不能证明 iOS 26 的液态玻璃图标已经接入。
+图标文件存在但主屏看不到时，也要检查 App 资源库、主屏下一页和系统图标缓存。
 
 ## 真机自动化测试原则
 
 - 使用 `XCUITest` 在物理设备上合成真实触摸，不使用 iPhone 镜像。
 - 测试 target 不嵌入 Kkindle，而是按 Bundle ID 启动已安装的
   被测 App。
-- Avalonia 的大部分界面不会作为原生控件暴露给 Accessibility；不要把
+- SwiftUI 前端的按钮、分段选择器、开关和输入框可以通过 Accessibility 定位，
+  优先使用原生控件的名称或 `accessibilityIdentifier`。正文渲染区域仍通过坐标操作。
+- 对 `UseSwiftUIFrontend=false` 的原有界面，Avalonia 的大部分界面不会作为原生控件暴露给 Accessibility；不要把
   `app.buttons["标题"]` 当成稳定定位方式。优先使用窗口坐标、滑动和截图断言。
-- 键盘不一定会被识别为 `Keyboard`。Avalonia 输入框的键盘使用
+- SwiftUI 输入框使用 `app.keyboards` 检查系统键盘。原有 Avalonia 输入框的键盘使用
   `app.otherElements["inputView"]` 判断，而不是 `app.keyboards.count`。
 - XCUITest 的 `tearDown` 会终止 App。测试结束后如需让 App 留在手机上，必须
   再执行一次普通启动命令。
 - 测试 runner 会单独安装一个 `KkindleUITests-Runner`，这是正常现象。
 
-## 临时 XCUITest 工程
+## 原有界面的临时 XCUITest 工程
 
-本次会话的工程位于：
+2026-11-06 原有界面的临时工程位于：
 
 ```text
 /tmp/kkindle-uitest/

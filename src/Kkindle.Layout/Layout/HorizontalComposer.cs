@@ -236,6 +236,10 @@ internal sealed class HorizontalComposer
 
         _cursorY += block.SpaceAfterLines * BodyLineHeight
             + block.MarginBottomEm * BaseFontSize;
+        if (block.Kind == BlockKind.Paragraph)
+        {
+            _cursorY += _context.Options.ParagraphSpacingEm * BaseFontSize;
+        }
     }
 
     private void PlaceLine(

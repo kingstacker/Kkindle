@@ -7,7 +7,7 @@ using Kkindle.Infrastructure;
 namespace Kkindle.Mobile.Views.Sheets;
 
 /// <summary>Bounded, local keyword retrieval for the file selected by the mobile reader.</summary>
-internal sealed class MobileAiBookRetrieval(ApplicationModules modules, Book book)
+public sealed class MobileAiBookRetrieval(ApplicationModules modules, Book book)
 {
     private const int MaxPdfPages = 10_000;
     private const long MaxPdfCharacters = 20_000_000;

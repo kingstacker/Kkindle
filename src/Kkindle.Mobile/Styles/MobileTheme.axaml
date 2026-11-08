@@ -260,6 +260,21 @@
     <Setter Property="MinHeight" Value="44" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
+  <Style Selector="TextBox.search-field">
+    <Setter Property="RenderTransformOrigin" Value="100%,50%" />
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="RenderTransform" Value="scale(0.85,1)" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="TextBox.search-field.search-expand">
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="RenderTransform" Value="scale(1,1)" />
+  </Style>
   <Style Selector="TextBox.field:pointerover /template/ Border#PART_BorderElement, TextBox.field:focus /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="{DynamicResource SunkBrush}" />
     <Setter Property="BorderThickness" Value="0" />

@@ -11,7 +11,10 @@ namespace Kkindle.Mobile.Controls;
 public interface INativeSegmentInteraction
 {
     void SetSheetInteractionBlocked(bool blocked);
-    void SetSheetScrim(Color? color);
+    void SetSheetScrim(Color? color, Color backdrop);
+
+    /// <summary>Clips the hosted view to the part still inside its scroll viewport.</summary>
+    void SetClipRect(Rect? visible) { }
 }
 
 /// <summary>Uses a platform segmented control when one is available.</summary>
@@ -24,38 +27,44 @@ public sealed class NativeSegmentGroup : ContentControl
     private bool _sheetObscured;
     private bool _sheetCoversControl;
     private Color? _sheetScrim;
-    private bool _inViewport = true;
+    private Color _sheetBackdrop;
+    private Rect? _clipRect;
+    private NativeScrollPositionTracker? _scrollTracker;
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _scrollTracker ??= new NativeScrollPositionTracker(this,
+            () => (_native as INativeScrollPosition)?.UpdateScrollPosition());
+        _scrollTracker.Attach();
         EffectiveViewportChanged += OnEffectiveViewportChanged;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         EffectiveViewportChanged -= OnEffectiveViewportChanged;
+        _scrollTracker?.Detach();
         base.OnDetachedFromVisualTree(e);
     }
 
     /// <summary>
-    /// A hosted native view is a platform view drawn above the whole Avalonia
-    /// scene, so a scrolling ancestor cannot clip it. Whenever any part of the
-    /// group leaves the visible viewport — sliding under a page header, mostly
-    /// — the Avalonia fallback takes over, because Avalonia does clip it.
+    /// A hosted native view sits above the Avalonia scene, so a scrolling
+    /// ancestor cannot clip it. Instead of swapping in the differently styled
+    /// Avalonia fallback, the native control is told exactly which part of
+    /// itself is still visible and masks the rest.
     /// </summary>
     private void OnEffectiveViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
     {
-        // The rect is the visible part expressed in this control's own
-        // coordinates, so it *contains* the control when nothing is cut off.
-        var viewport = e.EffectiveViewport;
-        var visible = viewport.Width > 0 && viewport.Height > 0
-            && viewport.X <= 0.5 && viewport.Y <= 0.5
-            && viewport.Right >= Bounds.Width - 0.5
-            && viewport.Bottom >= Bounds.Height - 0.5;
-        if (visible == _inViewport) return;
-        _inViewport = visible;
-        ApplyObscured();
+        var size = Bounds.Size;
+        if (size.Width <= 0 || size.Height <= 0) return;
+        var own = new Rect(size);
+        var viewport = e.EffectiveViewport.Intersect(own);
+        var fullyVisible = viewport.Width >= size.Width - 0.5 && viewport.Height >= size.Height - 0.5;
+        var next = fullyVisible ? null : (Rect?)viewport;
+        if (next == _clipRect) return;
+        _clipRect = next;
+        if (_native is INativeSegmentInteraction interaction)
+            interaction.SetClipRect(next);
     }
 
     protected override async void OnLoaded(RoutedEventArgs e)
@@ -69,7 +78,7 @@ public sealed class NativeSegmentGroup : ContentControl
             .FirstOrDefault(ancestor => ancestor.Name == "SheetScope");
         if (sheet is not null)
         {
-            await Task.Delay(300);
+            await Task.Delay(420);
             if (_initialized || !sheet.IsVisible || TopLevel.GetTopLevel(this) is null) return;
         }
 
@@ -84,9 +93,11 @@ public sealed class NativeSegmentGroup : ContentControl
         fallback.IsHitTestVisible = false;
         Content = new Grid { Children = { fallback, native } };
         ApplyObscured();
+        if (_clipRect is { } clip && native is INativeSegmentInteraction clipped)
+            clipped.SetClipRect(clip);
     }
 
-    /// <summary>Hides the hosted native view; the fallback stands in.</summary>
+    /// <summary>Hides the native view; the fallback stands in, under an opaque blocker.</summary>
     public void SetObscured(bool obscured)
     {
         if (_native is null || _fallback is null) return;
@@ -96,8 +107,9 @@ public sealed class NativeSegmentGroup : ContentControl
     }
 
     /// <summary>
-    /// A covered native control gives way to the fallback, and a visible one
-    /// cannot be tapped while the sheet is open.
+    /// A covered native control is hidden instead of swapped for the fallback:
+    /// the sheet is opaque there anyway, and swapping would visibly change its
+    /// glass styling during the sheet animation.
     /// </summary>
     public void SetSheetObscured(bool obscured, bool covered)
     {
@@ -107,9 +119,10 @@ public sealed class NativeSegmentGroup : ContentControl
     }
 
     /// <summary>Fades the native control with the page's sheet scrim.</summary>
-    public void SetSheetScrim(Color? color)
+    public void SetSheetScrim(Color? color, Color backdrop)
     {
         _sheetScrim = color;
+        _sheetBackdrop = backdrop;
         ApplyObscured();
     }
 
@@ -119,15 +132,12 @@ public sealed class NativeSegmentGroup : ContentControl
         if (_native is INativeSegmentInteraction interaction)
         {
             interaction.SetSheetInteractionBlocked(_sheetObscured);
-            interaction.SetSheetScrim(_sheetScrim);
+            interaction.SetSheetScrim(_sheetScrim, _sheetBackdrop);
         }
 
-        // Hidden while the sheet panel covers it, and while scrolling carries
-        // it out of the viewport: the fallback then stands in, drawn and
-        // clipped by Avalonia, so it can also take the taps.
-        var showNative = _inViewport && !(_sheetObscured && _sheetCoversControl);
+        var showNative = !(_sheetObscured && _sheetCoversControl);
         _native.IsVisible = showNative;
-        _fallback.Opacity = showNative ? 0 : 1;
-        _fallback.IsHitTestVisible = !_inViewport && !_sheetObscured;
+        _fallback.Opacity = 0;
+        _fallback.IsHitTestVisible = false;
     }
 }

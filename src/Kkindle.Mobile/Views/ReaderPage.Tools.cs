@@ -21,6 +21,8 @@ public partial class ReaderPage
     private const int MaxContextCharacters = 4000;
 
     private TtsService? _tts;
+    private bool _speechExpanded;
+    private int _speechDockVersion;
     private IReadOnlyList<PdfPageText>? _pdfText;
     private string? _lastSearch;
     private bool _pinching;
@@ -29,13 +31,48 @@ public partial class ReaderPage
 
     // ---------- search
 
-    private void OnSearchClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => ShowSearch();
+    private void OnSearchClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (ReaderSearchRow.IsVisible)
+        {
+            if (!string.IsNullOrWhiteSpace(ReaderSearchBox.Text)) ShowSearch();
+            return;
+        }
+        HideSelectionBar();
+        TitleText.IsVisible = false;
+        ReaderSearchBox.Text = _lastSearch;
+        ReaderSearchRow.IsVisible = true;
+        ReaderSearchBox.Classes.Add("search-expand");
+        ReaderSearchBox.Focus();
+    }
+
+    private void OnCloseReaderSearchClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        ReaderSearchBox.Classes.Remove("search-expand");
+        ReaderSearchRow.IsVisible = false;
+        TitleText.IsVisible = true;
+        SearchButton.Focus();
+    }
+
+    private void OnReaderSearchKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || string.IsNullOrWhiteSpace(ReaderSearchBox.Text)) return;
+        e.Handled = true;
+        ShowSearch();
+    }
 
     public void ShowSearch()
     {
         HideSelectionBar();
-        var sheet = new SearchSheet(SearchBookAsync, hit => _ = JumpToSearchHitAsync(hit), _lastSearch);
-        _shell.ShowSheet("搜索", sheet, ThemeScope.RequestedThemeVariant, () => _lastSearch = sheet.Query);
+        var query = ReaderSearchRow.IsVisible ? ReaderSearchBox.Text : _lastSearch;
+        var sheet = new SearchSheet(SearchBookAsync, hit => _ = JumpToSearchHitAsync(hit), query,
+            searchImmediately: !string.IsNullOrWhiteSpace(query));
+        SearchButton.Focus();
+        _shell.ShowSheet("搜索", sheet, ThemeScope.RequestedThemeVariant, () =>
+        {
+            _lastSearch = sheet.Query;
+            ReaderSearchBox.Text = _lastSearch;
+        });
     }
 
     private async Task<IReadOnlyList<SearchHit>> SearchBookAsync(
@@ -83,6 +120,7 @@ public partial class ReaderPage
 
     private async Task JumpToSearchHitAsync(SearchHit hit)
     {
+        _tts?.NotifyManualNavigation();
         _shell.HideSheet();
         SetChromeVisible(false);
         try
@@ -155,7 +193,10 @@ public partial class ReaderPage
             // Engine construction binds platform speech services and can throw.
             _tts ??= CreateSpeech(createEngine(), createPlayer());
             SetChromeVisible(false);
-            SpeechBar.IsVisible = true;
+            _speechExpanded = true;
+            SpeechBar.IsVisible = !_usesNativeFrontend;
+            SpeechDock.IsVisible = false;
+            if (!_usesNativeFrontend) ScheduleSpeechDock();
             SpeechStatusText.Text = "正在准备朗读…";
             var settings = await _modules.Reader.TtsSettings.LoadAsync(_lifetime.Token);
             settings.AudioFormat = "wav";
@@ -166,7 +207,10 @@ public partial class ReaderPage
         }
         catch (Exception exception)
         {
+            _speechDockVersion++;
+            _speechExpanded = false;
             SpeechBar.IsVisible = false;
+            SpeechDock.IsVisible = false;
             _shell.ShowToast("朗读失败：" + UiText.Localize(exception.Message));
         }
     }
@@ -212,7 +256,8 @@ public partial class ReaderPage
         {
             return null;
         }
-        var chapter = _chapterIndex.ToString();
+        var chapterIndex = _chapterIndex;
+        var chapter = chapterIndex.ToString();
         return new ReaderTtsDocument(
             $"{fileKey}:{chapter}",
             speech.Text,
@@ -222,7 +267,15 @@ public partial class ReaderPage
             speech.MapToSource,
             fileKey,
             chapter,
-            speech.PageBreakOffsets);
+            speech.PageBreakOffsets,
+            (offset, token) => Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (token.IsCancellationRequested || _disposed || _chapterIndex != chapterIndex
+                    || !ReferenceEquals(_readerHost, host)) return;
+                host.NavigateToSpeechOffset(offset);
+                UpdateEpubLabels();
+                _ = SaveProgressSoonAsync(force: true);
+            }).GetTask());
     }
 
     private async Task<bool> AdvanceForSpeechAsync()
@@ -246,8 +299,15 @@ public partial class ReaderPage
     private void PresentSpeech(TtsStateChangedEventArgs e)
     {
         if (_disposed) return;
-        SpeechBar.IsVisible = e.State is not (TtsPlaybackState.Stopped or TtsPlaybackState.Error);
-        ListenLabel.Text = SpeechBar.IsVisible ? "停止" : "听书";
+        var active = e.State is not (TtsPlaybackState.Stopped or TtsPlaybackState.Error);
+        if (!active)
+        {
+            _speechDockVersion++;
+            _speechExpanded = false;
+        }
+        SpeechBar.IsVisible = !_usesNativeFrontend && active && _speechExpanded;
+        SpeechDock.IsVisible = !_usesNativeFrontend && active && !_speechExpanded;
+        ListenLabel.Text = active ? "停止" : "听书";
         if (this.TryFindResource(e.State == TtsPlaybackState.Paused ? "IconPlay" : "IconPause", out var icon)
             && icon is Avalonia.Media.Geometry geometry)
         {
@@ -255,18 +315,43 @@ public partial class ReaderPage
         }
         SpeechStatusText.Text = e.State switch
         {
-            TtsPlaybackState.Generating => "正在合成…",
-            TtsPlaybackState.Playing => e.SegmentCount > 0 ? $"朗读中 {e.SegmentIndex}/{e.SegmentCount}" : "朗读中",
+            TtsPlaybackState.Generating or TtsPlaybackState.Playing => e.SegmentCount > 0
+                ? $"朗读中 {e.SegmentIndex}/{e.SegmentCount}"
+                : "正在准备朗读…",
             TtsPlaybackState.Paused => "已暂停",
             TtsPlaybackState.AdvancingChapter => _isPdf ? "翻到下一页…" : "翻到下一章…",
             _ => string.Empty
         };
         if (e.State == TtsPlaybackState.Error && !string.IsNullOrWhiteSpace(e.Message))
             _shell.ShowToast("朗读失败：" + UiText.Localize(e.Message));
+        NotifyNativeState();
+    }
+
+    private void OnSpeechDockClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        _speechExpanded = true;
+        SpeechDock.IsVisible = false;
+        SpeechBar.IsVisible = true;
+        ScheduleSpeechDock();
+    }
+
+    private async void ScheduleSpeechDock()
+    {
+        var version = ++_speechDockVersion;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4), _lifetime.Token);
+            if (_disposed || version != _speechDockVersion || !_speechExpanded) return;
+            _speechExpanded = false;
+            SpeechBar.IsVisible = false;
+            SpeechDock.IsVisible = true;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
     }
 
     private async void OnSpeechSettingsClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        ScheduleSpeechDock();
         if (_shell.Services.CreateTtsEngine is not { } createEngine) return;
         try
         {
@@ -288,7 +373,11 @@ public partial class ReaderPage
         }
     }
 
-    private void OnSpeechPauseClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _tts?.PauseOrResume();
+    private void OnSpeechPauseClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        _tts?.PauseOrResume();
+        ScheduleSpeechDock();
+    }
 
     private void OnSpeechStopClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _ = _tts?.StopAsync();
 

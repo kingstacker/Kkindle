@@ -14,7 +14,7 @@
       <SolidColorBrush x:Key="TextMutedBrush" Color="#767676" />
       <SolidColorBrush x:Key="TextFaintBrush" Color="#9A9A9A" />
       <SolidColorBrush x:Key="DividerBrush" Color="#EFEFEF" />
-      <SolidColorBrush x:Key="ScrimBrush" Color="#59000000" />
+      <SolidColorBrush x:Key="ScrimBrush" Color="#40000000" />
       <BoxShadows x:Key="CoverShadow">0 2 10 0 #1F000000</BoxShadows>
       <BoxShadows x:Key="CardShadow">0 4 20 0 #1A000000</BoxShadows>
       <BoxShadows x:Key="SegmentShadow">0 1 3 0 #1F000000</BoxShadows>

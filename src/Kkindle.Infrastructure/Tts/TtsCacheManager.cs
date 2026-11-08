@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
@@ -101,6 +102,50 @@ public sealed class TtsCacheManager
         {
             return Task.FromResult<string?>(null);
         }
+    }
+
+    private sealed record TimingFile(string AudioHash, TtsTimingMarker[] Markers);
+
+    public async Task<IReadOnlyList<TtsTimingMarker>?> ReadTimingAsync(
+        string audioPath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var metadataPath = audioPath + ".timing.json";
+            if (!File.Exists(metadataPath)) return null;
+            await using var metadata = File.OpenRead(metadataPath);
+            var timing = await JsonSerializer.DeserializeAsync<TimingFile>(metadata, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (timing?.Markers is not { Length: > 0 }) return null;
+            await using var audio = File.OpenRead(audioPath);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(audio, cancellationToken).ConfigureAwait(false));
+            return string.Equals(hash, timing.AudioHash, StringComparison.Ordinal) ? timing.Markers : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch { return null; }
+    }
+
+    public async Task WriteTimingAsync(string audioPath, string sourcePath,
+        IReadOnlyList<TtsTimingMarker>? markers, CancellationToken cancellationToken = default)
+    {
+        if (markers is not { Count: > 0 }) return;
+        var temporaryPath = audioPath + ".timing.tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using var source = File.OpenRead(sourcePath);
+            var sourceHash = Convert.ToHexString(await SHA256.HashDataAsync(source, cancellationToken).ConfigureAwait(false));
+            await using var audio = File.OpenRead(audioPath);
+            var audioHash = Convert.ToHexString(await SHA256.HashDataAsync(audio, cancellationToken).ConfigureAwait(false));
+            if (!string.Equals(sourceHash, audioHash, StringComparison.Ordinal)) return;
+            await using (var metadata = File.Create(temporaryPath))
+                await JsonSerializer.SerializeAsync(metadata, new TimingFile(audioHash, markers.ToArray()),
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath, audioPath + ".timing.json", overwrite: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch { /* Timing is optional; a cache error must not break audio playback. */ }
+        finally { DeleteFileQuietly(temporaryPath); }
     }
 
     /// <summary>
@@ -320,6 +365,7 @@ public sealed class TtsCacheManager
                 if (string.Equals(file.Path, keep, StringComparison.OrdinalIgnoreCase))
                     continue;
                 DeleteFileQuietly(file.Path);
+                DeleteFileQuietly(file.Path + ".timing.json");
                 totalBytes -= file.Length;
                 if (totalBytes <= _maximumBytes) break;
             }
@@ -361,7 +407,7 @@ public sealed class TtsCacheManager
             baseDirectory = Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData);
         }
-        else if (OperatingSystem.IsMacOS())
+        else if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
         {
             // macOS convention: disposable caches live in ~/Library/Caches,
             // never in ~/.cache (which is a Linux XDG location).

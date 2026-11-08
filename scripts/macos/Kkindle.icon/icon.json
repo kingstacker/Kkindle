@@ -1,0 +1,34 @@
+{
+  "fill": {
+    "solid": "srgb:0.10,0.10,0.11,1.0"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "Spine.png",
+          "name": "Spine",
+          "position": {
+            "scale": 1.2,
+            "translation-in-points": [0, 0]
+          }
+        },
+        {
+          "image-name": "Page.png",
+          "name": "Page",
+          "position": {
+            "scale": 1.2,
+            "translation-in-points": [0, 0]
+          }
+        }
+      ],
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

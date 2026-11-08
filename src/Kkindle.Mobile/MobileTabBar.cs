@@ -1,3 +1,5 @@
+using Avalonia;
+
 namespace Kkindle.Mobile;
 
 /// <summary>
@@ -19,4 +21,9 @@ public interface IMobileTabBar
 
     /// <summary>Matches the native bar to the application's current appearance.</summary>
     void SetDarkAppearance(bool dark);
+}
+
+public interface ISheetOccludingTabBar
+{
+    void SetSheetOcclusion(Rect? sheetBounds);
 }

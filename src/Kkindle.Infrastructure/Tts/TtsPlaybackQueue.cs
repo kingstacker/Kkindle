@@ -89,6 +89,14 @@ public sealed class TtsPlaybackQueue : IDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            // A caller can resume before the asynchronous cleanup continuation.
+            // Only pending generations may be shared; completed requests must
+            // check the cache again instead of returning the original result.
+            if (_inflight.TryGetValue(cachePath, out var previous)
+                && previous.IsValueCreated && previous.Value.IsCompleted)
+            {
+                RemoveIfCurrent(cachePath, previous);
+            }
             actual = _inflight.GetOrAdd(cachePath, lazy);
             task = actual.Value;
             _activeTasks.Add(task);
@@ -142,7 +150,10 @@ public sealed class TtsPlaybackQueue : IDisposable
                 return TtsResult.Success(
                     cached,
                     TtsOptions.Normalize(item.Options).AudioFormat,
-                    fromCache: true);
+                    fromCache: true) with
+                {
+                    TimingMarkers = await _cache.ReadTimingAsync(cached, cancellationToken).ConfigureAwait(false),
+                };
 
             var generated = await _engine.SynthesizeAsync(
                     item.Segment.Text,
@@ -166,12 +177,15 @@ public sealed class TtsPlaybackQueue : IDisposable
                     generated.AudioPath,
                     cancellationToken)
                 .ConfigureAwait(false);
+            await _cache.WriteTimingAsync(cachedPath, generated.AudioPath, generated.TimingMarkers, cancellationToken)
+                .ConfigureAwait(false);
+            var timing = await _cache.ReadTimingAsync(cachedPath, cancellationToken).ConfigureAwait(false);
             return TtsResult.Success(
                 cachedPath,
                 string.IsNullOrWhiteSpace(generated.Format)
                     ? "mp3"
                     : generated.Format,
-                fromCache: false);
+                fromCache: false) with { TimingMarkers = timing };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

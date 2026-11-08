@@ -40,13 +40,18 @@ public partial class SearchSheet : UserControl, IFullHeightSheet
     public SearchSheet(
         Func<string, IProgress<string>, CancellationToken, Task<IReadOnlyList<SearchHit>>> search,
         Action<SearchHit> pick,
-        string? lastQuery)
+        string? lastQuery,
+        bool searchImmediately = false)
     {
         _search = search;
         _pick = pick;
         InitializeComponent();
         QueryBox.Text = lastQuery;
-        Loaded += (_, _) => QueryBox.Focus();
+        Loaded += async (_, _) =>
+        {
+            if (searchImmediately) await SearchAsync();
+            else QueryBox.Focus();
+        };
         DetachedFromVisualTree += (_, _) => _running?.Cancel();
     }
 

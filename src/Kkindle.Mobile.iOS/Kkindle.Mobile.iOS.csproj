@@ -1,15 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- iOS head: owns the app delegate and platform adapters, contains no UI.
-         Everything shared lives in Kkindle.Mobile / ApplicationModules. -->
+    <!-- iOS owns its SwiftUI frontend; shared services and the reader renderer
+         continue to live in Kkindle.Mobile / ApplicationModules. -->
     <TargetFramework>net10.0-ios</TargetFramework>
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
     <OutputType>Exe</OutputType>
     <RootNamespace>Kkindle.iOSHead</RootNamespace>
     <AssemblyName>Kkindle.Mobile.iOS</AssemblyName>
     <ApplicationId>com.kingstacker.kkindle</ApplicationId>
-    <ApplicationTitle>Kkindle</ApplicationTitle>
-    <AppIcon>AppIcon</AppIcon>
+    <ApplicationTitle>kkindle</ApplicationTitle>
+    <AppIcon>Kkindle</AppIcon>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>1.1.3</ApplicationDisplayVersion>
     <!-- Intel Macs are capped at Xcode 26, while the current .NET iOS
@@ -18,9 +18,19 @@
     <ValidateXcodeVersion>false</ValidateXcodeVersion>
     <MtouchLink>SdkOnly</MtouchLink>
     <RuntimeIdentifiers>iossimulator-x64;iossimulator-arm64;ios-arm64</RuntimeIdentifiers>
+    <UseSwiftUIFrontend Condition="'$(UseSwiftUIFrontend)' == ''">true</UseSwiftUIFrontend>
+    <Registrar Condition="'$(UseSwiftUIFrontend)' == 'true'">static</Registrar>
+    <DefineConstants Condition="'$(UseSwiftUIFrontend)' == 'true'">$(DefineConstants);KKINDLE_SWIFT_UI</DefineConstants>
+    <NativeSwiftOutput>$(MSBuildProjectDirectory)/obj/$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/native-ui</NativeSwiftOutput>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Share the real Icon Composer layers with macOS. ACTool emits the
+         Liquid Glass rendition and the fallback for iOS 15–25 together. -->
+    <ImageAsset Remove="Assets.xcassets/AppIcon.appiconset/**" />
+    <ImageAsset Include="../../scripts/macos/Kkindle.icon/**/*"
+                Exclude="../../scripts/macos/Kkindle.icon/**/.DS_Store"
+                Link="Kkindle.icon/%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- The reader's typesetter opens this font by filesystem path. An
          AvaloniaResource alone embeds it in an assembly, not in the app bundle. -->
     <BundleResource Include="..\Kkindle.App\Assets\Fonts\KingHwaOldSong-v3.0.ttf"
@@ -51,4 +61,20 @@
          on both platforms. -->
     <PackageReference Include="bblanchon.PDFium.iOS" Version="152.0.7961" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(UseSwiftUIFrontend)' == 'true'">
+    <PartialAppManifest Include="NativeUI/SceneManifest.plist" />
+    <SwiftFrontendSource Include="NativeUI/*.swift" />
+    <NativeReference Include="$(NativeSwiftOutput)/libKkindleNativeUI.a"
+                     Kind="Static" ForceLoad="true" SmartLink="false"
+                     Frameworks="SwiftUI UIKit Foundation"
+                     LinkWithSwiftSystemLibraries="true" />
+  </ItemGroup>
+
+  <Target Name="BuildSwiftFrontend" BeforeTargets="_ExpandNativeReferences"
+          Condition="'$(UseSwiftUIFrontend)' == 'true' And '$(RuntimeIdentifier)' != ''"
+          Inputs="@(SwiftFrontendSource);NativeUI/build-native-ui.sh"
+          Outputs="$(NativeSwiftOutput)/libKkindleNativeUI.a">
+    <Exec Command="/bin/zsh &quot;$(MSBuildProjectDirectory)/NativeUI/build-native-ui.sh&quot; &quot;$(RuntimeIdentifier)&quot; &quot;$(NativeSwiftOutput)&quot; &quot;$(Configuration)&quot;" />
+  </Target>
 </Project>

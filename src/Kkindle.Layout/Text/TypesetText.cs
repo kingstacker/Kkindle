@@ -42,9 +42,11 @@ public static class TypesetText
     // reading faces ship no `palt`/`halt` feature (the bundled Song face does
     // not), so the composer squeezes these marks itself. Ellipses, dashes,
     // iteration marks and small kana are deliberately excluded: their ink or
-    // their typographic role spans the full cell.
+    // their typographic role spans the full cell. Question and exclamation
+    // marks are centered in common Chinese fonts and must keep their full cell;
+    // otherwise their ink can overlap a following closing quotation mark.
     private const string CompressibleClosingPunctuation =
-        "、。，．：；？！‼⁇⁈⁉）〕］｝〉》」』】〙〗〟’”｠»";
+        "、。，．：；）〕］｝〉》」』】〙〗〟’”｠»";
 
     private const string CompressibleOpeningPunctuation =
         "（〔［｛〈《「『【〘〖〝‘“｟«";

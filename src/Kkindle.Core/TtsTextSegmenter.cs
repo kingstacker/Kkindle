@@ -205,14 +205,25 @@ public static class TtsTextSegmenter
         int maxCharacters = DefaultMaximumCharacters)
     {
         ArgumentNullException.ThrowIfNull(prepared);
-        if (string.IsNullOrWhiteSpace(prepared.Text)) return [];
+        return SplitPlainTextSentences(prepared.Text, maxCharacters);
+    }
+
+    /// <summary>
+    /// Splits already-extracted reader text without interpreting literal markup
+    /// or entities. Segment offsets refer directly to <paramref name="text"/>.
+    /// </summary>
+    public static IReadOnlyList<TtsTextSegment> SplitPlainTextSentences(
+        string? text,
+        int maxCharacters = DefaultMaximumCharacters,
+        bool preserveLongSentences = false)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
 
         maxCharacters = Math.Clamp(
             maxCharacters,
             120,
             RecommendedMaximumCharacters * 2 + 200);
 
-        var text = prepared.Text;
         var segments = new List<TtsTextSegment>();
         var cursor = 0;
         while (cursor < text.Length)
@@ -223,7 +234,7 @@ public static class TtsTextSegmenter
             var start = cursor;
             var naturalEnd = FindNextSentenceEnd(text, start);
             var hardLimit = Math.Min(text.Length, start + maxCharacters);
-            var end = naturalEnd switch
+            var end = preserveLongSentences ? (naturalEnd > 0 ? naturalEnd : text.Length) : naturalEnd switch
             {
                 // Keep a complete sentence even when it is a little longer
                 // than the normal request size. This is what makes one

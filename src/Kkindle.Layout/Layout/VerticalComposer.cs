@@ -161,6 +161,10 @@ internal sealed class VerticalComposer
         }
 
         _cursorX -= block.SpaceAfterLines * ColumnPitch;
+        if (block.Kind == BlockKind.Paragraph)
+        {
+            _cursorX -= _context.Options.ParagraphSpacingEm * _context.Options.BaseFontSize;
+        }
     }
 
     /// <summary>

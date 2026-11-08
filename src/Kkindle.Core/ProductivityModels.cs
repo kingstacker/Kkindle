@@ -78,6 +78,10 @@ public sealed record AppSettings
     // reload, folder install). It is off by default and never shipped enabled.
     public bool PluginDeveloperMode { get; init; }
 
+    // Plugins may declare a background script (contributes.background). It
+    // runs headless, at startup and on its interval, only while this is on.
+    public bool PluginBackgroundTasksEnabled { get; init; } = true;
+
     // Update checks run at most once per calendar day; the timestamp and the
     // discovered update summary persist so the title-bar badge survives restarts
     // without extra network calls.

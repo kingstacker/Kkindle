@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Kkindle.Mobile.Controls"
              x:Class="Kkindle.Mobile.Views.Sheets.SpeechSettingsSheet">
   <StackPanel Margin="20,4,20,24" Spacing="12">
     <TextBlock Classes="label" Text="系统语音" />
@@ -10,8 +11,10 @@
       <TextBlock Classes="label" Text="语速" />
       <TextBlock Grid.Column="1" Name="SpeedText" Classes="muted" />
     </Grid>
-    <Slider Name="SpeedSlider" Minimum="0.5" Maximum="2" TickFrequency="0.1"
-            IsSnapToTickEnabled="True" ValueChanged="OnSpeedChanged" />
+    <c:NativeSliderGroup>
+      <Slider Name="SpeedSlider" Minimum="0.5" Maximum="2" TickFrequency="0.1"
+              IsSnapToTickEnabled="True" ValueChanged="OnSpeedChanged" />
+    </c:NativeSliderGroup>
     <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="保存后，下次开始朗读时生效。" />
     <Button Name="SaveButton" Classes="primary" Content="保存" Click="OnSaveClick" Margin="0,8,0,0" />
   </StackPanel>

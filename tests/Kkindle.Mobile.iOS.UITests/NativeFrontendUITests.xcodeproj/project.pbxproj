@@ -1,0 +1,15 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+A0000000000000000000000A = {isa = PBXBuildFile; fileRef = A0000000000000000000000B; };
+A0000000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFrontendTests.swift; sourceTree = "<group>"; };
+A0000000000000000000000C = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NativeFrontendUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+A0000000000000000000000D = {isa = PBXGroup; children = (A0000000000000000000000B, A0000000000000000000000F); sourceTree = "<group>"; };
+A0000000000000000000000F = {isa = PBXGroup; children = (A0000000000000000000000C); name = Products; sourceTree = "<group>"; };
+A00000000000000000000010 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A0000000000000000000000A); runOnlyForDeploymentPostprocessing = 0; };
+A00000000000000000000011 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000014; buildPhases = (A00000000000000000000010); buildRules = (); dependencies = (); name = NativeFrontendUITests; productName = NativeFrontendUITests; productReference = A0000000000000000000000C; productType = "com.apple.product-type.bundle.ui-testing"; };
+A00000000000000000000012 = {isa = PBXProject; attributes = {LastUpgradeCheck = 2600; }; buildConfigurationList = A00000000000000000000015; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en); mainGroup = A0000000000000000000000D; productRefGroup = A0000000000000000000000F; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000011); };
+A00000000000000000000013 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.kingstacker.kkindle.nativefrontenduitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+A00000000000000000000016 = {isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; }; name = Debug; };
+A00000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000013); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+A00000000000000000000015 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000016); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+}; rootObject = A00000000000000000000012; }

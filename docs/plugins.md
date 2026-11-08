@@ -2,12 +2,25 @@
 
 插件是一个扩展名为 `.kkplugin` 的文件（本质是 zip），导入后在书库书籍的右键菜单和详情页的“插件操作”按钮里出现入口。插件页面运行在独立的网页窗口中，只能使用它声明的权限，不会接触主程序的内部实现。
 
+插件还可以提供不带窗口的**脚本**：阅读器查词时的词典、划词翻译的翻译服务，以及定时运行的后台任务。它们和页面共用同一套 `window.kkindle` 接口和权限。
+
+开发工具都在仓库里：
+
+- `sdk/kkindle.d.ts`：`window.kkindle` 的 TypeScript 类型。
+- `sdk/kkindle-mock.js`：在普通浏览器里模拟宿主，脱离应用开发页面。
+- `tools/Kkindle.PluginTool`（命令 `kkplugin`）：校验、打包、签名、生成插件市场索引。
+
 ## 安装与使用
 
 - 设置 → 高级 → 插件 → **导入插件…**，选择 `.kkplugin` 文件。导入前会列出插件声明的权限，确认后才安装。
 - 安装目录：程序根目录下的 `plugins/<插件 id>/`；插件自己的数据在 `plugin-data/<插件 id>/`。两者都不参与同步和备份。
 - 每个插件的开关、设置页、卸载按钮都在同一页。卸载会同时删除插件保存的数据。
 - 升级：再次导入同 id 的更高版本即可覆盖；导入较低版本会给出提示但允许安装。
+- **插件市场**：设置 → 高级 → 插件 → **插件市场…** 读取官方索引 `https://kkindle.stacker.beauty/plugins/index.json`，列出可安装和可更新的插件；安装仍然走同一个权限确认框，下载的文件必须与索引里的 SHA-256 和大小一致。开发时可以用环境变量 `KKINDLE_PLUGIN_CATALOG` 指向自己的索引（支持 `https://`、本机回环地址和 `file://`）。
+- **更新检查**：打开了“自动检查更新”和网络功能时，启动约 45 秒后对照索引检查已安装插件，有新版本会在状态栏提示，到插件市场里点「更新」即可。
+- **签名**：插件列表和安装确认框会显示来源——「随应用附带」「官方签名」「已签名：发布者」或「未签名」。已签名插件升级时如果换了签名密钥，确认框会给出醒目警告（可能是冒名包）。签名被篡改的包直接拒绝安装。详见下文“签名”。
+- **后台任务**：同一页的「允许插件后台任务」开关控制所有插件的定时脚本，默认开启。
+- 随包插件：桌面版安装包自带“书籍翻译与注音”，放在程序目录的 `bundled-plugins/` 下。首次启动时自动安装到上面的插件目录；之后的版本如果随包插件版本号更高，会自动更新已安装的副本，开关状态保持不变。用户卸载后不会再自动装回，需要时可以手动导入。已安装记录在插件目录的 `bundled-plugins.json`。
 
 ## 插件包结构
 
@@ -15,6 +28,10 @@
 com.example.my-plugin/
 ├── manifest.json
 ├── icon.svg
+├── signature.json        可选，kkplugin sign 生成
+├── scripts/
+│   ├── dictionary.js     词典 / 翻译 / 后台脚本（无窗口）
+│   └── background.js
 └── ui/
     ├── app.html
     ├── app.js
@@ -22,7 +39,7 @@ com.example.my-plugin/
     └── settings.html
 ```
 
-打包：`scripts/package-plugin.sh examples/book-info`，产物为 `<目录名>.kkplugin`。
+打包：`kkplugin pack examples/book-info`（或旧脚本 `scripts/package-plugin.sh examples/book-info`），产物为 `<目录名>.kkplugin`。见下文“开发工具”。
 
 页面引用的相对资源（`<script src>`、`<link rel="stylesheet">`、`<img src>`）在打开时会被**内联**进同一个文档，因此页面里没有其他文件可加载，也不允许链接到外部地址。
 
@@ -36,7 +53,16 @@ com.example.my-plugin/
   "apiVersion": 1,
   "author": "作者",
   "description": "一句话说明这个插件做什么。",
+  "homepage": "https://example.com/my-plugin",
+  "minAppVersion": "1.1.3",
   "icon": "ui/icon.svg",
+  "i18n": {
+    "en-US": {
+      "name": "My Plugin",
+      "description": "What this plugin does, in one sentence.",
+      "titles": { "match": "Match details", "catalog": "Online catalog", "app": "Online library", "dict": "Example dictionary" }
+    }
+  },
   "permissions": {
     "network": ["https://example.com", "https://*.examplecdn.com"],
     "library": "write",
@@ -45,7 +71,11 @@ com.example.my-plugin/
     "pinyin": true,
     "import": true,
     "storage": true,
-    "secrets": true
+    "secrets": true,
+    "content": true,
+    "bookFiles": true,
+    "readingWrite": true,
+    "ai": true
   },
   "contributes": {
     "bookActions": [
@@ -58,7 +88,14 @@ com.example.my-plugin/
       { "id": "lookup", "title": "查资料", "page": "ui/reader.html", "width": 960, "height": 680 }
     ],
     "settings": { "page": "ui/settings.html", "width": 560, "height": 460 },
-    "app": { "title": "在线书库", "page": "ui/library.html", "width": 1080, "height": 760 }
+    "app": { "title": "在线书库", "page": "ui/library.html", "width": 1080, "height": 760 },
+    "dictionaries": [
+      { "id": "dict", "title": "示例词典", "script": "scripts/dictionary.js" }
+    ],
+    "translators": [
+      { "id": "mt", "title": "示例翻译", "script": "scripts/dictionary.js" }
+    ],
+    "background": { "script": "scripts/background.js", "intervalMinutes": 360, "onStartup": true }
   }
 }
 ```
@@ -68,6 +105,9 @@ com.example.my-plugin/
 | `id` | 小写字母、数字、点和短横线，3–64 个字符；同时是安装目录名 |
 | `version` | `1.0.0` 形式；再次导入更高版本即为升级 |
 | `apiVersion` | 目前固定为 `1`，不兼容时导入会被拒绝 |
+| `minAppVersion` | 可选，`1.2.0` 形式；低于此版本的 Kkindle 拒绝安装，插件市场显示「需要 Kkindle x.y.z」 |
+| `homepage` | 可选，`https://` 地址；显示在插件列表和市场中 |
+| `i18n` | 可选，按语言代码（如 `en-US`）提供 `name`、`description` 和 `titles`。`titles` 的键是贡献点 `id`，独立页面用 `app`。找不到完全匹配时按语言前缀（`en`）匹配，仍找不到就用顶层字段 |
 | `permissions.network` | 允许请求的 HTTPS 来源；`*.example.com` 包含子域名，端口必须是默认端口 |
 | `permissions.library` | `read` 可读选中书籍，`write` 可修改；声明 `bookActions` 时必须至少为 `read` |
 | `permissions.libraryAll` | `true` 时允许搜索整个书库、读取分组和阅读数据；创建或修改分组还需要 `library` 为 `write` |
@@ -76,11 +116,18 @@ com.example.my-plugin/
 | `permissions.import` | 允许把插件指定的文件下载并加入书库（单个文件上限 500 MB） |
 | `permissions.storage` | 允许使用插件私有键值存储（上限 1 MB） |
 | `permissions.secrets` | 允许使用系统密钥库加密保存账号、密码等敏感信息 |
+| `permissions.content` | 允许读取书籍目录和章节正文（`book.getToc` / `book.getChapterText`），支持 EPUB、AZW3、MOBI；需要 `library` |
+| `permissions.bookFiles` | 允许按块读取书籍原始文件（`library.readFile`）；需要 `library` |
+| `permissions.readingWrite` | 允许新增划线和书签（`reading.addAnnotation` / `addBookmark`）；需要 `library` |
+| `permissions.ai` | 允许使用用户在应用里配置的 AI 服务（`ai.complete`），插件拿不到 API Key |
 | `contributes.bookActions` | 书籍操作；`multiple: true` 时允许一次选中多本书 |
 | `contributes.commands` | 全局命令；显示在书库工具栏的「插件工具」菜单里，打开时不带选中的书籍 |
 | `contributes.readerActions` | 阅读器划词操作；选中文字后出现在阅读器选区工具栏，页面通过 `kkindle.context.selection` 取得选中内容 |
 | `contributes.settings` | 设置页；插件设置完全由插件自己的页面实现 |
 | `contributes.app` | 独立页面；在设置 → 插件里以「打开」按钮进入，不依赖选中的书籍 |
+| `contributes.dictionaries` | 词典脚本；阅读器查词弹窗里多出一个以 `title` 命名的标签页。见“词典、翻译与后台脚本” |
+| `contributes.translators` | 翻译脚本；阅读器划词翻译面板顶部多出一个以 `title` 命名的按钮 |
+| `contributes.background` | 后台脚本；`intervalMinutes`（0 或 15–10080）和 `onStartup`（默认 `true`）至少要有一个生效 |
 
 声明了 `permissions.network` 的插件还可以在运行时请求访问额外域名（例如轮换的镜像或个人域名），用户确认后才会放行；确认结果保存在 `plugin-data/<id>/network.json`，卸载插件时一并删除。
 
@@ -91,8 +138,12 @@ com.example.my-plugin/
 ### 上下文
 
 ```js
-kkindle.context // { pluginId, pluginVersion, action, bookIds, language, appVersion, theme, selection }
+kkindle.context
+// { pluginId, pluginVersion, action, bookIds, language, appVersion, theme,
+//   selection, developerMode, headless }
 ```
+
+`language` 是界面语言（`zh-CN` / `en-US`），可据此切换插件自己的文案。`headless` 在词典、翻译和后台脚本里为 `true`。
 
 `bookIds` 是本次打开窗口时选中的书籍；没有 `libraryAll` 权限时，插件只能访问这些书籍。
 
@@ -105,6 +156,24 @@ kkindle.context // { pluginId, pluginVersion, action, bookIds, language, appVers
   position   // 阅读器内部定位信息，通常原样保存即可
 }
 ```
+
+### 能力检测与接口稳定性
+
+```js
+kkindle.capabilities
+// { apiVersion: 1, appVersion, headless, methods: ["library.getBooks", ...],
+//   permissions: { library, libraryAll, network, import, translation, pinyin,
+//                  storage, secrets, content, ai, readingWrite, bookFiles } }
+
+if (kkindle.has("ai.complete")) { /* 当前宿主支持这个方法 */ }
+```
+
+**按方法检测，不要比较版本号。** 约定如下：
+
+- `apiVersion: 1` 期间只做向后兼容的增量：新增方法、新增可选参数、返回对象新增字段。已有方法的名称、参数和返回字段不会删改。
+- 新方法发布后，旧版应用里 `kkindle.has(name)` 为 `false`，调用会被拒绝（`不支持的方法`）。可选功能先检测再用；必须依赖新方法时，在 manifest 里写 `minAppVersion`，旧版应用会拒绝安装而不是运行到一半失败。
+- 不兼容的改动只会出现在 `apiVersion: 2`，届时旧插件仍按版本 1 运行或被明确拒绝，不会静默出错。
+- 返回对象里没有写进文档的字段不属于接口，可能变化。
 
 ### 书库
 
@@ -151,7 +220,7 @@ await kkindle.library.removeFromCollection(bookId, created.id);
 
 分组名称最多 60 个字符，且不能与现有分组重名。「未收藏」是系统分组，不能通过插件修改。宿主的「分组互斥」设置只约束主界面操作，插件调用会保留多分组关系。
 
-#### 阅读数据（只读）
+#### 阅读数据
 
 ```js
 const progress = await kkindle.reading.getProgress(bookId);
@@ -170,7 +239,89 @@ const stats = await kkindle.reading.getStats(bookId);
 //   completedChapters, totalChapters, updatedAt }] }
 ```
 
-阅读数据按书籍文件（格式）保存，因此返回值总是 `files` 数组；划线和高亮都表示为 `annotations`，`note` 为空时表示只有划线。插件只能读取，不能修改或删除阅读数据。
+阅读数据按书籍文件（格式）保存，因此返回值总是 `files` 数组；划线和高亮都表示为 `annotations`，`note` 为空时表示只有划线。
+
+声明 `permissions.readingWrite` 后可以**新增**划线和书签（不能修改或删除已有数据）：
+
+```js
+const annotation = await kkindle.reading.addAnnotation(bookId, {
+  chapterIndex: 3,            // book.getToc 的 chapters[].index
+  startOffset: 120,           // book.getChapterText 文本中的字符位置
+  endOffset: 168,             // 必须大于 startOffset，跨度最多 20,000 个字符
+  note: "批注（可选）",
+  color: "#C0392B",           // #RRGGBB，默认 #000000
+  style: "highlight",         // solid / wavy / dashed / highlight
+  fileId: null                // 可选，默认取第一个可读格式
+});
+// { id, bookId, fileId, chapterPath, startOffset, endOffset, selectedText, note, color, underlineStyle }
+
+const bookmark = await kkindle.reading.addBookmark(bookId, {
+  chapterIndex: 3, offset: 120,
+  title: "可选，默认章节名", quote: "可选，默认取该位置之后的文字"
+});
+// { id, bookId, fileId, chapterPath, chapterIndex, title, quote }
+```
+
+偏移量和阅读器内部使用的是同一套章节文本，因此只要来自 `book.getChapterText`，写入的划线会准确落在原文位置；`selectedText`、前后文由宿主根据偏移截取，插件不能伪造。写入的数据和用户自己做的划线、书签存在一起，下次打开这本书即可看到。
+
+### 书籍正文（`permissions.content`）
+
+```js
+const outline = await kkindle.book.getToc(bookId, { fileId: null });
+// { bookId, fileId, format,
+//   chapters: [{ index, title, path, length }],         // 阅读顺序（spine）
+//   toc: [{ title, chapterIndex, level, fragment }] }    // 目录，可多级
+
+const slice = await kkindle.book.getChapterText(bookId, 0, { offset: 0, maxLength: 200000 });
+// { chapterIndex, title, path, text, offset, length, hasMore }
+```
+
+- 支持 EPUB、AZW3、MOBI；书籍没有这些格式时报错。`fileId` 省略时自动选择。
+- `text` 是阅读器看到的纯文本（去掉标签、保留段落换行）；`length` 是整章长度，章节很长时用 `offset` + `hasMore` 分段读取，每次最多 200,000 个字符。
+- `path` 与划线、书签里的 `chapterPath` 一致，可直接对应。
+- 访问范围和书库一样：没有 `libraryAll` 时只能读本次选中的书。
+- 云端未下载的书会先按需下载到本地。
+
+### 读取书籍文件（`permissions.bookFiles`）
+
+```js
+let offset = 0, chunks = [];
+for (;;) {
+  const chunk = await kkindle.library.readFile(bookId, { offset, length: 4 * 1024 * 1024 });
+  // { fileId, name, format, size, offset, data /* base64 */, hasMore }
+  chunks.push(chunk.data);
+  if (!chunk.hasMore) break;
+  offset = chunk.offset + atob(chunk.data).length;
+}
+```
+
+每块默认 4 MB、最多 8 MB。适合导出、转换或上传到用户自己的服务；只需要文字时请用 `book.getChapterText`，权限更小。
+
+### 在阅读器中打开
+
+```js
+await kkindle.reader.open(bookId, {
+  chapterIndex: 3,            // 或 chapterPath: "OEBPS/Text/ch3.xhtml"
+  offset: 120,                // 章节内字符位置，可选
+  fileId: null
+});
+```
+
+关闭插件窗口，打开阅读器并跳到指定位置；不需要额外权限，但书籍访问范围规则同样适用。脚本（无窗口）里不可用。
+
+### AI（`permissions.ai`）
+
+```js
+const status = await kkindle.ai.status();
+// { available, provider, model, reason }   reason：未启用 / 未配置 / 网络已关闭 等
+
+const text = await kkindle.ai.complete("把这段话改写得更简洁：……", {
+  system: "你是一名编辑。",
+  history: [{ role: "user", content: "……" }, { role: "assistant", content: "……" }]
+});
+```
+
+使用用户在 设置 → AI 里配置的服务和模型，插件拿不到 API Key。`complete` 直接返回回复文本。提示词、系统提示和历史合计上限 200,000 个字符，历史最多 50 条。AI 未启用、未配置或网络关闭（本机模型除外）时调用失败，先用 `status()` 判断并给出提示。
 
 ### 网络
 
@@ -351,6 +502,62 @@ body { color: var(--kk-ink); background: var(--kk-paper); font: 14px var(--kk-fo
 
 带 `hidden` 属性的元素始终隐藏，不会被页面里的 `display` 规则覆盖。字体随应用使用宋体系字体；由于 CSP 只允许 `data:` 字体，不要引用外部字体文件。
 
+## 词典、翻译与后台脚本
+
+`contributes.dictionaries`、`contributes.translators` 和 `contributes.background` 指向的是 `.js` 脚本而不是页面。脚本在宿主内的 JavaScript 沙箱里运行，没有窗口和 DOM，但 `window.kkindle` 与页面完全相同，权限检查也相同。脚本在顶层注册处理函数：
+
+```js
+// scripts/dictionary.js
+kkindle.register.dictionary("dict", async (term, { language }) => {
+  const res = await kkindle.http.fetch("https://dict.example.com/api?q=" + encodeURIComponent(term));
+  if (!res.ok) return null;                       // null / 空数组：显示“没有结果”
+  const data = JSON.parse(res.body);
+  return {
+    headword: data.word,
+    phonetic: data.ipa,                           // 可选
+    senses: data.meanings.map(m => ({ pos: m.pos, text: m.definition, examples: m.examples })),
+    note: "来源：Example Dictionary"               // 可选
+  };
+});
+
+kkindle.register.translator("mt", async (text, { target, language }) => {
+  const key = await kkindle.secrets.get("apiKey");
+  const res = await kkindle.http.fetch("https://mt.example.com/translate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+    body: JSON.stringify({ text, target })
+  });
+  return JSON.parse(res.body).translation;        // 字符串或 { text }
+});
+```
+
+```js
+// scripts/background.js
+kkindle.register.background(async ({ reason, lastRun, lastSucceeded }) => {
+  // reason: "startup" | "interval"；lastRun 为上次运行时间（ISO 字符串）或 null
+  const page = await kkindle.library.search({ sort: "updated", pageSize: 20 });
+  await kkindle.storage.set("lastSync", { at: new Date().toISOString(), count: page.totalCount });
+});
+```
+
+| 贡献点 | 何时调用 | 参数 | 返回值 |
+|---|---|---|---|
+| `dictionaries` | 阅读器查词弹窗打开时，每个词典一个标签页 | `(term, { language })` | 字符串、单个词条、词条数组或 `{ entries: [...] }`；`null` 表示无结果 |
+| `translators` | 用户在划词翻译面板点击该翻译服务的按钮 | `(text, { target, language })`，`target` 为面板当前的目标语言 | 字符串、`{ text }` 或 `{ translation }` |
+| `background` | 启动约 20 秒后（`onStartup`）和每隔 `intervalMinutes` 分钟 | `({ reason, lastRun, lastSucceeded })` | 忽略；抛出异常或 reject 视为失败 |
+
+词条对象的字段：`headword`（或 `word`，缺省为查询词）、`phonetic`（或 `pronunciation`）、`senses`（字符串或 `{ pos/partOfSpeech, text/definition, examples }` 的数组；没有 `senses` 时可直接写 `definition`）、`note`。宿主只显示这些字段，并截断过长内容：最多 20 个词条、每条 30 个义项、每个义项 5 个例句、单段文字 4,000 字符；译文最多 100,000 字符。返回的内容一律作为纯文本显示，不会解释 HTML。
+
+运行规则：
+
+- 每次调用都会新建沙箱并重新执行整个脚本，所以全局变量不会在两次调用之间保留；需要缓存时用 `kkindle.storage`。
+- 时限：词典和翻译 20 秒，后台任务 2 分钟；内存上限 64 MB，脚本文件最多 2 MB，返回值序列化后最多 200,000 字符。超时或超限即视为失败。
+- 可用的全局对象：标准 JavaScript（含 `async`/`await`）、`Promise`、`setTimeout` / `clearTimeout`、`atob` / `btoa`、`console`。**没有** `fetch`、`XMLHttpRequest`、`document`、`localStorage`；联网用 `kkindle.http.fetch`。
+- 脚本不能弹出界面：`ui.pickFiles`、`ui.saveFile`、剪贴板、`ui.openExternal`、`reader.open` 会被拒绝；`network.requestAccess` 不会弹窗，只对 manifest 声明或用户之前在页面里批准过的域名返回 `granted: true`；`library.importDownload` 需要用户确认，因此在脚本里总是被拒绝。`ui.notify` 显示在主窗口状态栏。
+- 脚本的 `context.bookIds` 为空，读取书籍需要 `libraryAll`（搜索后按 id 访问）。
+- 后台任务同一时间只运行一个插件；连续失败 5 次后暂停，直到插件更新到新版本。运行记录在 `plugin-data/background-state.json`。用户可以在插件设置里整体关闭后台任务；网络开关同样约束脚本。
+- 开发者模式下，脚本的 `console.*` 和错误写入 `plugin-data/headless-console.log`（上限 1 MB），排查问题时先看这里。
+
 ## 从示例插件开始
 
 `examples/book-info` 是最小可运行的插件：只声明读取权限，打开后展示选中书籍的作者、丛书、出版社、出版日期、ISBN、页数、标签和格式。它不连接网络、不修改书库，适合直接复制成新插件的起点。
@@ -509,6 +716,13 @@ examples/book-info/
 | 搜索整个书库 | `library.search(options)` / `library.getBook(id)` | `libraryAll` |
 | 读/建/改分组 | `library.getCollections` / `createCollection` / `addToCollection` / `removeFromCollection` | `libraryAll`（修改还需 `library: write`） |
 | 读进度/划线/书签/统计 | `reading.getProgress/getAnnotations/getBookmarks/getStats(bookId)` | `libraryAll` |
+| 新增划线/书签 | `reading.addAnnotation` / `reading.addBookmark` | `readingWrite` + `library` |
+| 读目录和章节正文 | `book.getToc(bookId)` / `book.getChapterText(bookId, index)` | `content` + `library` |
+| 读书籍原始文件 | `library.readFile(bookId, { offset, length })` | `bookFiles` + `library` |
+| 打开阅读器并定位 | `reader.open(bookId, { chapterIndex, offset })` | — |
+| 调用用户配置的 AI | `ai.status()` / `ai.complete(prompt, options)` | `ai` |
+| 检测宿主是否支持某方法 | `kkindle.has("book.getToc")` / `kkindle.capabilities` | — |
+| 提供词典/翻译/后台任务 | `register.dictionary` / `register.translator` / `register.background` | 贡献点 + 实际用到的权限 |
 | 选择并导入本地文件 | `ui.pickFiles()` → `library.importFiles(paths)` | `import` |
 | 保存文件 / 剪贴板 | `ui.saveFile` / `ui.copyText` / `ui.readText` | — |
 | 监听书库、阅读数据和主题变化 | `events.on('library.changed' / 'reading.changed' / 'theme.changed', handler)` | — |
@@ -529,13 +743,16 @@ examples/book-info/
 ### 打包与安装
 
 ```sh
-scripts/package-plugin.sh examples/book-info dist/
+dotnet run --project tools/Kkindle.PluginTool -- pack examples/book-info -o dist/
+# 或旧脚本：scripts/package-plugin.sh examples/book-info dist/
 ```
 
-脚本会在插件目录内打包，保证 `manifest.json` 位于压缩包根部，并排除 `.git` 等无关文件。然后在 设置 → 高级 → 插件 → **导入插件…** 选择产物；确认权限后安装。安装后的副本在程序根目录的 `plugins/<id>/`，插件数据在 `plugin-data/<id>/`，两者都不参与同步和备份。
+打包时保证 `manifest.json` 位于压缩包根部，并排除 `.git`、`node_modules`、`.DS_Store` 等无关文件。然后在 设置 → 高级 → 插件 → **导入插件…** 选择产物；确认权限后安装。安装后的副本在程序根目录的 `plugins/<id>/`，插件数据在 `plugin-data/<id>/`，两者都不参与同步和备份。
 
 ### 调试与排错
 
+- **先跑校验**：`kkplugin validate <目录或 .kkplugin>` 用应用自己的解析代码检查清单、页面和脚本文件、签名，并列出权限、贡献点和语言；它能通过，应用就能安装。
+- **脱离应用开发页面**：在页面里先引入 `sdk/kkindle-mock.js`，用浏览器打开即可调用全部接口（数据是假的，存储用 `localStorage`）。在 `window.KKINDLE_MOCK` 里可以改上下文、权限、书籍和 AI 回复；`kkindleMock.lookup("词")`、`kkindleMock.translate("text")`、`kkindleMock.runBackground()` 可以直接调试脚本里注册的处理函数。在应用里 `window.kkindle` 已存在，mock 不会生效。
 - **页面打不开**：先在插件列表确认版本、操作页路径和权限是否被拒绝；安装/升级失败时宿主会显示解析错误。
 - **开发者模式**：在 设置 → 高级 → 插件 里打开「插件开发模式」，之后新打开的插件窗口会：
   - 允许在页面内右键打开 WebView 开发者工具；
@@ -547,6 +764,77 @@ scripts/package-plugin.sh examples/book-info dist/
 - **网络问题**：先确认应用设置里的网络开关，再确认 `permissions.network` 声明或运行时授权；HTTP 错误码由 `http.fetch` 的结果返回，不会自动抛异常。
 - **改完没生效**：关闭插件窗口重新打开；设置页保存的值通常在下一次打开匹配窗口时读取。升级后仍显示旧内容时，检查是否导入了更高版本、以及 id 是否与原来一致。
 
+### 开发工具：kkplugin
+
+```sh
+dotnet run --project tools/Kkindle.PluginTool -- help
+```
+
+| 命令 | 作用 |
+|---|---|
+| `validate <目录或 .kkplugin>` | 用应用的解析代码校验，列出权限、贡献点、语言和签名 |
+| `pack <目录> [-o 输出目录] [--key 私钥.pem] [--publisher 名称]` | 打包为 `.kkplugin`，给了 `--key` 时顺便签名 |
+| `sign <插件.kkplugin> --key 私钥.pem [--publisher 名称]` | 给已有的包签名（会替换旧签名） |
+| `verify <插件.kkplugin>` | 只校验签名 |
+| `keygen [-o 目录]` | 生成 ECDSA P-256 密钥对：`kkplugin-<密钥 ID>.pem`（私钥，权限 600）和 `.pub` |
+| `index <目录> --base-url https://…/plugins/ [-o index.json]` | 为目录里所有 `.kkplugin` 生成插件市场索引，并用应用的解析器复核 |
+
+TypeScript 项目把 `sdk/kkindle.d.ts` 复制到工程里（或在 `tsconfig.json` 的 `include` 里引用），`kkindle.*` 即有完整类型和注释；JavaScript 文件也可以在开头写 `/// <reference path="kkindle.d.ts" />` 获得编辑器补全。
+
+### 签名
+
+签名文件 `signature.json` 位于包根部，记录插件 id、版本和包内每个文件（除自身外）的 SHA-256，用 ECDSA P-256（ES256）签名。任何文件被修改、增加或删除，签名都会失效，应用拒绝安装。
+
+| 来源 | 含义 |
+|---|---|
+| 随应用附带 | 从安装包的 `bundled-plugins/` 安装 |
+| 官方签名 | 用 Kkindle 官方密钥签名（公钥写在 `PluginSignature.OfficialKeys`） |
+| 已签名：发布者 | 用第三方密钥签名。应用不认识这把钥匙，但会记住它：之后的升级换了密钥会醒目警告 |
+| 未签名 | 没有 `signature.json`，仍可安装，确认框会标明 |
+
+第三方开发者：`kkplugin keygen` 生成自己的密钥，之后每次发布都用同一把私钥签名。**私钥丢失就无法再以同一身份发布更新**（用户升级时会看到“签名者变了”的警告），请离线备份，不要提交到仓库。
+
+### 插件市场与索引
+
+插件市场读取一个静态 JSON 索引，可以放在任何 HTTPS 静态站点上：
+
+```json
+{
+  "format": 1,
+  "generatedAt": "2026-11-07T00:00:00Z",
+  "plugins": [
+    {
+      "id": "com.kkindle.book-translation",
+      "name": "书籍翻译与注音",
+      "version": "1.2.0",
+      "description": "……",
+      "author": "Kkindle",
+      "homepage": "https://kkindle.stacker.beauty/",
+      "minAppVersion": null,
+      "trust": "official",
+      "download": "https://kkindle.stacker.beauty/plugins/book-translation.kkplugin",
+      "sha256": "64 位十六进制",
+      "size": 123456,
+      "i18n": { "en-US": { "name": "Book Translation & Pinyin", "description": "……" } }
+    }
+  ]
+}
+```
+
+- 必填：`id`、`name`、`version`、`download`、`sha256`；缺字段或格式不对的条目会被跳过，同一个 id 只取第一条。
+- `download` 可以是相对索引地址的路径；必须是 `https://`（开发时可以是回环地址或 `file://`，但要和索引同类）。
+- 下载后先核对 `sha256` 和 `size`，再走正常的校验、签名和权限确认；索引里的 `trust` 只是给人看的说明，应用不读取它，来源一律以包里的签名为准。
+- 包上限与手动导入相同；`format` 大于 1 的索引会提示需要更新应用。
+
+官方插件的发布流程：
+
+```sh
+scripts/publish-plugins.sh                    # plugins/ 下全部插件
+scripts/publish-plugins.sh book-translation   # 只发布一个
+```
+
+脚本用官方私钥（环境变量 `KKINDLE_PLUGIN_SIGNING_KEY` 指定，默认 `~/.config/kkindle/plugin-signing/official-p256.pem`）打包签名到 `website/plugins/`，再生成 `website/plugins/index.json`；之后照常运行 `scripts/build_website.sh` 部署网站即可。发布前记得递增插件版本号。
+
 ### 发布前检查
 
 - 权限只声明真正用到的项；描述里写清楚联网做什么。
@@ -555,10 +843,13 @@ scripts/package-plugin.sh examples/book-info dist/
 - 所有外部文本都用 `textContent` 写入；不拼接 HTML。
 - 浅色和深色主题下都检查过；窗口缩到最小尺寸时不溢出。
 - 版本号已递增；从干净目录打包；用旧版本升级安装验证过一次。
+- `kkplugin validate` 通过；用了新接口时写好 `minAppVersion`，或先用 `kkindle.has()` 检测。
+- 有英文用户时补上 `i18n.en-US`，页面按 `kkindle.context.language` 切换文案。
+- 打算长期发布的插件用自己的密钥签名，并备份私钥。
 
 ## 现有插件源码
 
-仓库中保留的插件源码在 `plugins/`；书籍详情匹配和在线书库的源码单独维护，不在本仓库中：
+仓库中保留的插件源码在 `plugins/`，其中 `book-translation` 由 `src/Kkindle.App/Kkindle.App.csproj` 复制到输出目录的 `bundled-plugins/`，随桌面版发布（修改后记得递增 `manifest.json` 的版本号，老用户才会收到更新）；书籍详情匹配和在线书库的源码单独维护，不在本仓库中：
 
 - “书籍详情匹配”插件（id `com.kkindle.book-details-match`），搜索在线图书条目，展示候选和详情对比，按字段勾选写回书名、作者、丛书、出版社、出版年、ISBN、页数、装帧、简介、评分和封面。插件设置中填写包含 `{query}`（也可用 `{title}`、`{author}`、`{isbn}`）的搜索地址模板；字段和封面从搜索结果及条目页面自动识别，不依赖特定网站，插件包内不包含任何网站地址。批量请求间隔默认 30 秒，同一本书的页面和详情之间使用 3 秒间隔。第一次打开插件设置页时会显示免责声明，同意后不再显示。
 - `plugins/book-translation`：“书籍翻译与注音”插件（id `com.kkindle.book-translation`），书籍右键菜单里提供“翻译书籍”和“生成注音书”两个操作，分别选择翻译服务、语言、输出模式、注音引擎/样式，展示进度并支持取消；设置页保存默认选项。翻译和注音都使用宿主引擎，结果直接加入书库。
@@ -575,5 +866,6 @@ scripts/package-plugin.sh plugins/book-translation dist/
 - 插件页面不能自己打开子窗口，也不能留在窗口之外的导航。
 - Linux 的插件窗口依赖 WebKitGTK/WPE，界面渲染需要单独验证；不可用时只能使用设置页之外的宿主界面。
 - 暂不提供「元数据来源」贡献：主界面的在线元数据流程没有暴露给插件。需要匹配书籍信息时，请使用 `contributes.bookActions` 打开自己的页面（现有“书籍详情匹配”插件即此模式）。
-- 暂不提供后台或定时任务：插件页面只在窗口打开期间运行，窗口关闭后页面逻辑停止。耗时的整本书翻译、注音和模型下载由宿主执行，关闭窗口前会询问是否取消。
+- 插件页面只在窗口打开期间运行，窗口关闭后页面逻辑停止。需要定时工作时用 `contributes.background` 脚本（最短间隔 15 分钟，单次 2 分钟内完成）；耗时的整本书翻译、注音和模型下载由宿主执行，关闭窗口前会询问是否取消。
+- 词典、翻译和后台脚本没有 DOM，不能弹出界面，也不能调用整本书翻译/注音任务。
 - `contributes.commands` 目前显示在书库工具栏的「插件工具」菜单中，macOS 原生菜单栏暂不追加插件项。

@@ -36,6 +36,27 @@ public sealed record PluginCommand(string Id, string Title, string Page, int Wid
 public sealed record PluginReaderAction(string Id, string Title, string Page, int Width, int Height);
 
 /// <summary>
+/// A headless lookup source shown in the reader's dictionary popup. The
+/// script runs in the plugin script runtime and answers <c>lookup</c> calls.
+/// </summary>
+public sealed record PluginDictionaryProvider(string Id, string Title, string Script);
+
+/// <summary>A headless translation engine offered in the reader's translation popup.</summary>
+public sealed record PluginTranslatorProvider(string Id, string Title, string Script);
+
+/// <summary>
+/// A script run without a window: once after startup and then every
+/// <see cref="IntervalMinutes"/> minutes (0 means startup only).
+/// </summary>
+public sealed record PluginBackgroundTask(string Script, int IntervalMinutes, bool RunOnStartup);
+
+/// <summary>Display strings for one language; missing entries fall back to the manifest defaults.</summary>
+public sealed record PluginLocalization(
+    string? Name,
+    string? Description,
+    IReadOnlyDictionary<string, string> Titles);
+
+/// <summary>
 /// The validated contents of a plugin's <c>manifest.json</c>. Construction
 /// goes through <see cref="Parse"/> so every instance has passed validation.
 /// </summary>
@@ -43,6 +64,12 @@ public sealed partial record PluginManifest
 {
     public const string FileName = "manifest.json";
     public const int SupportedApiVersion = 1;
+
+    /// <summary>
+    /// Shortest allowed background interval. Plugins cannot poll faster than
+    /// this; the scheduler also enforces it.
+    /// </summary>
+    public const int MinimumBackgroundIntervalMinutes = 15;
     private const int DefaultPageWidth = 960;
     private const int DefaultPageHeight = 680;
 
@@ -71,6 +98,31 @@ public sealed partial record PluginManifest
     public bool AllowsPinyin { get; init; }
     public bool UsesStorage { get; init; }
     public bool UsesSecrets { get; init; }
+
+    /// <summary>Reads chapter text and the table of contents of accessible books.</summary>
+    public bool CanReadContent { get; init; }
+
+    /// <summary>Sends prompts to the AI service the user configured in the app.</summary>
+    public bool UsesAi { get; init; }
+
+    /// <summary>Adds annotations and bookmarks to accessible books.</summary>
+    public bool CanWriteReadingData { get; init; }
+
+    /// <summary>Reads the raw bytes of accessible book files.</summary>
+    public bool CanReadBookFiles { get; init; }
+
+    /// <summary>Oldest application version the plugin supports, or null.</summary>
+    public Version? MinAppVersion { get; init; }
+
+    public string? Homepage { get; init; }
+
+    /// <summary>Per-language display strings keyed by normalized language (<c>en-US</c>, <c>zh-CN</c>).</summary>
+    public IReadOnlyDictionary<string, PluginLocalization> Localizations { get; init; } =
+        new Dictionary<string, PluginLocalization>(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyList<PluginDictionaryProvider> Dictionaries { get; init; } = [];
+    public IReadOnlyList<PluginTranslatorProvider> Translators { get; init; } = [];
+    public PluginBackgroundTask? Background { get; init; }
     public IReadOnlyList<PluginBookAction> BookActions { get; init; } = [];
     public IReadOnlyList<PluginCommand> Commands { get; init; } = [];
     public IReadOnlyList<PluginReaderAction> ReaderActions { get; init; } = [];
@@ -123,6 +175,10 @@ public sealed partial record PluginManifest
             var allowsPinyin = false;
             var usesStorage = false;
             var usesSecrets = false;
+            var canReadContent = false;
+            var usesAi = false;
+            var canWriteReadingData = false;
+            var canReadBookFiles = false;
             if (root.TryGetProperty("permissions", out var permissions))
             {
                 if (permissions.ValueKind != JsonValueKind.Object)
@@ -159,6 +215,10 @@ public sealed partial record PluginManifest
                     usesStorage = storage.ValueKind == JsonValueKind.True;
                 if (permissions.TryGetProperty("secrets", out var secrets))
                     usesSecrets = secrets.ValueKind == JsonValueKind.True;
+                canReadContent = IsTrue(permissions, "content");
+                usesAi = IsTrue(permissions, "ai");
+                canWriteReadingData = IsTrue(permissions, "readingWrite");
+                canReadBookFiles = IsTrue(permissions, "bookFiles");
             }
 
             var actions = new List<PluginBookAction>();
@@ -166,6 +226,9 @@ public sealed partial record PluginManifest
             var readerActions = new List<PluginReaderAction>();
             PluginSettingsPage? settingsPage = null;
             PluginAppPage? appPage = null;
+            var dictionaries = new List<PluginDictionaryProvider>();
+            var translators = new List<PluginTranslatorProvider>();
+            PluginBackgroundTask? background = null;
             if (root.TryGetProperty("contributes", out var contributes))
             {
                 if (contributes.ValueKind != JsonValueKind.Object)
@@ -246,12 +309,56 @@ public sealed partial record PluginManifest
                         ReadDimension(app, "width", DefaultPageWidth),
                         ReadDimension(app, "height", DefaultPageHeight));
                 }
+                foreach (var (id2, title2, script) in ReadProviders(contributes, "dictionaries", "词典"))
+                    dictionaries.Add(new PluginDictionaryProvider(id2, title2, script));
+                foreach (var (id2, title2, script) in ReadProviders(contributes, "translators", "翻译"))
+                    translators.Add(new PluginTranslatorProvider(id2, title2, script));
+                if (contributes.TryGetProperty("background", out var backgroundElement))
+                {
+                    if (backgroundElement.ValueKind != JsonValueKind.Object)
+                        throw new PluginPackageException("contributes.background 必须是对象。");
+                    var interval = backgroundElement.TryGetProperty("intervalMinutes", out var intervalElement)
+                        && intervalElement.TryGetInt32(out var minutes)
+                            ? minutes
+                            : 0;
+                    if (interval < 0 || interval > 7 * 24 * 60)
+                        throw new PluginPackageException("contributes.background.intervalMinutes 超出范围。");
+                    if (interval is > 0 and < MinimumBackgroundIntervalMinutes)
+                        throw new PluginPackageException(
+                            $"后台任务间隔不能少于 {MinimumBackgroundIntervalMinutes} 分钟。");
+                    var onStartup = !backgroundElement.TryGetProperty("onStartup", out var startupElement)
+                        || startupElement.ValueKind != JsonValueKind.False;
+                    if (interval == 0 && !onStartup)
+                        throw new PluginPackageException("后台任务需要 intervalMinutes 或 onStartup。");
+                    background = new PluginBackgroundTask(
+                        RequiredScriptPath(backgroundElement, "script"),
+                        interval,
+                        onStartup);
+                }
             }
 
             if (actions.Any() && libraryAccess == PluginLibraryAccess.None)
                 throw new PluginPackageException("提供书籍操作的插件需要声明 permissions.library。");
             if ((allowsTranslation || allowsPinyin) && libraryAccess == PluginLibraryAccess.None)
                 throw new PluginPackageException("翻译或注音插件需要声明 permissions.library。");
+            if ((canReadContent || canWriteReadingData || canReadBookFiles) && libraryAccess == PluginLibraryAccess.None)
+                throw new PluginPackageException("读取正文、书籍文件或写入阅读数据需要同时声明 permissions.library。");
+
+            Version? minAppVersion = null;
+            var minAppText = OptionalString(root, "minAppVersion");
+            if (minAppText.Length > 0)
+            {
+                if (!TryParseVersion(minAppText, out var parsedMinimum))
+                    throw new PluginPackageException("minAppVersion 格式无效，应类似 1.2.0。");
+                minAppVersion = parsedMinimum;
+            }
+
+            var homepage = OptionalString(root, "homepage");
+            if (homepage.Length > 0
+                && (!Uri.TryCreate(homepage, UriKind.Absolute, out var homepageUri) || homepageUri.Scheme != Uri.UriSchemeHttps))
+                throw new PluginPackageException("homepage 必须是 https:// 地址。");
+
+            var localizations = ReadLocalizations(root);
 
             string? icon = null;
             if (root.TryGetProperty("icon", out var iconElement) && iconElement.ValueKind == JsonValueKind.String)
@@ -279,7 +386,17 @@ public sealed partial record PluginManifest
                 Commands = commands,
                 ReaderActions = readerActions,
                 SettingsPage = settingsPage,
-                AppPage = appPage
+                AppPage = appPage,
+                CanReadContent = canReadContent,
+                UsesAi = usesAi,
+                CanWriteReadingData = canWriteReadingData,
+                CanReadBookFiles = canReadBookFiles,
+                MinAppVersion = minAppVersion,
+                Homepage = homepage.Length == 0 ? null : homepage,
+                Localizations = localizations,
+                Dictionaries = dictionaries,
+                Translators = translators,
+                Background = background
             };
         }
     }
@@ -292,6 +409,38 @@ public sealed partial record PluginManifest
             .Concat(SettingsPage is null ? [] : [SettingsPage.Page])
             .Concat(AppPage is null ? [] : [AppPage.Page])
             .Distinct(StringComparer.Ordinal);
+
+    /// <summary>Every headless script the manifest refers to.</summary>
+    public IEnumerable<string> ScriptPaths =>
+        Dictionaries.Select(provider => provider.Script)
+            .Concat(Translators.Select(provider => provider.Script))
+            .Concat(Background is null ? [] : [Background.Script])
+            .Distinct(StringComparer.Ordinal);
+
+    /// <summary>True when the plugin needs the script runtime rather than only pages.</summary>
+    public bool HasHeadlessContributions => Dictionaries.Count > 0 || Translators.Count > 0 || Background is not null;
+
+    public string GetName(string? language) => FindLocalization(language)?.Name ?? Name;
+
+    public string GetDescription(string? language) => FindLocalization(language)?.Description ?? Description;
+
+    /// <summary>
+    /// Localized title of a contribution. Keys are contribution ids; the app
+    /// page uses the key <c>app</c>.
+    /// </summary>
+    public string GetTitle(string? language, string key, string fallback) =>
+        FindLocalization(language)?.Titles.TryGetValue(key, out var title) == true ? title : fallback;
+
+    private PluginLocalization? FindLocalization(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language) || Localizations.Count == 0) return null;
+        if (Localizations.TryGetValue(language, out var exact)) return exact;
+        var prefix = language.Split('-')[0];
+        return Localizations
+            .Where(pair => pair.Key.Split('-')[0].Equals(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(pair => pair.Value)
+            .FirstOrDefault();
+    }
 
     public static bool TryParseVersion(string value, out Version version)
     {
@@ -329,6 +478,75 @@ public sealed partial record PluginManifest
         return path;
     }
 
+    private static string RequiredScriptPath(JsonElement element, string name)
+    {
+        var path = PluginPackage.NormalizeEntryPath(RequiredString(element, name));
+        if (!path.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+            throw new PluginPackageException($"脚本“{path}”必须是 .js 文件。");
+        return path;
+    }
+
+    private static bool IsTrue(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static IEnumerable<(string Id, string Title, string Script)> ReadProviders(
+        JsonElement contributes,
+        string property,
+        string label)
+    {
+        if (!contributes.TryGetProperty(property, out var elements)) yield break;
+        if (elements.ValueKind != JsonValueKind.Array)
+            throw new PluginPackageException($"contributes.{property} 必须是数组。");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var element in elements.EnumerateArray())
+        {
+            var id = RequiredString(element, "id");
+            if (!ActionIdRegex().IsMatch(id))
+                throw new PluginPackageException($"{label} id“{id}”无效。");
+            if (!seen.Add(id))
+                throw new PluginPackageException($"{label} id“{id}”重复。");
+            var title = RequiredString(element, "title");
+            if (title.Length > 40)
+                throw new PluginPackageException($"{label}名称不能超过 40 个字符。");
+            yield return (id, title, RequiredScriptPath(element, "script"));
+        }
+    }
+
+    private static Dictionary<string, PluginLocalization> ReadLocalizations(JsonElement root)
+    {
+        var result = new Dictionary<string, PluginLocalization>(StringComparer.OrdinalIgnoreCase);
+        if (!root.TryGetProperty("i18n", out var i18n)) return result;
+        if (i18n.ValueKind != JsonValueKind.Object)
+            throw new PluginPackageException("i18n 必须是对象。");
+        foreach (var language in i18n.EnumerateObject())
+        {
+            if (!LanguageRegex().IsMatch(language.Name))
+                throw new PluginPackageException($"i18n 语言代码“{language.Name}”无效，应类似 en-US。");
+            if (language.Value.ValueKind != JsonValueKind.Object)
+                throw new PluginPackageException($"i18n.{language.Name} 必须是对象。");
+            var titles = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (language.Value.TryGetProperty("titles", out var titleElements))
+            {
+                if (titleElements.ValueKind != JsonValueKind.Object)
+                    throw new PluginPackageException($"i18n.{language.Name}.titles 必须是对象。");
+                foreach (var title in titleElements.EnumerateObject())
+                {
+                    if (title.Value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(title.Value.GetString()))
+                        titles[title.Name] = Limit(title.Value.GetString()!.Trim(), 60);
+                }
+            }
+            var name = OptionalString(language.Value, "name");
+            var description = OptionalString(language.Value, "description");
+            result[language.Name] = new PluginLocalization(
+                name.Length == 0 ? null : Limit(name, 60),
+                description.Length == 0 ? null : Limit(description, 2000),
+                titles);
+        }
+        return result;
+    }
+
+    private static string Limit(string value, int length) => value.Length <= length ? value : value[..length];
+
     private static int ReadDimension(JsonElement element, string name, int fallback) =>
         element.TryGetProperty(name, out var value) && value.TryGetInt32(out var number)
             ? Math.Clamp(number, 320, 1600)
@@ -339,6 +557,9 @@ public sealed partial record PluginManifest
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,40}$")]
     private static partial Regex ActionIdRegex();
+
+    [GeneratedRegex("^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")]
+    private static partial Regex LanguageRegex();
 }
 
 /// <summary>An HTTPS origin a plugin may call, optionally with a subdomain wildcard.</summary>

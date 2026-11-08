@@ -68,6 +68,10 @@ bash scripts/build-linux-release.sh 1.1.3 artifacts/linux linux-x64
 bash scripts/build-macos-release.sh 1.1.3 artifacts/macos osx-arm64
 ```
 
+macOS release packaging also requires Xcode 26 or newer to compile the layered
+Icon Composer artwork. Select it with `xcode-select` or `DEVELOPER_DIR` when
+multiple Xcode versions are installed.
+
 Each macOS build produces both `Kkindle-{version}-{rid}.dmg` and the
 `Kkindle-{version}-{rid}.tar.gz` used by the in-app updater. The DMG contains
 `Kkindle.app` and an `Applications` symlink, so the standard drag-to-Applications

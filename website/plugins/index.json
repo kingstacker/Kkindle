@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "generatedAt": "2026-11-07T11:26:36.2086060+00:00",
+  "plugins": [
+    {
+      "id": "com.kkindle.book-translation",
+      "name": "书籍翻译与注音",
+      "version": "1.2.0",
+      "description": "整本书翻译和注音。翻译沿用应用里的 AI 或免费翻译服务，注音使用内置或 g2pW 引擎，结果直接加入书库。",
+      "author": "Kkindle",
+      "homepage": "https://kkindle.stacker.beauty/",
+      "minAppVersion": null,
+      "trust": "official",
+      "download": "https://kkindle.stacker.beauty/plugins/book-translation.kkplugin",
+      "sha256": "c753c8a6b12a36ae822028ebc61b1cbce0468363828433cb45ecf1c417cd5c50",
+      "size": 21437,
+      "i18n": {
+        "en-US": {
+          "name": "Book Translation & Pinyin",
+          "description": "Translate whole books or add pinyin. Translation uses the app's AI or free translation services; pinyin uses the built-in or g2pW engine. Results are added to the library."
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Command-line helper for plugin authors: validate, pack, sign and
+       publish Kkindle plugins. Uses the app's own manifest, package and
+       signature code so its verdicts match what the app will accept.
+       Run: dotnet run (project tools/Kkindle.PluginTool) help -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>kkplugin</AssemblyName>
+    <RootNamespace>Kkindle.PluginTool</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kkindle.Infrastructure\Kkindle.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

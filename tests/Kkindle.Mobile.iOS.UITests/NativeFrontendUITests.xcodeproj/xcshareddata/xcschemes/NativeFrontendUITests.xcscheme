@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2600" version="1.7">
+  <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="" selectedLauncherIdentifier="" shouldUseLaunchSchemeArgsEnv="YES">
+    <Testables>
+      <TestableReference skipped="NO">
+        <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000011" BuildableName="NativeFrontendUITests.xctest" BlueprintName="NativeFrontendUITests" ReferencedContainer="container:NativeFrontendUITests.xcodeproj" />
+      </TestableReference>
+    </Testables>
+  </TestAction>
+</Scheme>

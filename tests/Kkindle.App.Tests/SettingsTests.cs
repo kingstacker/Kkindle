@@ -86,7 +86,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         scope.Get<ComboBox>("PreferredOpenFormatBox").SelectedIndex = 1;
         scope.Get<ComboBox>("UiLanguageBox").SelectedIndex = 1;
         scope.Get<TextBox>("CalibrePathBox").Text = Path.Combine(scope.Paths.Data, "ebook-convert-test");
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => !scope.Window.IsVisible);
         var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
         Assert.True(stored.GridGalleryDisplay);
@@ -101,8 +101,27 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         await using var scope = await TestWindow.Create();
         scope.Set("_stage3Ready", false);
         scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = true;
+        scope.RequestQuit();
+        await Until(() => !scope.Window.IsVisible);
+        Assert.True((await new AppSettingsStore(scope.Paths).LoadAsync()).GridGalleryDisplay);
+    });
+
+    [Fact]
+    public Task MacWindowCloseHidesWindowAndQuitFlushesPreferences() => Run(async () =>
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        await using var scope = await TestWindow.Create();
+        var closed = false;
+        scope.Window.Closed += (_, _) => closed = true;
+        scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = true;
+
         scope.Window.Close();
         await Until(() => !scope.Window.IsVisible);
+        Assert.False(closed);
+
+        scope.Window.Show();
+        scope.RequestQuit();
+        await Until(() => closed);
         Assert.True((await new AppSettingsStore(scope.Paths).LoadAsync()).GridGalleryDisplay);
     });
 
@@ -120,7 +139,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         toggle.IsChecked = false;
         await Render();
 
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => !scope.Window.IsVisible);
         Assert.False((await new AppSettingsStore(scope.Paths).LoadAsync()).SendToKindleWebEnabled);
     });
@@ -136,7 +155,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
 
         syncIcon.IsChecked = false;
         presenceIcon.IsChecked = false;
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => !scope.Window.IsVisible);
 
         var stored = await new AppSettingsStore(scope.Paths).LoadAsync();
@@ -154,8 +173,8 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.False(saving.IsCompleted);
         scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = false;
         scope.Get<ComboBox>("PreferredOpenFormatBox").SelectedIndex = 2;
-        scope.Window.Close();
-        scope.Window.Close();
+        scope.RequestQuit();
+        scope.RequestQuit();
         await Task.Delay(50);
         Assert.True(scope.Window.IsVisible);
         lease.Dispose();
@@ -172,12 +191,12 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         await using var scope = await TestWindow.Create();
         Directory.CreateDirectory(scope.Paths.Settings + ".tmp");
         scope.Get<ToggleSwitch>("GridGalleryDisplayCheck").IsChecked = true;
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => !scope.Field<bool>("_s3SyncExitInProgress"));
         Assert.True(scope.Window.IsVisible);
         Assert.Contains("保存失败", scope.Get<TextBlock>("SettingsStatusText").Text);
         Directory.Delete(scope.Paths.Settings + ".tmp");
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => !scope.Window.IsVisible);
         Assert.True((await new AppSettingsStore(scope.Paths).LoadAsync()).GridGalleryDisplay);
     });
@@ -339,14 +358,14 @@ public sealed partial class SettingsTests(SettingsUiSession session)
     {
         await using var scope = await TestWindow.Create();
         scope.Get<TextBox>("S3BucketBox").Text = "unsaved-bucket";
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
-        scope.Window.Close();
+        scope.RequestQuit();
         Assert.True(scope.Window.IsVisible);
         scope.Call("ConfirmationCancelButton_Click", null, new RoutedEventArgs());
         await Until(() => !scope.Field<bool>("_s3SyncExitInProgress"));
         Assert.Equal("unsaved-bucket", scope.Get<TextBox>("S3BucketBox").Text);
-        scope.Window.Close();
+        scope.RequestQuit();
         await Until(() => scope.Get<Control>("ConfirmationOverlay").IsVisible);
         scope.Call("ConfirmationOkButton_Click", null, new RoutedEventArgs());
         await Until(() => !scope.Window.IsVisible);
@@ -646,8 +665,10 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         ((Kkindle.App)Application.Current!).ApplyLanguage(language);
         scope.Call("SettingsButton_Click", null, new RoutedEventArgs());
         Assert.Null(scope.Window.FindControl<Control>("SystemChildren"));
-        Assert.Equal(7, scope.Get<WrapPanel>("SettingsCategoryButtons").Children.Count);
-        foreach (var category in new[] { "General", "Library", "Reading", "Kindle", "Data", "Advanced", "About" })
+        var categories = new[] { "General", "Library", "Reading", "Kindle", "Data", "Advanced", "Plugins", "About" };
+        Assert.Equal(categories, scope.Get<WrapPanel>("SettingsCategoryButtons").Children
+            .OfType<Button>().Select(button => button.Tag?.ToString()));
+        foreach (var category in categories)
         {
             scope.Call("ShowSettingsSection", category);
             await Render();
@@ -739,6 +760,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
 
     private sealed class TestWindow(MainWindow window, AppPaths paths, string directory) : IAsyncDisposable
     {
+        private bool _closed;
         public MainWindow Window => window;
         public AppPaths Paths => paths;
         public ISyncService Sync => Field<ISyncService>("_s3SyncService");
@@ -747,6 +769,9 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         public void Set(string name, object? value) => typeof(MainWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, value);
         public object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, args);
         public T Call<T>(string name, params object?[] args) => (T)Call(name, args)!;
+        // A macOS window close hides the window. Persistence and exit tests
+        // must request the same application quit as the tray and Cmd+Q.
+        public void RequestQuit() => Call("RequestApplicationQuit");
 
         public static async Task<TestWindow> Create(AppSettings? settings = null, IBookFormatConverter? formatConverter = null,
             IReaderHostFactory? readerHostFactory = null, ISyncService? syncService = null)
@@ -769,7 +794,10 @@ public sealed partial class SettingsTests(SettingsUiSession session)
             var window = new MainWindow(paths, library, formatConverter: formatConverter,
                 startupSettings: initial, services: services) { Width = 1294, Height = 818 };
             var scope = new TestWindow(window, paths, directory);
+            window.Closed += (_, _) => scope._closed = true;
             scope.Set("_s3SyncStoredSettings", await scope.Sync.LoadSettingsAsync());
+            // Keep UI tests independent of the plugins bundled with the app.
+            scope.Set("_bundledPluginsDirectory", null);
             await scope.Field<ReaderDataService>("_readerData").InitializeAsync();
             scope.Call("PopulateSettingsControls");
             window.Show();
@@ -787,7 +815,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
 
         public async ValueTask DisposeAsync()
         {
-            if (window.IsVisible)
+            if (!_closed)
             {
                 await Call<Task<bool>>("FlushAppSettingsAsync");
                 Set("_allowWindowCloseForS3Sync", true);

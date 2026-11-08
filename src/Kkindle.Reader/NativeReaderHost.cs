@@ -1248,6 +1248,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             && Math.Abs(options.BaseFontSize - expected.BaseFontSize) < 0.01f
             && Math.Abs(options.LineHeight - expected.LineHeight) < 0.001f
             && options.ParagraphIndent == expected.ParagraphIndent
+            && Math.Abs(options.ParagraphSpacingEm - expected.ParagraphSpacingEm) < 0.001f
             && Math.Abs(options.ViewportWidth - expected.ViewportWidth) < 0.5f
             && Math.Abs(options.ViewportHeight - expected.ViewportHeight) < 0.5f
             && Math.Abs(options.InsetHorizontal - expected.InsetHorizontal) < 0.5f
@@ -1360,6 +1361,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         InvalidateVisual();
     }
 
+    public void NavigateToSpeechOffset(int offset)
+    {
+        if (_content is null || _layout is null || offset < 0 || offset >= _content.BodyText.Length) return;
+        ScrollToOffset(offset);
+    }
+
     public void ClearSpeechHighlight()
     {
         if (_speechHighlight is null) return;
@@ -1416,6 +1423,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         || Math.Abs(settings.MaxWidth - _settings.MaxWidth) > 0.001
         || settings.VerticalWriting != _settings.VerticalWriting
         || settings.ParagraphIndent != _settings.ParagraphIndent
+        || Math.Abs(settings.ParagraphSpacing - _settings.ParagraphSpacing) > 0.001
         || !string.Equals(settings.FontFamily, _settings.FontFamily, StringComparison.OrdinalIgnoreCase)
         || settings.FlowMode != _settings.FlowMode
         || settings.TwoPageMode != _settings.TwoPageMode
@@ -1814,6 +1822,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             BaseFontSize = 16f * (float)settings.FontScale,
             LineHeight = (float)settings.LineHeight,
             ParagraphIndent = settings.ParagraphIndent,
+            ParagraphSpacingEm = (float)settings.ParagraphSpacing,
             ViewportWidth = (float)width,
             ViewportHeight = (float)height,
             InsetHorizontal = (float)horizontalInset,
@@ -1893,6 +1902,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         hash.Add(height);
         hash.Add(settings.VerticalWriting);
         hash.Add(settings.ParagraphIndent);
+        hash.Add(settings.ParagraphSpacing);
         hash.Add(settings.FontScale);
         hash.Add(settings.LineHeight);
         hash.Add(settings.MaxWidth);

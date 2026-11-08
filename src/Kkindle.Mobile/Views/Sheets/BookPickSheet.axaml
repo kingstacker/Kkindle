@@ -18,8 +18,13 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,*,Auto" Margin="20,0,20,14">
-    <TextBox Name="FilterBox" Classes="field" PlaceholderText="搜索书名或作者" Margin="0,0,0,6"
-             TextChanged="OnFilterChanged" />
+    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+      <TextBox Name="FilterBox" Classes="field search-field" PlaceholderText="搜索书名或作者"
+               IsVisible="False" VerticalAlignment="Center" TextChanged="OnFilterChanged" />
+      <Button Grid.Column="1" Name="FilterSearchButton" Classes="icon" Click="OnToggleSearchClick">
+        <c:LineIcon Name="FilterIcon" Data="{StaticResource IconSearch}" StrokeThickness="1.4" />
+      </Button>
+    </Grid>
 
     <!-- Virtualized: a phone library can hold thousands of books. -->
     <ItemsControl Grid.Row="1" Name="Rows">

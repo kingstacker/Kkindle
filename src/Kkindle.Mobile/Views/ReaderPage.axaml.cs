@@ -105,10 +105,17 @@ public partial class ReaderPage : UserControl
         _longPress.Tick += OnLongPress;
         ProgressSlider.AddHandler(PointerPressedEvent, OnSliderPressed, tunnel, handledEventsToo: true);
         ProgressSlider.AddHandler(PointerReleasedEvent, OnSliderReleased, tunnel, handledEventsToo: true);
+        ProgressSliderGroup.SetHostVisible(false);
+        ProgressSliderGroup.DragStarted += () => _sliderActive = true;
+        ProgressSliderGroup.DragCompleted += canceled =>
+        {
+            _sliderActive = false;
+            if (!canceled) _ = SeekAsync(ProgressSlider.Value);
+        };
         Loaded += OnLoaded;
     }
 
-    public bool IsChromeVisible => TopChrome.Classes.Contains("visible");
+    public bool IsChromeVisible => _usesNativeFrontend ? _nativeChromeVisible : TopChrome.Classes.Contains("visible");
 
     public string? PositionText => FooterPosition.Text;
 
@@ -122,7 +129,7 @@ public partial class ReaderPage : UserControl
             FontFamily: ReaderFontDefaults.BundledFamily,
             FlowMode: 1,
             VerticalWriting: preferences.ReaderVerticalWriting,
-            TwoPageMode: false));
+            TwoPageMode: false) { ParagraphSpacing = preferences.ReaderParagraphSpacing });
         // Applied after Normalize: a phone reads better with a narrower column
         // than the desktop's 24-point floor allows.
         return normalized with
@@ -147,7 +154,7 @@ public partial class ReaderPage : UserControl
         if (operation is null) return;
         try
         {
-            LoadingPanel.IsVisible = true;
+            LoadingPanel.IsVisible = !_usesNativeFrontend;
             ErrorPanel.IsVisible = false;
             LoadingDetailText.Text = "正在读取书籍信息";
 
@@ -263,6 +270,7 @@ public partial class ReaderPage : UserControl
         UpdateEpubLabels();
         LoadingPanel.IsVisible = false;
         _ready = true;
+        NotifyNativeState();
     }
 
     /// <summary>
@@ -324,6 +332,7 @@ public partial class ReaderPage : UserControl
         UpdatePdfLabels();
         LoadingPanel.IsVisible = false;
         _ready = true;
+        NotifyNativeState();
     }
 
     /// <summary>
@@ -473,6 +482,7 @@ public partial class ReaderPage : UserControl
         PercentText.Text = percent;
         ProgressSlider.Value = _overallProgress * 100;
         BookmarkIcon.Filled = FindCurrentBookmark() is not null;
+        NotifyNativeState();
     }
 
     private void BuildEpubToc()
@@ -518,6 +528,7 @@ public partial class ReaderPage : UserControl
 
     private async Task JumpToAsync(TocEntry item)
     {
+        _tts?.NotifyManualNavigation();
         _shell.HideSheet();
         SetChromeVisible(false);
         try
@@ -632,24 +643,36 @@ public partial class ReaderPage : UserControl
 
     private void ShowError(string message)
     {
+        _nativeError = message;
         LoadingPanel.IsVisible = false;
-        ErrorPanel.IsVisible = true;
+        ErrorPanel.IsVisible = !_usesNativeFrontend;
         ErrorText.Text = message;
         SetChromeVisible(false);
     }
 
     public void SetChromeVisible(bool visible)
     {
+        if (_usesNativeFrontend)
+        {
+            _nativeChromeVisible = visible;
+            NotifyNativeState();
+            return;
+        }
         TopChrome.Classes.Set("visible", visible);
         BottomChrome.Classes.Set("visible", visible);
+        ProgressSliderGroup.SetHostVisible(visible);
         // The reading-aloud bar stays reachable above the toolbar.
-        SpeechBar.Margin = new Thickness(12, 0, 12, visible ? BottomChrome.Bounds.Height + 24 : 40);
+        var speechBottom = visible ? BottomChrome.Bounds.Height + 24 : 40;
+        SpeechBar.Margin = new Thickness(12, 0, 12, speechBottom);
+        SpeechDock.Margin = new Thickness(0, 0, 0, speechBottom);
     }
 
     private void OnSurfacePressed(object? sender, PointerPressedEventArgs e)
     {
         TrackTouchPressed(e);
-        if (SelectionLayer.IsVisible)
+        // The native frontend draws its selection toolbar in SwiftUI, so the
+        // Avalonia layer stays hidden while a selection is active.
+        if (SelectionLayer.IsVisible || _usesNativeFrontend && _selection is not null)
         {
             // A tap outside the floating toolbar dismisses the selection
             // instead of turning the page or toggling the chrome.
@@ -763,6 +786,7 @@ public partial class ReaderPage : UserControl
     {
         HideSelectionBar();
         if (_turning) return;
+        _tts?.NotifyManualNavigation();
         _turning = true;
         try
         {
@@ -831,6 +855,7 @@ public partial class ReaderPage : UserControl
 
     private async Task MoveChapterAsync(int direction)
     {
+        _tts?.NotifyManualNavigation();
         try
         {
             if (_isPdf) await GoToPdfPageAsync(_pdfPage + direction);
@@ -851,6 +876,11 @@ public partial class ReaderPage : UserControl
         if (string.IsNullOrWhiteSpace(href)) return;
         if (!string.IsNullOrWhiteSpace(footnoteText))
         {
+            if (_usesNativeFrontend)
+            {
+                NativeDialogRequested?.Invoke(new NativeReaderDialog("info", "注释", footnoteText));
+                return;
+            }
             _shell.ShowSheet("注释", new InfoSheet(footnoteText), ThemeScope.RequestedThemeVariant);
             return;
         }
@@ -864,6 +894,7 @@ public partial class ReaderPage : UserControl
             }
 
             if (_readerHost is not NativeReaderHost host || _epubDocument is not { } document) return;
+            _tts?.NotifyManualNavigation();
             var target = new Uri(new Uri(document.Chapters[_chapterIndex]), href);
             var path = Path.GetFullPath(target.LocalPath);
             var chapter = document.Chapters.ToList().FindIndex(item =>
@@ -900,6 +931,11 @@ public partial class ReaderPage : UserControl
         var overlaps = _annotations.Any(item => item.ChapterPath == chapterPath
             && selection.Start < item.EndOffset && selection.End > item.StartOffset);
         _selection = selection;
+        if (_usesNativeFrontend)
+        {
+            NotifyNativeState();
+            return;
+        }
         SelectionHighlightButton.IsVisible = !overlaps;
         SelectionNoteButton.IsVisible = !overlaps;
         SelectionLayer.IsVisible = true;
@@ -910,6 +946,7 @@ public partial class ReaderPage : UserControl
     {
         _selection = null;
         SelectionLayer.IsVisible = false;
+        NotifyNativeState();
     }
 
     private void PositionSelectionBar(ReaderSelection selection)
@@ -1016,6 +1053,12 @@ public partial class ReaderPage : UserControl
     private void ShowAnnotation(Guid id)
     {
         if (_annotations.Find(item => item.Id == id) is not { } annotation) return;
+        if (_usesNativeFrontend)
+        {
+            NativeDialogRequested?.Invoke(new NativeReaderDialog("annotation", "批注", annotation.DisplayQuote,
+                annotation.Id, annotation.Note));
+            return;
+        }
         var title = annotation.DisplayQuote.Length > 24
             ? annotation.DisplayQuote[..24] + "…"
             : annotation.DisplayQuote;
@@ -1082,6 +1125,7 @@ public partial class ReaderPage : UserControl
 
     private async Task SeekAsync(double percent)
     {
+        _tts?.NotifyManualNavigation();
         try
         {
             if (_isPdf)
@@ -1115,9 +1159,7 @@ public partial class ReaderPage : UserControl
     public void ShowToc()
     {
         HideSelectionBar();
-        var current = _isPdf ? _pdfPage - 1 : _chapterIndex;
-        var selected = _tocEntries.FindIndex(entry => entry.ChapterIndex == current);
-        if (selected < 0) selected = _tocEntries.FindLastIndex(entry => entry.ChapterIndex < current);
+        var selected = CurrentTocIndex();
         var items = _tocEntries
             .Select((entry, index) => new ChoiceItem(entry.Title, null, index == selected, entry.Level, entry))
             .ToList();
@@ -1125,6 +1167,17 @@ public partial class ReaderPage : UserControl
         {
             if (choice.Tag is TocEntry entry) _ = JumpToAsync(entry);
         }), ThemeScope.RequestedThemeVariant);
+    }
+
+    /// <summary>
+    /// The entry for the current chapter or PDF page. Pages without their own
+    /// entry, such as illustrations, belong to the nearest preceding entry.
+    /// </summary>
+    private int CurrentTocIndex()
+    {
+        var current = _isPdf ? _pdfPage - 1 : _chapterIndex;
+        var selected = _tocEntries.FindIndex(entry => entry.ChapterIndex == current);
+        return selected >= 0 ? selected : _tocEntries.FindLastIndex(entry => entry.ChapterIndex < current);
     }
 
     private async void OnPreviousClick(object? sender, RoutedEventArgs e) => await MoveChapterAsync(-1);
@@ -1165,16 +1218,19 @@ public partial class ReaderPage : UserControl
         _shell.SetPaperSystemBars(paper, dark);
     }
 
-    private async void OnReaderSettingsChanged()
+    private async void OnReaderSettingsChanged() => await ApplyReaderSettingsAsync();
+
+    private async Task ApplyReaderSettingsAsync()
     {
         ApplyTheme();
         (_readerHost as IReaderAppearanceHost)?.SetAppearance(new ReaderAppearanceSettings { Theme = CurrentTheme });
-        // The sheet stays open while the page behind it updates live.
-        ShowTypography();
+        // Preserve the sheet's scroll position while the page updates live.
+        _shell.SetSheetTheme(ThemeScope.RequestedThemeVariant);
         if (_readerHost is NativePdfReaderHost pdf && pdf.Zoom != PdfZoom) await ApplyPdfZoomAsync(pdf);
 
         var layout = BuildLayout(_shell.Preferences.Current);
         if (layout == _layout) return;
+        _tts?.NotifyManualNavigation();
         _layout = layout;
         if (_readerHost is not IReaderConfiguredHost configured) return;
         try
@@ -1220,6 +1276,7 @@ public partial class ReaderPage : UserControl
                 await _modules.Reader.Data.DeleteBookmarkAsync(existing.Id, _lifetime.Token);
                 _bookmarks.Remove(existing);
                 BookmarkIcon.Filled = false;
+                NotifyNativeState();
                 _shell.ShowToast("已移除书签");
                 return;
             }
@@ -1241,6 +1298,7 @@ public partial class ReaderPage : UserControl
             await _modules.Reader.Data.SaveBookmarkAsync(bookmark, _lifetime.Token);
             _bookmarks.Add(bookmark);
             BookmarkIcon.Filled = true;
+            NotifyNativeState();
             _shell.ShowToast("已添加书签");
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)

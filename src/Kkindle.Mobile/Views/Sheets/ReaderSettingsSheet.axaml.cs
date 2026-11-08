@@ -48,6 +48,9 @@ public partial class ReaderSettingsSheet : UserControl
         LineTight.Classes.Set("on", current.ReaderLineHeight <= TightLine);
         LineNormal.Classes.Set("on", current.ReaderLineHeight is > TightLine and < LooseLine);
         LineLoose.Classes.Set("on", current.ReaderLineHeight >= LooseLine);
+        ParagraphTight.Classes.Set("on", current.ReaderParagraphSpacing <= 0);
+        ParagraphNormal.Classes.Set("on", current.ReaderParagraphSpacing is > 0 and < 1);
+        ParagraphLoose.Classes.Set("on", current.ReaderParagraphSpacing >= 1);
         DirectionHorizontal.Classes.Set("on", !current.ReaderVerticalWriting);
         DirectionVertical.Classes.Set("on", current.ReaderVerticalWriting);
         MarginNarrow.Classes.Set("on", current.ReaderBodyPadding <= NarrowMargin);
@@ -142,5 +145,16 @@ public partial class ReaderSettingsSheet : UserControl
             _ => NormalLine
         };
         Change(value => value with { ReaderLineHeight = height });
+    }
+
+    private void OnParagraphClick(object? sender, RoutedEventArgs e)
+    {
+        var spacing = sender switch
+        {
+            Button { Name: nameof(ParagraphNormal) } => 0.5,
+            Button { Name: nameof(ParagraphLoose) } => 1.0,
+            _ => 0.0
+        };
+        Change(value => value with { ReaderParagraphSpacing = spacing });
     }
 }

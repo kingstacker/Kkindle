@@ -27,6 +27,10 @@ public partial class MainWindow
     private readonly List<PluginWindow> _openPluginWindows = [];
     private bool _pluginsInitialized;
     private PluginBookTaskService? _pluginBookTasks;
+    // Plugins shipped next to the executable; UI tests clear this so their
+    // windows start without the bundled plugins.
+    private string? _bundledPluginsDirectory =
+        Path.Combine(AppContext.BaseDirectory, PluginManager.BundledDirectoryName);
 
     /// <summary>Installed, enabled plugins; refresh after install or removal.</summary>
     public IReadOnlyList<InstalledPlugin> Plugins => _pluginSnapshot;
@@ -40,6 +44,19 @@ public partial class MainWindow
         _pluginsInitialized = true;
         _pluginManager.Changed += (_, _) => Dispatcher.UIThread.Post(RefreshPluginContributions);
         RefreshPluginContributions();
+        // Plugins shipped next to the executable are installed off the UI
+        // thread; Changed refreshes the menus once they land.
+        var bundled = _bundledPluginsDirectory;
+        if (bundled is not null) _ = Task.Run(() =>
+        {
+            try { _pluginManager.InstallBundled(bundled); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                // A read-only or damaged plugin folder must not break startup.
+            }
+        });
+        StartPluginBackgroundTasks();
+        _ = CheckPluginUpdatesAfterStartupAsync(_lifetimeCancellation.Token);
     }
 
     private void RefreshPluginContributions()
@@ -51,6 +68,8 @@ public partial class MainWindow
         RefreshPluginSettingsUi();
         RefreshPluginCommandMenu();
         RefreshReaderPluginActions();
+        RefreshReaderTranslationPluginProviders();
+        if (PluginCatalogSection.IsVisible && _pluginCatalogEntries is not null) RenderPluginCatalog();
         PluginsChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -114,7 +133,7 @@ public partial class MainWindow
         {
             var item = new MenuItem
             {
-                Header = $"{plugin.Manifest.Name} · {command.Title}"
+                Header = $"{PluginName(plugin)} · {PluginTitle(plugin, command.Id, command.Title)}"
             };
             item.Click += async (_, _) => await OpenPluginCommandAsync(plugin, command);
             flyout.Items.Add(item);
@@ -123,7 +142,7 @@ public partial class MainWindow
     }
 
     private async Task OpenPluginCommandAsync(InstalledPlugin plugin, PluginCommand command) =>
-        await ShowPluginWindowAsync(plugin, command.Page, command.Title, command.Width, command.Height, null, []);
+        await ShowPluginWindowAsync(plugin, command.Page, PluginTitle(plugin, command.Id, command.Title), command.Width, command.Height, null, []);
 
     /// <summary>Rebuilds the reader selection bar's plugin buttons.</summary>
     private void RefreshReaderPluginActions()
@@ -149,7 +168,7 @@ public partial class MainWindow
             {
                 Content = new TextBlock
                 {
-                    Text = action.Title,
+                    Text = PluginTitle(plugin, action.Id, action.Title),
                     FontSize = 12,
                     MaxWidth = 140,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
@@ -157,7 +176,7 @@ public partial class MainWindow
             };
             button.Classes.Add("readerSelectionAction");
             button.Classes.Add("pluginReaderAction");
-            ToolTip.SetTip(button, action.Title);
+            ToolTip.SetTip(button, PluginTitle(plugin, action.Id, action.Title));
             button.Click += async (_, _) => await OpenReaderPluginActionAsync(plugin, action);
             ReaderSelectionPluginActions.Children.Add(button);
         }
@@ -181,7 +200,7 @@ public partial class MainWindow
         IReadOnlyList<Guid> books = _readerBookCard is null ? [] : [_readerBookCard.Book.Id];
         HideReaderSelectionPopup();
         await ShowPluginWindowAsync(
-            plugin, action.Page, action.Title, action.Width, action.Height,
+            plugin, action.Page, PluginTitle(plugin, action.Id, action.Title), action.Width, action.Height,
             action.Id, books, selection);
     }
 
@@ -206,7 +225,7 @@ public partial class MainWindow
             foreach (var action in plugin.Manifest.BookActions)
             {
                 menu.Items.Add(CreateMenuItem(
-                    action.Title,
+                    PluginTitle(plugin, action.Id, action.Title),
                     () => OpenPluginWindowAsync(plugin, action, targets)));
                 added = true;
             }
@@ -253,13 +272,13 @@ public partial class MainWindow
         }
         if (!action.AllowsMultipleBooks && books.Length > 1)
         {
-            await ShowMessageAsync(T("插件操作"), T("“{0}”一次只能处理一本书。", action.Title));
+            await ShowMessageAsync(T("插件操作"), T("“{0}”一次只能处理一本书。", PluginTitle(plugin, action.Id, action.Title)));
             return;
         }
         await ShowPluginWindowAsync(
             plugin,
             action.Page,
-            action.Title,
+            PluginTitle(plugin, action.Id, action.Title),
             action.Width,
             action.Height,
             action.Id,
@@ -269,7 +288,7 @@ public partial class MainWindow
     private async Task OpenPluginAppPageAsync(InstalledPlugin plugin)
     {
         if (plugin.Manifest.AppPage is not { } page) return;
-        await ShowPluginWindowAsync(plugin, page.Page, page.Title, page.Width, page.Height, null, []);
+        await ShowPluginWindowAsync(plugin, page.Page, PluginTitle(plugin, "app", page.Title), page.Width, page.Height, null, []);
     }
 
     private async Task ShowPluginWindowAsync(
@@ -284,6 +303,7 @@ public partial class MainWindow
     {
         try
         {
+            PluginWindow? created = null;
             var window = new PluginWindow(
                 plugin,
                 page,
@@ -299,7 +319,11 @@ public partial class MainWindow
                 () => _appSettings.NetworkEnabled,
                 enableDevTools: _appSettings.PluginDeveloperMode,
                 GetPluginBookTaskService(),
-                _readerData);
+                _readerData,
+                plugin.Manifest.CanReadContent ? PluginContent : null,
+                plugin.Manifest.UsesAi ? PluginAi : null,
+                CreatePluginReaderHost(() => created));
+            created = window;
             window.BooksUpdated += PluginWindow_BooksUpdated;
             _openPluginWindows.Add(window);
             window.Closed += (_, _) =>
@@ -418,7 +442,7 @@ public partial class MainWindow
         var manifest = plugin.Manifest;
         var title = new TextBlock
         {
-            Text = manifest.Name,
+            Text = PluginName(plugin),
             FontSize = 14,
             FontWeight = Avalonia.Media.FontWeight.SemiBold,
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
@@ -426,18 +450,19 @@ public partial class MainWindow
         };
         var meta = new TextBlock
         {
-            Text = T("版本 {0}", manifest.Version),
+            Text = $"{T("版本 {0}", manifest.Version)} · {DescribePluginTrust(plugin.Trust, plugin.Publisher)}",
             FontSize = 12,
             Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(GetPluginTheme().MutedInk)),
             TextWrapping = Avalonia.Media.TextWrapping.Wrap
         };
+        var localizedDescription = manifest.GetDescription(UiText.CurrentLanguage);
         var description = new TextBlock
         {
-            Text = manifest.Description,
+            Text = localizedDescription,
             FontSize = 12,
             Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(GetPluginTheme().MutedInk)),
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-            IsVisible = !string.IsNullOrWhiteSpace(manifest.Description)
+            IsVisible = !string.IsNullOrWhiteSpace(localizedDescription)
         };
         // The bare switch, without the settings row's hover background: this
         // one only occupies its own 24px in the action strip.
@@ -523,6 +548,19 @@ public partial class MainWindow
         return button;
     }
 
+    private static string PluginName(InstalledPlugin plugin) =>
+        plugin.Manifest.GetName(UiText.CurrentLanguage);
+
+    private static string DescribePluginTrust(PluginTrustLevel trust, string? publisher) => trust switch
+    {
+        PluginTrustLevel.Bundled => UiText.Get("随应用附带"),
+        PluginTrustLevel.Official => UiText.Get("官方签名"),
+        PluginTrustLevel.Signed => string.IsNullOrWhiteSpace(publisher)
+            ? UiText.Get("已签名")
+            : UiText.Get("已签名：{0}", publisher),
+        _ => UiText.Get("未签名")
+    };
+
     private static string DescribePluginPermissions(PluginManifest manifest)
     {
         var parts = new List<string>();
@@ -540,6 +578,11 @@ public partial class MainWindow
                 .Distinct(StringComparer.OrdinalIgnoreCase);
             parts.Add(UiText.Get("访问网站：{0}", string.Join("、", hosts)));
         }
+        if (manifest.CanReadContent) parts.Add(UiText.Get("读取书籍正文"));
+        if (manifest.CanReadBookFiles) parts.Add(UiText.Get("读取书籍原始文件"));
+        if (manifest.CanWriteReadingData) parts.Add(UiText.Get("添加批注和书签"));
+        if (manifest.UsesAi) parts.Add(UiText.Get("使用你配置的 AI 服务"));
+        if (manifest.Background is not null) parts.Add(UiText.Get("在后台定时运行"));
         if (manifest.UsesStorage) parts.Add(UiText.Get("保存自己的设置"));
         return parts.Count == 0
             ? UiText.Get("不需要任何权限")
@@ -563,11 +606,11 @@ public partial class MainWindow
     {
         var confirmed = await ConfirmAsync(
             T("卸载插件"),
-            T("确定要卸载“{0}”吗？插件保存的设置也会一并删除。", plugin.Manifest.Name),
+            T("确定要卸载“{0}”吗？插件保存的设置也会一并删除。", PluginName(plugin)),
             T("卸载"));
         if (!confirmed) return;
         _pluginManager.Uninstall(plugin.Id);
-        SetTaskStatus(T("已卸载插件“{0}”。", plugin.Manifest.Name));
+        SetTaskStatus(T("已卸载插件“{0}”。", PluginName(plugin)));
     }
 
     private async void ImportPluginButton_Click(object? sender, RoutedEventArgs e)
@@ -642,11 +685,13 @@ public partial class MainWindow
         Func<InstalledPlugin> install)
     {
         var manifest = preview.Manifest;
+        var name = manifest.GetName(UiText.CurrentLanguage);
         var lines = new List<string>
         {
             preview.IsUpdate
-                ? T("将把“{0}”从 {1} 更新到 {2}。", manifest.Name, preview.Existing!.Manifest.Version, manifest.Version)
-                : T("将安装插件“{0}”{1}。", manifest.Name, string.IsNullOrWhiteSpace(manifest.Version) ? string.Empty : $" {manifest.Version}"),
+                ? T("将把“{0}”从 {1} 更新到 {2}。", name, preview.Existing!.Manifest.Version, manifest.Version)
+                : T("将安装插件“{0}”{1}。", name, string.IsNullOrWhiteSpace(manifest.Version) ? string.Empty : $" {manifest.Version}"),
+            DescribePluginTrust(preview.Signature.Trust, preview.Signature.Publisher),
             string.Empty,
             DescribePluginPermissions(manifest),
             string.Empty,
@@ -654,11 +699,13 @@ public partial class MainWindow
         };
         if (preview.IsDowngrade)
             lines.Add(T("注意：这是较旧的插件版本。"));
+        if (preview.SignerChanged)
+            lines.Add(T("警告：已安装的版本有签名，而这个文件没有签名或签名者不同，可能不是原作者发布的。"));
         if (!await ConfirmAsync(T("导入插件"), string.Join('\n', lines), T("安装"), cancelText: T("取消")))
             throw new PluginPackageException(T("已取消导入。"));
 
         var installed = install();
-        SetTaskStatus(T("已安装插件“{0}”。", installed.Manifest.Name));
+        SetTaskStatus(T("已安装插件“{0}”。", PluginName(installed)));
         RefreshPluginContributions();
         return installed;
     }

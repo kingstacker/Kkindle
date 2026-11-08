@@ -1,6 +1,7 @@
 bin/
 obj/
 .vs/
+.DS_Store
 data/
 browser-data/
 TestResults/

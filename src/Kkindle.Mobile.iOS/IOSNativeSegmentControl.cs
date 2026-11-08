@@ -1,33 +1,30 @@
 using System.Collections.Specialized;
+using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
-using CoreGraphics;
-using Foundation;
 using Kkindle.Mobile.Controls;
 using UIKit;
-using System.Runtime.Versioning;
 
 namespace Kkindle.iOSHead;
 
-/// <summary>Hosts a Liquid Glass segmented control within Avalonia's layout.</summary>
+/// <summary>Uses the system segmented control and its native iOS appearance and gestures.</summary>
 [SupportedOSPlatform("ios26.0")]
-internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmentInteraction
+internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmentInteraction, INativeScrollPosition
 {
-    private static readonly nfloat TrackInset = 3;
     private readonly IReadOnlyList<Button> _buttons;
-    private readonly List<UIButton> _segmentButtons = [];
-    private SegmentContainer? _container;
-    private UIVisualEffectView? _glassContainer;
-    private UIVisualEffectView? _trackGlass;
-    private UIView? _selectionPill;
+    private UIView? _container;
+    private UIView? _backdrop;
+    private UISegmentedControl? _segments;
     private UIView? _scrim;
-    private int _selectedIndex = -1;
+    private UIView? _clipMask;
+    private Rect? _clipRect;
     private bool _sheetInteractionBlocked;
     private Color? _sheetScrim;
+    private Color _sheetBackdrop;
 
     public IOSNativeSegmentControl(IReadOnlyList<Button> buttons)
     {
@@ -35,61 +32,24 @@ internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmen
         foreach (var button in buttons)
             ((INotifyCollectionChanged)button.Classes).CollectionChanged += OnClassesChanged;
         ActualThemeVariantChanged += (_, _) => UpdateTheme();
-        SizeChanged += (_, _) => LayoutSegments(animated: false);
     }
 
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
-        _container = new SegmentContainer(() => LayoutSegments(animated: false))
+        _container = new SegmentContainer { ClipsToBounds = true };
+        _backdrop = new UIView(_container.Bounds)
         {
-            ClipsToBounds = true
-        };
-
-        _glassContainer = new UIVisualEffectView(new UIGlassContainerEffect())
-        {
-            Frame = _container.Bounds,
             AutoresizingMask = UIViewAutoresizing.FlexibleDimensions,
-            ClipsToBounds = true
-        };
-        _container.AddSubview(_glassContainer);
-
-        var trackEffect = UIGlassEffect.Create(UIGlassEffectStyle.Regular);
-        trackEffect.Interactive = false;
-        _trackGlass = new UIVisualEffectView(trackEffect)
-        {
-            Frame = _glassContainer.ContentView.Bounds,
-            AutoresizingMask = UIViewAutoresizing.FlexibleDimensions,
-            ClipsToBounds = true
-        };
-        _glassContainer.ContentView.AddSubview(_trackGlass);
-
-        _selectionPill = new UIView
-        {
-            ClipsToBounds = true,
             UserInteractionEnabled = false
         };
-        _selectionPill.Layer.ShadowColor = UIColor.Black.CGColor;
-        _selectionPill.Layer.ShadowOpacity = 0.12f;
-        _selectionPill.Layer.ShadowRadius = 5;
-        _selectionPill.Layer.ShadowOffset = new CGSize(0, 1);
-        _glassContainer.ContentView.AddSubview(_selectionPill);
-
-        var font = UIFont.FromName("KingHwaOldSong", 14)
-            ?? UIFont.SystemFontOfSize(14, UIFontWeight.Medium);
-        for (var index = 0; index < _buttons.Count; index++)
+        _container.AddSubview(_backdrop);
+        _segments = new UISegmentedControl(_buttons.Select(button => button.Content?.ToString() ?? "").ToArray())
         {
-            var segment = new UIButton(UIButtonType.Custom)
-            {
-                Tag = index,
-                BackgroundColor = UIColor.Clear
-            };
-            segment.SetTitle(_buttons[index].Content?.ToString() ?? "", UIControlState.Normal);
-            segment.TitleLabel.Font = font;
-            segment.TouchUpInside += OnSegmentTouchUpInside;
-            _segmentButtons.Add(segment);
-            _container.AddSubview(segment);
-        }
-
+            Frame = _container.Bounds,
+            AutoresizingMask = UIViewAutoresizing.FlexibleDimensions
+        };
+        _segments.ValueChanged += OnValueChanged;
+        _container.AddSubview(_segments);
         _scrim = new UIView(_container.Bounds)
         {
             AutoresizingMask = UIViewAutoresizing.FlexibleDimensions,
@@ -97,28 +57,29 @@ internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmen
             Alpha = 0
         };
         _container.AddSubview(_scrim);
-
         UpdateSelection();
         UpdateTheme();
-        LayoutSegments(animated: false);
+        if (_clipRect is { } clip) SetClipRect(clip);
         _container.UserInteractionEnabled = !_sheetInteractionBlocked;
-        ApplyScrim(animated: false);
+        ApplyScrim(false);
         return new PlatformHandle(_container.Handle, "UIView");
     }
 
     protected override void DestroyNativeControlCore(IPlatformHandle control)
     {
-        foreach (var button in _segmentButtons)
-            button.TouchUpInside -= OnSegmentTouchUpInside;
-        _segmentButtons.Clear();
-        _selectionPill?.Dispose();
-        _selectionPill = null;
-        _trackGlass?.Dispose();
-        _trackGlass = null;
-        _glassContainer?.Dispose();
-        _glassContainer = null;
+        if (_segments is not null)
+        {
+            _segments.ValueChanged -= OnValueChanged;
+            _segments.Dispose();
+            _segments = null;
+        }
         _scrim?.Dispose();
         _scrim = null;
+        _backdrop?.Dispose();
+        _backdrop = null;
+        if (_container is not null) _container.Layer.Mask = null;
+        _clipMask?.Dispose();
+        _clipMask = null;
         _container?.Dispose();
         _container = null;
     }
@@ -129,44 +90,89 @@ internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmen
         if (_container is not null) _container.UserInteractionEnabled = !blocked;
     }
 
-    public void SetSheetScrim(Color? color)
+    public void UpdateScrollPosition() => TryUpdateNativeControlPosition();
+
+    /// <summary>Masks the part of the hosted view that has scrolled out of its viewport.</summary>
+    public void SetClipRect(Rect? visible)
     {
-        if (_sheetScrim == color) return;
+        _clipRect = visible;
+        if (_container is null) return;
+        if (visible is not { } rect)
+        {
+            _container.Layer.Mask = null;
+            _clipMask?.Dispose();
+            _clipMask = null;
+            return;
+        }
+
+        _clipMask ??= new UIView { BackgroundColor = UIColor.Black };
+        _clipMask.Frame = new CGRect(
+            rect.X, rect.Y, Math.Max(0, rect.Width), Math.Max(0, rect.Height));
+        _container.Layer.Mask = _clipMask.Layer;
+    }
+
+    public void SetSheetScrim(Color? color, Color backdrop)
+    {
+        if (_sheetScrim == color && (color is null || _sheetBackdrop == backdrop)) return;
         _sheetScrim = color;
-        ApplyScrim(animated: true);
+        _sheetBackdrop = backdrop;
+        ApplyScrim(true);
     }
 
     private void ApplyScrim(bool animated)
     {
         if (_scrim is null) return;
+        // The glass samples what is behind it. The page scrim is painted below
+        // the hosted view, so an opaque page-coloured backdrop keeps that
+        // sample undimmed and lets the overlay dim the control exactly once,
+        // including its opaque selected pill.
+        if (_backdrop is not null && _sheetScrim is not null)
+            _backdrop.BackgroundColor = UIColor.FromRGB(_sheetBackdrop.R, _sheetBackdrop.G, _sheetBackdrop.B);
         if (_sheetScrim is { } color)
             _scrim.BackgroundColor = UIColor.FromRGB(color.R, color.G, color.B);
         var opacity = _sheetScrim is { } scrim ? scrim.A / 255.0 : 0;
         if (animated)
-            UIView.Animate(0.2, 0, UIViewAnimationOptions.BeginFromCurrentState | UIViewAnimationOptions.CurveLinear,
-                () => { if (_scrim is not null) _scrim.Alpha = (nfloat)opacity; }, null);
+            UIView.Animate(0.3, 0, UIViewAnimationOptions.BeginFromCurrentState | UIViewAnimationOptions.CurveEaseOut,
+                () => { if (_scrim is not null) _scrim.Alpha = (nfloat)opacity; },
+                () =>
+                {
+                    // The overlay has faded out; only now let glass sample the
+                    // page again, otherwise the track would darken mid-fade.
+                    if (_sheetScrim is null && _backdrop is not null)
+                        _backdrop.BackgroundColor = UIColor.Clear;
+                });
         else
+        {
             _scrim.Alpha = (nfloat)opacity;
+            if (_sheetScrim is null && _backdrop is not null)
+                _backdrop.BackgroundColor = UIColor.Clear;
+        }
     }
 
-    private void OnSegmentTouchUpInside(object? sender, EventArgs e)
+    private sealed class SegmentContainer : UIView
     {
-        if (sender is not UIButton { Tag: var tag }
-            || tag < 0
-            || tag >= _buttons.Count)
+        public override void LayoutSubviews()
         {
-            return;
+            base.LayoutSubviews();
+            if (Subviews.Length < 3) return;
+            Subviews[0].Layer.CornerRadius = Bounds.Height / 2;
+            Subviews[2].Layer.CornerRadius = Bounds.Height / 2;
         }
+    }
 
-        _buttons[(int)tag].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+    private void OnValueChanged(object? sender, EventArgs e)
+    {
+        var index = _segments?.SelectedSegment ?? -1;
+        if (index < 0 || index >= _buttons.Count) return;
+        _buttons[(int)index].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         UpdateSelection();
-        LayoutSegments(animated: true);
     }
 
     private void OnClassesChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateSelection();
 
     private void UpdateSelection()
     {
+        if (_segments is null) return;
         var selected = -1;
         for (var index = 0; index < _buttons.Count; index++)
             if (_buttons[index].Classes.Contains("on"))
@@ -174,104 +180,14 @@ internal sealed class IOSNativeSegmentControl : NativeControlHost, INativeSegmen
                 selected = index;
                 break;
             }
-        _selectedIndex = selected;
-        for (var index = 0; index < _segmentButtons.Count; index++)
-            _segmentButtons[index].Selected = index == selected;
-    }
-
-    private void LayoutSegments(bool animated)
-    {
-        if (_container is null
-            || _glassContainer is null
-            || _trackGlass is null
-            || _selectionPill is null)
-        {
-            return;
-        }
-
-        var bounds = _container.Bounds;
-        if (bounds.Width <= 0 || bounds.Height <= 0) return;
-        var radius = bounds.Height / 2;
-        _container.Layer.CornerRadius = radius;
-        _glassContainer.Frame = bounds;
-        _glassContainer.Layer.CornerRadius = radius;
-        _trackGlass.Frame = _glassContainer.ContentView.Bounds;
-        _trackGlass.Layer.CornerRadius = radius;
-
-        var segmentWidth = _segmentButtons.Count == 0
-            ? 0
-            : (bounds.Width - TrackInset * 2) / _segmentButtons.Count;
-        for (var index = 0; index < _segmentButtons.Count; index++)
-        {
-            _segmentButtons[index].Frame = new CGRect(
-                TrackInset + index * segmentWidth,
-                TrackInset,
-                segmentWidth,
-                Math.Max(0, bounds.Height - TrackInset * 2));
-        }
-
-        if (_selectedIndex < 0 || segmentWidth <= 0)
-        {
-            _selectionPill.Hidden = true;
-            return;
-        }
-
-        _selectionPill.Hidden = false;
-        var target = new CGRect(
-            TrackInset + _selectedIndex * segmentWidth,
-            TrackInset,
-            segmentWidth,
-            Math.Max(0, bounds.Height - TrackInset * 2));
-        _selectionPill.Layer.CornerRadius = target.Height / 2;
-        if (!animated)
-        {
-            _selectionPill.Frame = target;
-            return;
-        }
-
-        UIView.Animate(
-            0.22,
-            0,
-            UIViewAnimationOptions.BeginFromCurrentState | UIViewAnimationOptions.CurveEaseOut,
-            () => { if (_selectionPill is not null) _selectionPill.Frame = target; },
-            null);
+        _segments.SelectedSegment = selected;
     }
 
     private void UpdateTheme()
     {
-        if (_container is null) return;
-        var style = ActualThemeVariant == ThemeVariant.Dark
-            ? UIUserInterfaceStyle.Dark
-            : UIUserInterfaceStyle.Light;
-        _container.OverrideUserInterfaceStyle = style;
-        _glassContainer?.OverrideUserInterfaceStyle = style;
-
-        var primary = style == UIUserInterfaceStyle.Dark
-            ? UIColor.White
-            : UIColor.FromWhiteAlpha(0.08f, 1);
-        var muted = style == UIUserInterfaceStyle.Dark
-            ? UIColor.FromWhiteAlpha(1, 0.64f)
-            : UIColor.FromWhiteAlpha(0.35f, 1);
-        if (_selectionPill is not null)
-        {
-            _selectionPill.BackgroundColor = style == UIUserInterfaceStyle.Dark
-                ? UIColor.FromWhiteAlpha(1, 0.18f)
-                : UIColor.FromWhiteAlpha(1, 0.66f);
-        }
-        foreach (var button in _segmentButtons)
-        {
-            button.SetTitleColor(muted, UIControlState.Normal);
-            button.SetTitleColor(primary, UIControlState.Selected);
-            button.SetTitleColor(primary, UIControlState.Highlighted);
-        }
-    }
-
-    private sealed class SegmentContainer(Action layout) : UIView
-    {
-        public override void LayoutSubviews()
-        {
-            base.LayoutSubviews();
-            layout();
-        }
+        if (_container is not null)
+            _container.OverrideUserInterfaceStyle = ActualThemeVariant == ThemeVariant.Dark
+                ? UIUserInterfaceStyle.Dark
+                : UIUserInterfaceStyle.Light;
     }
 }

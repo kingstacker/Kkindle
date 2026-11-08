@@ -56,7 +56,11 @@ public sealed record PluginPageContext(
     string Language,
     string AppVersion,
     PluginSelectionContext? Selection = null,
-    bool DeveloperMode = false);
+    bool DeveloperMode = false)
+{
+    /// <summary>True for provider and background scripts, which have no window or document.</summary>
+    public bool Headless { get; init; }
+}
 
 /// <summary>
 /// Turns a plugin page into one self-contained HTML document: relative
@@ -141,7 +145,7 @@ public static partial class PluginPageComposer
             .Append("<meta http-equiv=\"Content-Security-Policy\" content=\"").Append(ContentSecurityPolicy).Append("\">")
             .Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
             .Append("<style id=\"kkindle-theme\">").Append(BuildThemeCss(theme)).Append("</style>")
-            .Append("<script>").Append(EscapeScript(BuildBridgeScript(context, theme))).Append("\n</script>")
+            .Append("<script>").Append(EscapeScript(BuildBridgeScript(context, theme, plugin.Manifest))).Append("\n</script>")
             .ToString();
 
         var headMatch = HeadRegex().Match(html);
@@ -265,7 +269,39 @@ public static partial class PluginPageComposer
     private static string SvgDataUrl(string svg) =>
         "data:image/svg+xml," + Uri.EscapeDataString(svg).Replace("'", "%27", StringComparison.Ordinal);
 
-    public static string BuildBridgeScript(PluginPageContext context, PluginTheme theme)
+    /// <summary>
+    /// What this host supports, frozen into <c>kkindle.capabilities</c>.
+    /// Plugins should feature-test methods rather than compare app versions.
+    /// </summary>
+    public static object BuildCapabilities(PluginManifest? manifest, string appVersion, bool headless) => new
+    {
+        apiVersion = PluginManifest.SupportedApiVersion,
+        appVersion,
+        headless,
+        methods = PluginBridge.Methods,
+        permissions = manifest is null ? null : new
+        {
+            library = manifest.LibraryAccess switch
+            {
+                PluginLibraryAccess.Write => "write",
+                PluginLibraryAccess.Read => "read",
+                _ => null
+            },
+            libraryAll = manifest.HasLibraryScopeAll,
+            network = manifest.HasNetworkPermission,
+            import = manifest.CanImportLibrary,
+            translation = manifest.AllowsTranslation,
+            pinyin = manifest.AllowsPinyin,
+            storage = manifest.UsesStorage,
+            secrets = manifest.UsesSecrets,
+            content = manifest.CanReadContent,
+            ai = manifest.UsesAi,
+            readingWrite = manifest.CanWriteReadingData,
+            bookFiles = manifest.CanReadBookFiles
+        }
+    };
+
+    public static string BuildBridgeScript(PluginPageContext context, PluginTheme theme, PluginManifest? manifest = null)
     {
         var contextJson = JsonSerializer.Serialize(new
         {
@@ -277,9 +313,15 @@ public static partial class PluginPageComposer
             appVersion = context.AppVersion,
             theme = theme.IsDark ? "dark" : "light",
             selection = context.Selection,
-            developerMode = context.DeveloperMode
+            developerMode = context.DeveloperMode,
+            headless = context.Headless
         }, JsonOptions);
-        return BridgeTemplate.Replace("__CONTEXT__", contextJson, StringComparison.Ordinal);
+        var capabilitiesJson = JsonSerializer.Serialize(
+            BuildCapabilities(manifest, context.AppVersion, context.Headless),
+            JsonOptions);
+        return BridgeTemplate
+            .Replace("__CONTEXT__", contextJson, StringComparison.Ordinal)
+            .Replace("__CAPABILITIES__", capabilitiesJson, StringComparison.Ordinal);
     }
 
     // The host answers through window.__kkindleBridge.reply(id, payload).
@@ -334,13 +376,78 @@ public static partial class PluginPageComposer
               post(JSON.stringify({ id: id, method: method, params: params || {} }), 0);
             });
           }
+          // Handlers registered by provider and background scripts; the host
+          // looks them up by "kind:id" after the script has run.
+          var handlers = Object.create(null);
+          function register(kind, id, handler) {
+            if (typeof id === 'function') { handler = id; id = ''; }
+            if (typeof handler !== 'function') throw new TypeError('handler must be a function');
+            handlers[String(kind) + ':' + String(id || '')] = handler;
+          }
           Object.defineProperty(window, '__kkindleBridge', {
-            value: Object.freeze({ reply: settle, event: emit }),
+            value: Object.freeze({ reply: settle, event: emit, handlers: handlers }),
             writable: false, configurable: false
           });
+          function deepFreeze(value) {
+            if (value && typeof value === 'object') {
+              Object.getOwnPropertyNames(value).forEach(function (key) { deepFreeze(value[key]); });
+              Object.freeze(value);
+            }
+            return value;
+          }
           var context = Object.freeze(__CONTEXT__);
+          var capabilities = deepFreeze(__CAPABILITIES__);
           var api = {
             context: context,
+            capabilities: capabilities,
+            has: function (method) { return capabilities.methods.indexOf(String(method)) >= 0; },
+            register: Object.freeze({
+              dictionary: function (id, handler) { register('dictionary', id, handler); },
+              translator: function (id, handler) { register('translator', id, handler); },
+              background: function (handler) { register('background', '', handler); }
+            }),
+            book: Object.freeze({
+              getToc: function (bookId, options) {
+                options = options || {};
+                return call('book.getToc', {
+                  bookId: String(bookId),
+                  fileId: options.fileId == null ? null : String(options.fileId)
+                });
+              },
+              getChapterText: function (bookId, chapterIndex, options) {
+                options = options || {};
+                return call('book.getChapterText', {
+                  bookId: String(bookId),
+                  chapterIndex: chapterIndex == null ? 0 : chapterIndex,
+                  fileId: options.fileId == null ? null : String(options.fileId),
+                  offset: options.offset == null ? 0 : options.offset,
+                  maxLength: options.maxLength == null ? 200000 : options.maxLength
+                });
+              }
+            }),
+            ai: Object.freeze({
+              status: function () { return call('ai.status'); },
+              complete: function (prompt, options) {
+                options = options || {};
+                return call('ai.complete', {
+                  prompt: String(prompt),
+                  system: options.system == null ? null : String(options.system),
+                  history: options.history || []
+                }).then(function (result) { return result.text; });
+              }
+            }),
+            reader: Object.freeze({
+              open: function (bookId, options) {
+                options = options || {};
+                return call('reader.open', {
+                  bookId: String(bookId),
+                  fileId: options.fileId == null ? null : String(options.fileId),
+                  chapterIndex: options.chapterIndex == null ? null : options.chapterIndex,
+                  chapterPath: options.chapterPath == null ? null : String(options.chapterPath),
+                  offset: options.offset == null ? null : options.offset
+                });
+              }
+            }),
             library: Object.freeze({
               getBooks: function (ids) { return call('library.getBooks', { ids: ids || context.bookIds }); },
               search: function (options) {
@@ -372,6 +479,15 @@ public static partial class PluginPageComposer
               updateBook: function (id, patch) { return call('library.updateBook', { id: id, patch: patch }); },
               getCover: function (id) { return call('library.getCover', { id: id }); },
               setCover: function (id, data) { return call('library.setCover', { id: id, data: data }); },
+              readFile: function (bookId, options) {
+                options = options || {};
+                return call('library.readFile', {
+                  bookId: String(bookId),
+                  fileId: options.fileId == null ? null : String(options.fileId),
+                  offset: options.offset == null ? 0 : options.offset,
+                  length: options.length == null ? 4194304 : options.length
+                });
+              },
               importDownload: function (url, options) {
                 options = options || {};
                 return call('library.importDownload', {
@@ -426,7 +542,31 @@ public static partial class PluginPageComposer
                   limit: options.limit == null ? 500 : options.limit
                 });
               },
-              getStats: function (bookId) { return call('reading.getStats', { bookId: String(bookId) }); }
+              getStats: function (bookId) { return call('reading.getStats', { bookId: String(bookId) }); },
+              addAnnotation: function (bookId, annotation) {
+                annotation = annotation || {};
+                return call('reading.addAnnotation', {
+                  bookId: String(bookId),
+                  fileId: annotation.fileId == null ? null : String(annotation.fileId),
+                  chapterIndex: annotation.chapterIndex,
+                  startOffset: annotation.startOffset,
+                  endOffset: annotation.endOffset,
+                  note: annotation.note == null ? null : String(annotation.note),
+                  color: annotation.color == null ? null : String(annotation.color),
+                  style: annotation.style == null ? null : String(annotation.style)
+                });
+              },
+              addBookmark: function (bookId, bookmark) {
+                bookmark = bookmark || {};
+                return call('reading.addBookmark', {
+                  bookId: String(bookId),
+                  fileId: bookmark.fileId == null ? null : String(bookmark.fileId),
+                  chapterIndex: bookmark.chapterIndex,
+                  offset: bookmark.offset == null ? 0 : bookmark.offset,
+                  title: bookmark.title == null ? null : String(bookmark.title),
+                  quote: bookmark.quote == null ? null : String(bookmark.quote)
+                });
+              }
             }),
             http: Object.freeze({
               fetch: function (url, options) {
@@ -523,8 +663,10 @@ public static partial class PluginPageComposer
             reportDiagnostic('error', ['Unhandled rejection: ' + describeDiagnostic(event.reason)]);
           });
 
-          document.documentElement.setAttribute('data-kk-theme', context.theme);
-          document.documentElement.setAttribute('lang', context.language);
+          if (typeof document !== 'undefined' && document && document.documentElement) {
+            document.documentElement.setAttribute('data-kk-theme', context.theme);
+            document.documentElement.setAttribute('lang', context.language);
+          }
         })();
         """;
 

@@ -32,30 +32,24 @@
       <Setter Property="Background" Value="Transparent" />
     </Style>
   </UserControl.Styles>
-  <Grid RowDefinitions="Auto,Auto,*">
+  <Grid RowDefinitions="Auto,*">
     <!-- Masthead -->
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="24,16,12,4">
-      <StackPanel Orientation="Horizontal" Spacing="18">
+      <StackPanel Name="MastheadTabs" Orientation="Horizontal" Spacing="18">
         <Button Name="BooksTab" Classes="masthead on" Content="书库" Click="OnModeClick" />
         <Button Name="CollectionsTab" Classes="masthead" Content="收藏夹" Click="OnModeClick" />
       </StackPanel>
+      <TextBox Name="SearchBox" Classes="field search-field" PlaceholderText="搜索书名或作者"
+               IsVisible="False" VerticalAlignment="Center" TextChanged="OnSearchTextChanged" />
       <Button Grid.Column="1" Classes="icon" Name="SearchButton" Click="OnSearchClick">
-        <c:LineIcon Data="{StaticResource IconSearch}" StrokeThickness="1.4" />
+        <c:LineIcon Name="SearchIcon" Data="{StaticResource IconSearch}" StrokeThickness="1.4" />
       </Button>
       <Button Grid.Column="2" Classes="icon" Name="ImportButton" Click="OnImportClick">
         <c:LineIcon Data="{StaticResource IconPlus}" StrokeThickness="1.4" />
       </Button>
     </Grid>
 
-    <Grid Grid.Row="1" Name="SearchRow" IsVisible="False" ColumnDefinitions="*,Auto" Margin="24,4,12,4">
-      <TextBox Name="SearchBox" Classes="field" PlaceholderText="搜索书名或作者"
-               TextChanged="OnSearchTextChanged" />
-      <Button Grid.Column="1" Classes="icon" Click="OnCloseSearchClick">
-        <c:LineIcon Data="{StaticResource IconClose}" Size="18" StrokeThickness="1.4" />
-      </Button>
-    </Grid>
-
-    <ScrollViewer Grid.Row="2" Name="PageScroller">
+    <ScrollViewer Grid.Row="1" Name="PageScroller">
       <Panel Margin="24,8,24,28">
       <StackPanel Name="BooksPanel">
         <!-- Filters and view -->

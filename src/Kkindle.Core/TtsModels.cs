@@ -160,7 +160,8 @@ public sealed record TtsResult(
     string? AudioPath,
     string Format,
     string? ErrorMessage = null,
-    bool FromCache = false)
+    bool FromCache = false,
+    IReadOnlyList<TtsTimingMarker>? TimingMarkers = null)
 {
     public static TtsResult Success(
         string audioPath,
@@ -170,6 +171,15 @@ public sealed record TtsResult(
 
     public static TtsResult Failure(string message)
         => new(false, null, string.Empty, message);
+}
+
+/// <summary>A spoken UTF-16 range and its start time within the rendered audio.</summary>
+public sealed record TtsTimingMarker(int Start, int Length, double Seconds);
+
+/// <summary>Optional playback clock, measured against the current audio file.</summary>
+public interface ITtsPlaybackClock
+{
+    bool TryGetPosition(out TimeSpan position);
 }
 
 public sealed record TtsAvailability(
@@ -232,6 +242,13 @@ public sealed record TtsQueueItem(
 public readonly record struct TtsTextSegment(int Start, int Length, string Text)
 {
     public int End => Start + Length;
+}
+
+/// <summary>Optional native speech playback with a current UTF-16 text position.</summary>
+public interface ITtsLiveSpeechPlayer
+{
+    Task SpeakAsync(string text, TtsOptions options, CancellationToken cancellationToken = default);
+    bool TryGetSpeechPosition(out int offset);
 }
 
 /// <summary>Audio output is deliberately separate from the TTS engine.</summary>

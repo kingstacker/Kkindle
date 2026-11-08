@@ -3,11 +3,13 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using Kkindle.ApplicationServices;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Kkindle.Mobile;
+using Kkindle.Mobile.Controls;
 using Kkindle.Mobile.Views;
 using Kkindle.Mobile.Views.Sheets;
 using Xunit;
@@ -163,6 +165,260 @@ public sealed class SyncSettingsPageTests(MobileUiSession session)
         }
         return true;
     }, CancellationToken.None);
+
+    [Fact]
+    public Task SheetsDimNativeSegmentsWithoutChangingStyle() => session.Session.Dispatch(async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-sheet-tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var services = new MobileServices(paths, new TestProtector(), new BookMetadataService(),
+            new UnavailableBookFormatConverter(), new TestPicker("unused"));
+        var previousFactory = NativeSegmentGroup.CreateNativeControl;
+        NativeSegmentGroup.CreateNativeControl = _ => new TestNativeSegment();
+        using var modules = MobileComposition.Create(services);
+        var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths));
+        var window = new Window { Width = 411, Height = 880, Content = shell };
+        try
+        {
+            window.Show();
+            var library = (LibraryPage)shell.CurrentPage!;
+            await Until(() => library.GetVisualDescendants().OfType<TestNativeSegment>().Any());
+            var librarySegment = library.GetVisualDescendants().OfType<TestNativeSegment>().Single();
+            await Until(() => librarySegment.IsVisible);
+            Click(library.FindControl<Button>("SortButton")!);
+            Assert.NotNull(shell.CurrentSheet);
+            // The system control stays on screen; only a matching native scrim
+            // dims it, so its glass style never changes during the animation.
+            Assert.True(librarySegment.IsVisible);
+            Assert.True(librarySegment.Blocked);
+            await Task.Delay(300);
+            Assert.True(librarySegment.IsVisible);
+            Assert.NotNull(librarySegment.Scrim);
+
+            // Reopening while the previous close animation is running must keep it visible.
+            shell.HideSheet();
+            shell.ShowSheet("排序", new ChoiceSheet([], _ => { }));
+            await Task.Delay(300);
+            Assert.True(librarySegment.IsVisible);
+            shell.HideSheet();
+            await Until(() => shell.CurrentSheet is null && librarySegment.IsVisible);
+            Assert.False(librarySegment.Blocked);
+            Assert.Null(librarySegment.Scrim);
+
+            shell.ShowProfile();
+            var profile = (ProfilePage)shell.CurrentPage!;
+            await Until(() => profile.GetVisualDescendants().OfType<TestNativeSegment>().Any());
+            var appearance = profile.GetVisualDescendants().OfType<TestNativeSegment>().Single();
+            await Until(() => appearance.IsVisible);
+            shell.ShowSheet("外观", new ChoiceSheet([], _ => { }));
+            Assert.IsType<ChoiceSheet>(shell.CurrentSheet);
+            Assert.True(appearance.IsVisible);
+            await Task.Delay(300);
+            Assert.True(appearance.IsVisible);
+            Assert.NotNull(appearance.Scrim);
+            shell.HideSheet();
+            await Until(() => shell.CurrentSheet is null && appearance.IsVisible);
+            Assert.False(appearance.Blocked);
+        }
+        finally
+        {
+            NativeSegmentGroup.CreateNativeControl = previousFactory;
+            window.Close();
+            await Task.Delay(100);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        return true;
+    }, CancellationToken.None);
+
+    [Fact]
+    public Task BookDetailNativeActionsKeepTheirHandlersAndRespectSheets() => session.Session.Dispatch(async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-book-actions", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var services = new MobileServices(paths, new TestProtector(), new BookMetadataService(),
+            new UnavailableBookFormatConverter(), new TestPicker("unused"));
+        var previousMenuFactory = NativeMenuButton.CreateNativeControl;
+        var previousActionFactory = NativeActionButton.CreateNativeControl;
+        IReadOnlyList<MenuItem>? items = null;
+        NativeMenuButton.CreateNativeControl = menuItems =>
+        {
+            items = menuItems;
+            return new Border();
+        };
+        NativeActionButton.CreateNativeControl = _ => new Border();
+        using var modules = MobileComposition.Create(services);
+        var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths));
+        var window = new Window { Width = 411, Height = 880, Content = shell };
+        try
+        {
+            window.Show();
+            shell.OpenBook(new Book { Title = "测试书籍", Description = new string('文', 150) });
+            var page = Assert.IsType<BookDetailPage>(shell.CurrentPage);
+            await Until(() => items is not null &&
+                page.GetVisualDescendants().OfType<NativeActionButton>().Count() == 5 &&
+                page.GetVisualDescendants().OfType<NativeActionButton>().All(group => group.Content is Grid));
+            Assert.Equal(5, items!.Count);
+            var expand = page.FindControl<Button>("ExpandButton")!;
+            Click(expand);
+            Assert.Equal("收起", expand.Content);
+            var menu = page.GetVisualDescendants().OfType<NativeMenuButton>().Single();
+            var nativeMenu = ((Grid)menu.Content!).Children.OfType<Border>().Single();
+            var action = page.GetVisualDescendants().OfType<NativeActionButton>().First();
+            var nativeAction = ((Grid)action.Content!).Children.OfType<Border>().Single();
+            Assert.True(nativeMenu.IsVisible);
+            Assert.True(nativeAction.IsVisible);
+            items.Single(item => Equals(item.Header, "删除"))
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.IsType<PromptSheet>(shell.CurrentSheet);
+            Assert.False(nativeMenu.IsVisible);
+            Assert.False(nativeAction.IsVisible);
+            shell.HideSheet();
+            await Until(() => shell.CurrentSheet is null && nativeMenu.IsVisible && nativeAction.IsVisible);
+        }
+        finally
+        {
+            NativeMenuButton.CreateNativeControl = previousMenuFactory;
+            NativeActionButton.CreateNativeControl = previousActionFactory;
+            window.Close();
+            await Task.Delay(100);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        return true;
+    }, CancellationToken.None);
+
+    [Fact]
+    public Task SearchFieldsOpenInlineAndClearFilters() => session.Session.Dispatch(async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-search-tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var services = new MobileServices(paths, new TestProtector(), new BookMetadataService(),
+            new UnavailableBookFormatConverter(), new TestPicker("unused"));
+        using var modules = MobileComposition.Create(services);
+        var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths));
+        var window = new Window { Width = 411, Height = 880, Content = shell };
+        try
+        {
+            window.Show();
+            var library = (LibraryPage)shell.CurrentPage!;
+            var search = library.FindControl<TextBox>("SearchBox")!;
+            var searchButton = library.FindControl<Button>("SearchButton")!;
+            var titles = library.FindControl<StackPanel>("MastheadTabs")!;
+            Assert.False(search.IsVisible);
+            Click(searchButton);
+            Assert.True(search.IsVisible);
+            Assert.False(titles.IsVisible);
+            search.Text = "some book";
+            Click(searchButton);
+            Assert.False(search.IsVisible);
+            Assert.True(titles.IsVisible);
+            Assert.Equal(string.Empty, search.Text);
+
+            var picker = new BookPickSheet(
+                [new Book { Title = "Alpha" }, new Book { Title = "Beta" }], shell, _ => Task.CompletedTask);
+            shell.ShowSheet("选书", picker);
+            var filter = picker.FindControl<TextBox>("FilterBox")!;
+            var filterButton = picker.FindControl<Button>("FilterSearchButton")!;
+            var rows = picker.FindControl<ItemsControl>("Rows")!;
+            Assert.False(filter.IsVisible);
+            Click(filterButton);
+            filter.Text = "Alpha";
+            await Until(() => rows.Items.Count == 1);
+            Click(filterButton);
+            await Until(() => rows.Items.Count == 2);
+            Assert.False(filter.IsVisible);
+            Assert.Equal(string.Empty, filter.Text);
+        }
+        finally
+        {
+            window.Close();
+            await Task.Delay(100);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        return true;
+    }, CancellationToken.None);
+
+    [Fact]
+    public Task SheetTracksTabBarOcclusionUntilDismissed() => session.Session.Dispatch(async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-tab-tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var tabBar = new TestOccludingTabBar();
+        var services = new MobileServices(paths, new TestProtector(), new BookMetadataService(),
+            new UnavailableBookFormatConverter(), new TestPicker("unused"), TabBar: tabBar);
+        using var modules = MobileComposition.Create(services);
+        var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths));
+        var window = new Window { Width = 411, Height = 880, Content = shell };
+        try
+        {
+            window.Show();
+            shell.ShowSheet("排序", new ChoiceSheet([new ChoiceItem("书名")], _ => { }));
+            await Until(() => tabBar.SheetBounds is not null);
+            Assert.True(tabBar.Visible);
+            await Until(() => tabBar.SheetTops.Distinct().Count() > 1);
+            shell.HideSheet();
+            await Until(() => shell.CurrentSheet is null);
+            Assert.True(tabBar.Visible);
+            Assert.Null(tabBar.SheetBounds);
+        }
+        finally
+        {
+            window.Close();
+            await Task.Delay(100);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        return true;
+    }, CancellationToken.None);
+
+    [Fact]
+    public Task ReaderSearchRunsTheSubmittedQuery() => session.Session.Dispatch(async () =>
+    {
+        string? searched = null;
+        var sheet = new SearchSheet((query, _, _) =>
+        {
+            searched = query;
+            return Task.FromResult<IReadOnlyList<SearchHit>>([new SearchHit("章节", "结果", query, new object())]);
+        }, _ => { }, "关键词", searchImmediately: true);
+        var window = new Window { Width = 411, Height = 880, Content = sheet };
+        try
+        {
+            window.Show();
+            await Until(() => sheet.FindControl<ItemsControl>("Results")!.Items.Count == 1);
+            Assert.Equal("关键词", searched);
+            Assert.Equal("共 1 条", sheet.FindControl<TextBlock>("StatusText")!.Text);
+        }
+        finally
+        {
+            window.Close();
+        }
+        return true;
+    }, CancellationToken.None);
+
+    private sealed class TestOccludingTabBar : IMobileTabBar, ISheetOccludingTabBar
+    {
+        public event Action<int>? TabSelected { add { } remove { } }
+        public bool Visible { get; private set; }
+        public Rect? SheetBounds { get; private set; }
+        public List<double> SheetTops { get; } = [];
+        public void Update(bool visible, int selectedIndex) => Visible = visible;
+        public void SetDarkAppearance(bool dark) { }
+        public void SetSheetOcclusion(Rect? sheetBounds)
+        {
+            SheetBounds = sheetBounds;
+            if (sheetBounds is { } bounds) SheetTops.Add(bounds.Top);
+        }
+    }
+
+    private sealed class TestNativeSegment : Control, INativeSegmentInteraction
+    {
+        public bool Blocked { get; private set; }
+        public Color? Scrim { get; private set; }
+        public void SetSheetInteractionBlocked(bool blocked) => Blocked = blocked;
+        public void SetSheetScrim(Color? color, Color backdrop) => Scrim = color;
+    }
 
     private static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 

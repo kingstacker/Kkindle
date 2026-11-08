@@ -124,6 +124,8 @@ public sealed record ReaderLayoutSettings(
     // constructor parameter. Older JSON settings do not contain the field;
     // the initializer therefore gives new settings the current default.
     public bool ParagraphIndent { get; init; } = false;
+    /// <summary>Extra gap after body paragraphs, in multiples of the body font size.</summary>
+    public double ParagraphSpacing { get; init; } = ReaderLayoutDefaults.DefaultParagraphSpacing;
 }
 
 /// <summary>
@@ -169,6 +171,8 @@ public static class ReaderLayoutDefaults
     public const double MaxMaxWidth = 3840;
     public const double MinBodyPadding = 24;
     public const double MaxBodyPadding = 160;
+    public const double DefaultParagraphSpacing = 0;
+    public const double MaxParagraphSpacing = 2;
 
     // All reader layout options are global. Keep this helper for callers that
     // still pass a legacy per-book layout, but never let that layout override
@@ -201,6 +205,9 @@ public static class ReaderLayoutDefaults
         var bodyPadding = double.IsFinite(settings.BodyPadding)
             ? Math.Clamp(settings.BodyPadding, MinBodyPadding, MaxBodyPadding)
             : DefaultBodyPadding;
+        var paragraphSpacing = double.IsFinite(settings.ParagraphSpacing)
+            ? Math.Clamp(settings.ParagraphSpacing, 0, MaxParagraphSpacing)
+            : DefaultParagraphSpacing;
         var fontFamily = string.IsNullOrWhiteSpace(settings.FontFamily)
             ? ReaderFontDefaults.DefaultFamily
             : settings.FontFamily.Trim();
@@ -211,6 +218,7 @@ public static class ReaderLayoutDefaults
             LineHeight = lineHeight,
             MaxWidth = maxWidth,
             BodyPadding = bodyPadding,
+            ParagraphSpacing = paragraphSpacing,
             FontFamily = fontFamily,
             // Vertical text is deliberately a single-page-only layout. Keep
             // the invariant here rather than relying on individual controls:

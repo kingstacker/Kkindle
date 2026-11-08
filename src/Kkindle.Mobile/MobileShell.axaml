@@ -21,22 +21,15 @@
     </Style>
     <Style Selector="Border#SheetScrim">
       <Setter Property="Opacity" Value="0" />
-      <Setter Property="Transitions">
-        <Transitions>
-          <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
-        </Transitions>
-      </Setter>
     </Style>
     <Style Selector="Border#SheetScrim.open">
       <Setter Property="Opacity" Value="1" />
     </Style>
+    <Style Selector="Border#SheetScrim.open.reader-preview">
+      <Setter Property="Opacity" Value="0.2" />
+    </Style>
     <Style Selector="ContentControl#SheetPanel">
       <Setter Property="RenderTransform" Value="translateY(640px)" />
-      <Setter Property="Transitions">
-        <Transitions>
-          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.22" Easing="CubicEaseOut" />
-        </Transitions>
-      </Setter>
     </Style>
     <Style Selector="ContentControl#SheetPanel.open">
       <Setter Property="RenderTransform" Value="translateY(0px)" />
@@ -127,9 +120,20 @@
     <ThemeVariantScope Grid.RowSpan="2" Name="SheetScope" IsVisible="False" ZIndex="20">
       <Grid>
         <Border Name="SheetScrim" Background="{DynamicResource ScrimBrush}"
-                PointerPressed="OnScrimPressed" />
+                PointerPressed="OnScrimPressed">
+          <Border.Transitions>
+            <Transitions>
+              <DoubleTransition Property="Opacity" Duration="0:0:0.3" Easing="0.4,0,0.2,1" />
+            </Transitions>
+          </Border.Transitions>
+        </Border>
         <ContentControl Name="SheetPanel" Classes="themed" VerticalAlignment="Bottom"
                         CornerRadius="20,20,0,0" Background="{DynamicResource SurfaceBrush}">
+          <ContentControl.Transitions>
+            <Transitions>
+              <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.34" Easing="0.4,0,0.2,1" />
+            </Transitions>
+          </ContentControl.Transitions>
           <Grid RowDefinitions="Auto,Auto,*">
             <Border Width="36" Height="4" CornerRadius="2" Margin="0,8,0,0"
                     Background="{DynamicResource SunkStrongBrush}" HorizontalAlignment="Center" />

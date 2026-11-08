@@ -257,9 +257,6 @@ public partial class ProfilePage : UserControl
         }
     }
 
-    private void OnSupportClick(object? sender, RoutedEventArgs e) =>
-        _shell?.ShowSheet("请我喝杯咖啡", new SupportSheet());
-
     private void OnThemeClick(object? sender, RoutedEventArgs e)
     {
         var mode = sender switch

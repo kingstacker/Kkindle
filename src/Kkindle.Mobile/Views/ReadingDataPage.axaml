@@ -100,14 +100,15 @@
                 <TextBlock Classes="section" Name="DailyTitleText" />
                 <TextBlock Classes="muted" FontSize="12.5" Name="PickedDayText" />
               </StackPanel>
-              <Border Grid.Column="1" VerticalAlignment="Top" Classes="segments"
-                      Background="{DynamicResource SunkStrongBrush}" Padding="2">
+              <c:NativeSegmentGroup Grid.Column="1" VerticalAlignment="Top">
+              <Border Classes="segments" Background="{DynamicResource SunkStrongBrush}" Padding="2">
                 <StackPanel Orientation="Horizontal">
                   <Button Name="Range7" Classes="seg" Padding="10,4" FontSize="12.5" Content="7 天" Click="OnRangeClick" />
                   <Button Name="Range14" Classes="seg on" Padding="10,4" FontSize="12.5" Content="14 天" Click="OnRangeClick" />
                   <Button Name="Range30" Classes="seg" Padding="10,4" FontSize="12.5" Content="30 天" Click="OnRangeClick" />
                 </StackPanel>
               </Border>
+              </c:NativeSegmentGroup>
             </Grid>
             <!-- Labels sit in their own row: overhanging text inside a bar's
                  button would be painted over by the next bar. -->
@@ -244,7 +245,8 @@
             <TextBlock Classes="section" Text="阅读勋章" />
             <TextBlock Classes="muted" FontSize="12.5" Name="MedalSummaryText" />
           </StackPanel>
-          <Border Grid.Column="1" VerticalAlignment="Top" Classes="segments" Padding="2">
+          <c:NativeSegmentGroup Grid.Column="1" VerticalAlignment="Top">
+          <Border Classes="segments" Padding="2">
             <StackPanel Orientation="Horizontal">
               <Button Name="MedalsUnlocked" Classes="seg on" Padding="10,4" FontSize="12.5" Content="已解锁"
                       Click="OnMedalFilterClick" />
@@ -252,6 +254,7 @@
                       Click="OnMedalFilterClick" />
             </StackPanel>
           </Border>
+          </c:NativeSegmentGroup>
         </Grid>
         <ItemsControl Name="MedalsList">
           <ItemsControl.ItemsPanel>

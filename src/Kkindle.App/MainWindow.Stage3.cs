@@ -5123,6 +5123,7 @@ public partial class MainWindow
             CollectionsMutuallyExclusiveCheck.IsChecked = _appSettings.CollectionsMutuallyExclusive;
             NetworkEnabledCheck.IsChecked = _appSettings.NetworkEnabled;
             PluginDeveloperModeCheck.IsChecked = _appSettings.PluginDeveloperMode;
+            PluginBackgroundTasksCheck.IsChecked = _appSettings.PluginBackgroundTasksEnabled;
             InstallPluginFromFolderButton.IsVisible = _appSettings.PluginDeveloperMode;
             AutoUpdateCheck.IsChecked = _appSettings.AutoUpdateCheckEnabled;
             DevelopmentUpdateCheck.IsChecked = _appSettings.DevelopmentUpdateCheckEnabled;
@@ -5965,6 +5966,7 @@ public partial class MainWindow
             InstallPluginFromFolderButton.IsVisible = PluginDeveloperModeCheck.IsChecked == true;
             ScheduleAppSettingsAutoSave();
         };
+        PluginBackgroundTasksCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         CollectionsMutuallyExclusiveCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         ReadingMaterialsCollapsedByDefaultCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
         AutoGenerateReaderFormatsCheck.IsCheckedChanged += (_, _) => ScheduleAppSettingsAutoSave();
@@ -6507,6 +6509,7 @@ public partial class MainWindow
             AiEnabled = AiEnabledCheck.IsChecked != false,
             NetworkEnabled = NetworkEnabledCheck.IsChecked != false,
             PluginDeveloperMode = PluginDeveloperModeCheck.IsChecked == true,
+            PluginBackgroundTasksEnabled = PluginBackgroundTasksCheck.IsChecked != false,
             AutoUpdateCheckEnabled = AutoUpdateCheck.IsChecked != false,
             DevelopmentUpdateCheckEnabled = DevelopmentUpdateCheck.IsChecked == true,
             AutoConnectDevice = AutoConnectDeviceCheck.IsChecked != false,

@@ -194,6 +194,8 @@ public sealed class TypesetLayoutOptions
     public float LineHeight { get; init; } = 1.8f;
     public float LetterSpacingEm { get; init; } = 0.012f;
     public bool ParagraphIndent { get; init; } = true;
+    /// <summary>Extra spacing between body paragraphs, independent of line height.</summary>
+    public float ParagraphSpacingEm { get; init; }
     public float ViewportWidth { get; init; } = 800f;
     public float ViewportHeight { get; init; } = 600f;
     public float InsetHorizontal { get; init; } = 24f;

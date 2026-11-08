@@ -98,13 +98,6 @@
           <TextBlock Grid.Column="1" Text="1109898894" Classes="muted" FontSize="14" VerticalAlignment="Center" />
         </Grid>
       </Button>
-      <Button Classes="row" Click="OnSupportClick">
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Text="请我喝杯咖啡" VerticalAlignment="Center" />
-          <c:LineIcon Grid.Column="1" Data="{StaticResource IconChevronRight}" Size="16" StrokeThickness="1.4"
-                      VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
-        </Grid>
-      </Button>
       <Button Classes="row" Click="OnVersionClick">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Text="版本" VerticalAlignment="Center" />
