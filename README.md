@@ -116,3 +116,6 @@ Linux also requires WebKitGTK and Secret Service. See [cross-platform notes](doc
 ## License
 
 [GPL-3.0 License](LICENSE). Third-party components and bundled fonts retain their own licenses.
+
+See [third-party notices](THIRD-PARTY-NOTICES.md) and the
+[license/source distribution maintenance guide](docs/third-party-licenses.md).

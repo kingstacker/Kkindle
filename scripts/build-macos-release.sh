@@ -49,7 +49,8 @@ fi
 
 cd "$repo_root"
 app_macos="$app_root/Contents/MacOS"
-mkdir -p "$app_macos" "$app_root/Contents/Resources"
+mtp_source_bundle="$app_root/Contents/Resources/CorrespondingSource/MTP"
+mkdir -p "$app_macos" "$app_root/Contents/Resources" "$mtp_source_bundle"
 
 for payload_rid in "${payload_rids[@]}"; do
   arch="$(payload_arch "$payload_rid")"
@@ -90,7 +91,28 @@ for payload_rid in "${payload_rids[@]}"; do
   bash "$repo_root/scripts/build-macos-mtp-deps.sh" "$mtp_deps" "$arch"
   cp "$mtp_deps/prefix/lib/libmtp.9.dylib" "$mtp_deps/prefix/lib/libusb-1.0.0.dylib" \
     "$payload_dir/"
+  mtp_source="$mtp_deps/prefix/share/kkindle/corresponding-source/MTP"
+  dotnet run --file "$repo_root/scripts/verify-third-party.cs" -- \
+    --mtp-source "$mtp_source" --mtp-architecture "$arch" --mtp-binaries "$payload_dir"
+  # Universal payloads share exact source archives and script, but each keeps
+  # its own build metadata. Reject a mismatched common source before merging.
+  for material in "$mtp_source"/*; do
+    name="$(basename "$material")"
+    [[ "$name" == SHA256SUMS.txt ]] && continue
+    if [[ -f "$mtp_source_bundle/$name" ]] && ! cmp -s "$material" "$mtp_source_bundle/$name"; then
+      echo "Mismatched MTP corresponding-source material: $name" >&2
+      exit 2
+    fi
+    cp "$material" "$mtp_source_bundle/$name"
+  done
 done
+
+(
+  cd "$mtp_source_bundle"
+  shasum -a 256 libusb-*.tar.bz2 libmtp-*.tar.gz libusb-COPYING libmtp-COPYING \
+    build-macos-mtp-deps.sh README.md BUILD-METADATA-*.txt > SHA256SUMS.txt
+)
+dotnet run --file "$repo_root/scripts/verify-third-party.cs" -- --mtp-source "$mtp_source_bundle"
 
 if (( universal )); then
   # One fat executable picks the payload matching the architecture it was
@@ -142,6 +164,18 @@ LAUNCHER
 fi
 
 cp "$repo_root/LICENSE" "$app_root/Contents/Resources/LICENSE"
+cp "$repo_root/THIRD-PARTY-NOTICES.md" "$app_root/Contents/Resources/THIRD-PARTY-NOTICES.md"
+# Keep the notice index's relative links readable from Resources as well as
+# from each executable payload. These directories contain license materials.
+notice_payload="$app_macos"
+if (( universal )); then
+  notice_payload="$app_macos/$(payload_arch "${payload_rids[0]}")"
+fi
+mkdir -p "$app_root/Contents/Resources/ThirdParty" \
+  "$app_root/Contents/Resources/Assets/Fonts" "$app_root/Contents/Resources/Assets/Icons"
+cp -a "$notice_payload/ThirdParty/." "$app_root/Contents/Resources/ThirdParty/"
+cp "$notice_payload/Assets/Fonts/"*-LICENSE.txt "$app_root/Contents/Resources/Assets/Fonts/"
+cp "$notice_payload/Assets/Icons/Lucide-LICENSE.txt" "$app_root/Contents/Resources/Assets/Icons/"
 cp "$repo_root/src/Kkindle.App/Assets/Icons/Kkindle.ico" "$app_root/Contents/Resources/Kkindle.ico"
 
 # Compile the layered Icon Composer artwork for Liquid Glass appearances and
@@ -296,6 +330,12 @@ if [[ "$signing_identity" != "-" ]]; then
 fi
 while IFS= read -r -d '' binary; do
   [[ "$binary" == "$app_macos/Kkindle" ]] && continue
+  # Original notices and corresponding source are data resources. The outer
+  # bundle signature seals them; signing them individually would add needless
+  # signature metadata to the originals and source archives.
+  case "$binary" in
+    */ThirdParty/*|*/CorrespondingSource/*|*/LICENSE|*/THIRD-PARTY-NOTICES.md|*/Assets/Fonts/*-LICENSE.txt|*/Assets/Icons/*-LICENSE.txt) continue ;;
+  esac
   file_type="$(file -b "$binary")"
   if [[ "$file_type" == *Mach-O* ]]; then
     # Native code needs the hardened runtime (for Developer ID builds), a
@@ -319,6 +359,7 @@ codesign "${sign_args[@]}" \
   --sign "$signing_identity" "$app_root"
 codesign --verify --deep --strict "$app_root"
 plutil -lint "$app_root/Contents/Info.plist" >/dev/null
+dotnet run --file "$repo_root/scripts/verify-third-party.cs" -- --mtp-source "$mtp_source_bundle"
 
 # Build a drag-to-Applications disk image. The Applications entry is a
 # filesystem symlink, which is what makes Finder copy the bundle on drop; the

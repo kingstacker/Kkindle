@@ -1,0 +1,239 @@
+---
+id: faq
+title: FAQ
+description: Answers to common questions about Avalonia licensing, Developer Tools, TreeDataGrid updates and editing, and NativeWebView support.
+doc-type: troubleshooting
+---
+
+## General
+
+#### Do I need a license to use Avalonia?
+
+No. **Avalonia itself remains entirely open-source under the MIT license.** You can build and ship commercial applications with Avalonia completely free. The Community License only applies to the professional tooling (Visual Studio extension, Dev Tools, Parcel), not the framework itself.
+
+#### What if I don't want to obtain a license?
+
+All the legacy tooling remains open-source and available on GitHub:
+- The legacy Visual Studio extension
+- Dev Tools
+- TreeDataGrid
+
+You can continue using them as they are today, or fork and maintain them independently if you prefer.
+
+#### Can I continue using the legacy tools?
+
+Yes. The legacy open-source Visual Studio extension remains available to clone and build at [github.com/AvaloniaUI/AvaloniaVS](https://github.com/AvaloniaUI/AvaloniaVS). The legacy Dev Tools source remains available. The original TreeDataGrid remains available. All are MIT licensed and can be used, forked, or maintained by anyone.
+
+#### When does my Community License expire?
+
+Community Licenses do not expire as long as you remain eligible. However, if your circumstances change (e.g., your organization grows beyond the eligibility thresholds), you must upgrade to a paid license.
+
+#### What happens now that the Visual Studio grace period has expired?
+
+If you haven't registered for a Community License or purchased a paid license, you can:
+- Continue using the legacy FOSS Visual Studio extension
+- Switch to Visual Studio Code or JetBrains Rider (extensions remain freely available)
+- Register for a Community License if eligible
+- Purchase a paid license
+
+#### I have another question. Where can I ask?
+
+You can leave any questions or feedback on [Community Hub](https://github.com/AvaloniaCommunity) or [Avalonia Support](https://support.avaloniaui.net/).
+
+## Developer tools
+
+#### Is it possible to connect multiple instances to the Developer Tools?
+
+Yes, while a single instance of Developer Tools is running and activated, you can connect one or many apps to it.
+Each new connection will open a new Developer Tools window, working independently from each other.
+
+#### Does it work with Browser/Android/iOS?
+
+It does work with mobile and browser applications.
+See [Attaching Browser or Mobile application](/tools/developer-tools/attaching-applications) for more details.
+
+#### Can I use Developer Tools and `DiagnosticsSupport` with a Native AOT app?
+
+Yes. `AvaloniaUI.DiagnosticsSupport` is trimming friendly. Even though it does use reflection, the tool was tested with AOT.
+
+#### Does `AvaloniaUI.DiagnosticsSupport` replace `Avalonia.Diagnostics` package? Or do I need both?
+
+You only need `AvaloniaUI.DiagnosticsSupport`.
+`Avalonia.Diagnostics` is an old package used for legacy developer tools. It can be safely removed from the project.
+If for some reason necessary, both packages can be referenced, but you might want to set up different gestures for each tool.
+
+#### Can everybody build project referencing `AvaloniaUI.DiagnosticsSupport`, even without a license?
+
+Yes, `AvaloniaUI.DiagnosticsSupport` is an integration package, a bridge between the Developer Tools and the user app. On its own, it doesn't require any license, and can be referenced in public projects.
+
+But to actually open the Developer Tools, you need the license and an Avalonia portal account.
+
+#### Is it necessary to exclude `AvaloniaUI.DiagnosticsSupport` package from Release/Production build?
+
+Tool can be useful for internal testing of Release builds. And it's not necessary to only include it with Debug builds.
+
+Unlike the legacy Avalonia DevTools, this package is not shipped with heavy dependencies that might break Release compilation.
+
+But it is still advised to exclude this package on production builds for security and bundle size reasons.
+
+To do that, `Condition="'$(Configuration)' == 'Debug'"` can be used:
+```xml
+<PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="" Condition="'$(Configuration)' == 'Debug'" />
+```
+
+Combined with `#if DEBUG` for the `this.AttachDeveloperTools()` or `.WithDeveloperTools()`.
+
+#### Are arm64 and x86 builds of the tool available?
+
+Only **x64** builds for Windows and Linux are available at the moment.
+
+The macOS build is a universal bundle with both **x64** and **arm64** architectures.
+
+## TreeDataGrid
+
+### Data updates
+
+#### TreeDataGrid doesn't update when I change model properties
+
+**Problem**: You're modifying properties on your data objects, but the grid doesn't reflect the changes.
+
+**Solution**: Your data model must implement `INotifyPropertyChanged`. The TreeDataGrid relies on property change notifications to update the UI.
+
+```csharp
+// ❌ Wrong - No property change notifications
+public class Person
+{
+    public string Name { get; set; }
+    public int Age { get; set; }
+}
+
+// ✅ Correct - Implements INotifyPropertyChanged
+public class Person : INotifyPropertyChanged
+{
+    private string _name;
+    private int _age;
+
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            if (_name != value)
+            {
+                _name = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public int Age
+    {
+        get => _age;
+        set
+        {
+            if (_age != value)
+            {
+                _age = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+}
+```
+
+#### New items don't appear when I add them to the collection
+
+**Problem**: You're adding items to a `List<T>` or array, but the grid doesn't show new items.
+
+**Solution**: Use `ObservableCollection<T>` instead, which automatically notifies the grid of collection changes.
+
+```csharp
+// ❌ Wrong - List doesn't notify of changes
+private List<Person> _people = new List<Person>();
+
+// ✅ Correct - ObservableCollection notifies of changes
+private ObservableCollection<Person> _people = new ObservableCollection<Person>();
+```
+
+### Cell editing
+
+#### Cell editing doesn't work when I click on cells
+
+**Problem**: Clicking cells doesn't begin editing.
+
+**Solution**: Check that the column is editable, then check which gesture starts editing.
+
+A text column is editable when its expression points to a writable property and the column doesn't set `IsReadOnly`. If the property has no setter, or the expression calculates a value, the column is read-only.
+
+```csharp
+// ❌ Wrong - No setter, so the column is read-only
+public string Name { get; }
+
+// ✅ Correct - Has a setter, so the column is editable
+public string Name { get; set; }
+```
+
+By default, a cell enters edit mode when the user presses <kbd>F2</kbd> or double-clicks the cell. To start editing with a single click, set `BeginEditGestures` to `Tap`. In this example, `source` is your `FlatTreeDataGridSource<Person>`:
+
+```csharp
+source.WithTextColumn("Name", x => x.Name, o =>
+{
+    o.BeginEditGestures = BeginEditGestures.Tap;
+});
+```
+
+If you define columns in XAML, set the same option as an attribute:
+
+```xml
+<TreeDataGridTextColumn Header="Name" Binding="{Binding Name}" BeginEditGestures="Tap" />
+```
+
+For all column options, see [Column types](/controls/data-display/structured-data/treedatagrid/column-types).
+
+## WebView
+
+#### Is offscreen rendering supported? To avoid airspace issue?
+
+Partly. On Linux, the WPE backend always renders offscreen and composites into the Avalonia visual tree, so there is no airspace issue there. On Windows and on the Linux WebKitGTK backend, offscreen rendering is available but experimental, via `ExperimentalOffscreen` on the [environment options](/controls/web/webview-environment). macOS is not yet supported.
+
+#### Is NativeWebView supported on Linux?
+
+Yes. `NativeWebView` picks its backend automatically:
+
+- **WebKitGTK** is the baseline, and is used whenever WPE is not installed. This is the case on Ubuntu, which does not package WPE WebKit.
+- **[WPE WebKit](https://wpewebkit.org)** is preferred when its libraries are present. It renders offscreen using shared memory, so it does not depend on native window embedding and works on both X11 and Wayland sessions.
+
+Either way, no configuration is required. See the [Linux prerequisites](/docs/app-development/embedding-web-content#linux) for the runtime libraries each backend needs, and use [`LinuxWpeWebViewEnvironmentRequestedEventArgs.PreferWebKitGtkInstead`](/controls/web/webview-environment#linux-wpe-webkit) only if you want WebKitGTK on a machine that does have WPE.
+
+#### Can I use WebAuthenticationBroker for Google Auth or Microsoft.Identity Auth?
+
+Yes, both authentication providers are supported. You can either:
+- Build request and redirect `Uri`s manually
+- Integrate with `Google.Apis.Auth` and `Microsoft.Identity.Client` NuGet packages
+
+Integration samples are available in the [sample repository](https://github.com/AvaloniaUI/Accelerate.Samples/tree/main/WebAuthenticationBrokerSample).
+
+#### Why use WebAuthenticationBroker over other options?
+
+While `Microsoft.Identity.Client` and `Google.Apis.Auth` include their own Web-UI dialogs, these are limited to specific platforms and providers. WebAuthenticationBroker offers:
+- Provider-independent implementation
+- Desktop platform support without special framework requirements
+- Full macOS support without Mac Catalyst limitations
+
+#### Does NativeWebView support camera/microphone/screenshare access via getUserMedia() API?
+
+Yes, `getUserMedia()` API is supported across platforms. Users will receive permission prompts for camera, microphone, or screen sharing access, similar to desktop browsers. macOS support was added in version `11.2.4`.
+
+Some platforms also require developer to configure permissions on the application bundle. If any particular permission is necessary for a main application, it's likely to be necessary for a web view. For example, [NSCameraUsageDescription](https://developer.apple.com/documentation/bundleresources/information-property-list/nscamerausagedescription?language=objc) is necessary for macOS/iOS on bundled apps.
+
+## See also
+
+- [Developer tools installation](/tools/developer-tools/installation)
+- [Avalonia Tools overview](/tools/)

@@ -1,0 +1,46 @@
+<Project>
+  <PropertyGroup>
+    <KkindleLicenseRoot>$(MSBuildThisFileDirectory)</KkindleLicenseRoot>
+    <KkindleLicenseHead Condition="'$(MSBuildProjectName)' == 'Kkindle.Desktop.Windows' Or '$(MSBuildProjectName)' == 'Kkindle.Desktop.MacOS' Or '$(MSBuildProjectName)' == 'Kkindle.Desktop.Linux' Or '$(MSBuildProjectName)' == 'Kkindle.McpServer'">true</KkindleLicenseHead>
+    <KkindleLicenseMobile Condition="'$(MSBuildProjectName)' == 'Kkindle.Mobile.Android' Or '$(MSBuildProjectName)' == 'Kkindle.Mobile.iOS'">true</KkindleLicenseMobile>
+    <KkindleLicenseResourceDependencies Condition="'$(MSBuildProjectName)' == 'Kkindle.Mobile.Android'">_ComputeAndroidAssetsPaths</KkindleLicenseResourceDependencies>
+    <KkindleLicenseDotnet Condition="'$(DotNetHostPath)' != ''">$(DotNetHostPath)</KkindleLicenseDotnet>
+    <KkindleLicenseDotnet Condition="'$(KkindleLicenseDotnet)' == '' And '$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</KkindleLicenseDotnet>
+    <KkindleLicenseDotnet Condition="'$(KkindleLicenseDotnet)' == ''">dotnet</KkindleLicenseDotnet>
+  </PropertyGroup>
+
+  <!-- License documents are checked in and copied by Infrastructure. This
+       offline check prevents a dependency upgrade or publish filtering from
+       silently dropping the original notices. It runs before release scripts
+       can archive a desktop/MCP publish directory. Mobile bundles use explicit
+       AndroidAsset/BundleResource items for the same files. -->
+  <Target Name="VerifyKkindlePublishedLicenses" AfterTargets="Publish"
+          Condition="'$(KkindleLicenseHead)' == 'true' And '$(TargetFramework)' != ''">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
+          Command="&quot;$(KkindleLicenseDotnet)&quot; run --file &quot;$(KkindleLicenseRoot)scripts/verify-third-party.cs&quot; -- --repository &quot;$(KkindleLicenseRoot).&quot; --assets &quot;$(ProjectAssetsFile)&quot; --publish &quot;$(PublishDir).&quot; --configuration &quot;$(Configuration)&quot;" />
+  </Target>
+
+  <!-- Mobile license texts need native asset/resource items. Validate both
+       restored dependency coverage and their evaluated destination paths. -->
+  <Target Name="VerifyKkindleMobileLicenseResources" BeforeTargets="CoreCompile"
+          DependsOnTargets="$(KkindleLicenseResourceDependencies)"
+          Condition="'$(KkindleLicenseMobile)' == 'true' And '$(TargetFramework)' != ''">
+    <PropertyGroup>
+      <KkindleMobileLicenseMap>$(IntermediateOutputPath)third-party-resources.map</KkindleMobileLicenseMap>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'Kkindle.Mobile.Android'">
+      <_KkindleAndroidLicenseSources Include="%(_AndroidAssetsDest.OriginalItemSpec)">
+        <LogicalName>%(_AndroidAssetsDest.LogicalName)</LogicalName>
+      </_KkindleAndroidLicenseSources>
+    </ItemGroup>
+    <WriteLinesToFile Condition="'$(MSBuildProjectName)' == 'Kkindle.Mobile.Android'"
+                      File="$(KkindleMobileLicenseMap)" Lines="@(_KkindleAndroidLicenseSources->'%(FullPath)|%(LogicalName)')"
+                      Overwrite="true" Encoding="UTF-8" />
+    <WriteLinesToFile Condition="'$(MSBuildProjectName)' == 'Kkindle.Mobile.iOS'"
+                      File="$(KkindleMobileLicenseMap)" Lines="@(BundleResource->'%(FullPath)|%(LogicalName)')"
+                      Overwrite="true" Encoding="UTF-8" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)"
+          Command="&quot;$(KkindleLicenseDotnet)&quot; run --file &quot;$(KkindleLicenseRoot)scripts/verify-third-party.cs&quot; -- --repository &quot;$(KkindleLicenseRoot).&quot; --assets &quot;$(ProjectAssetsFile)&quot; --resources &quot;$(KkindleMobileLicenseMap)&quot; --configuration &quot;$(Configuration)&quot;" />
+  </Target>
+</Project>

@@ -46,6 +46,23 @@
                     LogicalName="Assets/Fonts/NotoEmoji-LICENSE.txt" />
     <BundleResource Include="..\Kkindle.App\Assets\Fonts\NotoSansSymbols2-LICENSE.txt"
                     LogicalName="Assets/Fonts/NotoSansSymbols2-LICENSE.txt" />
+    <!-- Preserve original third-party notices in the native app bundle too. -->
+    <BundleResource Include="../../LICENSE" LogicalName="LICENSE" />
+    <BundleResource Include="../../THIRD-PARTY-NOTICES.md" LogicalName="THIRD-PARTY-NOTICES.md" />
+    <BundleResource Include="../Kkindle.Infrastructure/ThirdParty/Notices/**/*"
+                    LogicalName="ThirdParty/Notices/%(RecursiveDir)%(Filename)%(Extension)" />
+    <BundleResource Include="../Kkindle.Infrastructure/ThirdParty/MdxParser/*.md;../Kkindle.Infrastructure/ThirdParty/MdxParser/*.txt;../Kkindle.Infrastructure/ThirdParty/MdxParser/*.html"
+                    LogicalName="ThirdParty/MdxParser/%(Filename)%(Extension)" />
+    <BundleResource Include="../Kkindle.Infrastructure/ThirdParty/KindleUnpack/*"
+                    LogicalName="ThirdParty/KindleUnpack/%(Filename)%(Extension)" />
+    <BundleResource Include="../Kkindle.Infrastructure/ThirdParty/PDFium/**/*"
+                    LogicalName="ThirdParty/PDFium/%(RecursiveDir)%(Filename)%(Extension)" />
+    <BundleResource Include="../Kkindle.Infrastructure/ThirdParty/G2PW/LICENSE.txt;../Kkindle.Infrastructure/ThirdParty/G2PW/NOTICE.md"
+                    LogicalName="ThirdParty/G2PW/%(Filename)%(Extension)" />
+    <BundleResource Include="../Kkindle.App/Assets/Fonts/KingHwaOldSong-LICENSE.txt"
+                    LogicalName="Assets/Fonts/KingHwaOldSong-LICENSE.txt" />
+    <BundleResource Include="../Kkindle.App/Assets/Icons/Lucide-LICENSE.txt"
+                    LogicalName="Assets/Icons/Lucide-LICENSE.txt" />
     <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
     <PackageReference Include="Avalonia.iOS" Version="12.1.1" />
     <!-- SkiaSharp only pulls its iOS native framework through its

@@ -30,6 +30,33 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Android packs license texts as readable APK assets; ordinary desktop
+         CopyToPublishDirectory items alone do not guarantee APK inclusion. -->
+    <AndroidAsset Include="../../LICENSE" Link="LICENSE" LogicalName="LICENSE" />
+    <AndroidAsset Include="../../THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" LogicalName="THIRD-PARTY-NOTICES.md" />
+    <AndroidAsset Include="../Kkindle.Infrastructure/ThirdParty/Notices/**/*"
+                  Link="ThirdParty/Notices/%(RecursiveDir)%(Filename)%(Extension)"
+                  LogicalName="ThirdParty/Notices/%(RecursiveDir)%(Filename)%(Extension)" />
+    <AndroidAsset Include="../Kkindle.Infrastructure/ThirdParty/MdxParser/*.md;../Kkindle.Infrastructure/ThirdParty/MdxParser/*.txt;../Kkindle.Infrastructure/ThirdParty/MdxParser/*.html"
+                  Link="ThirdParty/MdxParser/%(Filename)%(Extension)"
+                  LogicalName="ThirdParty/MdxParser/%(Filename)%(Extension)" />
+    <AndroidAsset Include="../Kkindle.Infrastructure/ThirdParty/KindleUnpack/*"
+                  Link="ThirdParty/KindleUnpack/%(Filename)%(Extension)"
+                  LogicalName="ThirdParty/KindleUnpack/%(Filename)%(Extension)" />
+    <AndroidAsset Include="../Kkindle.Infrastructure/ThirdParty/PDFium/**/*"
+                  Link="ThirdParty/PDFium/%(RecursiveDir)%(Filename)%(Extension)"
+                  LogicalName="ThirdParty/PDFium/%(RecursiveDir)%(Filename)%(Extension)" />
+    <AndroidAsset Include="../Kkindle.Infrastructure/ThirdParty/G2PW/LICENSE.txt;../Kkindle.Infrastructure/ThirdParty/G2PW/NOTICE.md"
+                  Link="ThirdParty/G2PW/%(Filename)%(Extension)"
+                  LogicalName="ThirdParty/G2PW/%(Filename)%(Extension)" />
+    <AndroidAsset Include="../Kkindle.App/Assets/Fonts/*-LICENSE.txt"
+                  Link="Assets/Assets/Fonts/%(Filename)%(Extension)"
+                  LogicalName="Assets/Assets/Fonts/%(Filename)%(Extension)" />
+    <!-- Android removes the first Assets prefix. The second preserves the
+         shared Assets/Fonts and Assets/Icons paths referenced by our notices. -->
+    <AndroidAsset Include="../Kkindle.App/Assets/Icons/Lucide-LICENSE.txt"
+                  Link="Assets/Assets/Icons/Lucide-LICENSE.txt"
+                  LogicalName="Assets/Assets/Icons/Lucide-LICENSE.txt" />
     <ProjectReference Include="..\Kkindle.Mobile\Kkindle.Mobile.csproj" />
     <PackageReference Include="Avalonia.Android" Version="12.1.1" />
     <!-- Local embeddings back the desktop AI features, which the phone app does

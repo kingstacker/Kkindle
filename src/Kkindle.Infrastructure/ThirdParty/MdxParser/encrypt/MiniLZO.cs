@@ -1,4 +1,70 @@
-﻿namespace MdxParser.encrypt
+﻿// SPDX-License-Identifier: GPL-2.0-or-later
+// This copy uses the MdxParser.encrypt namespace and C# expression/formatting
+// adaptations. Attribution was restored on 2026-11-08; this licensing change
+// does not alter compression or decompression. See ../NOTICE.md and
+// ../LICENSE.MiniLZO.txt for the GPL v3 option used when distributing Kkindle.
+
+#region Copyright notice
+/* C# port of the crude minilzo source version 2.06 by Frank Razenberg
+
+  Beware, you should never want to see C# code like this. You were warned.
+  I simply ran the MSVC preprocessor on the original source, changed the datatypes
+  to their C# counterpart and fixed changed some control flow stuff to amend for
+  the different goto semantics between C and C#.
+
+  Original copyright notice is included below.
+*/
+
+/* minilzo.c -- mini subset of the LZO real-time data compression library
+
+   This file is part of the LZO real-time data compression library.
+
+   Copyright (C) 2011 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2010 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2009 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2008 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2007 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2006 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2005 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2004 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2003 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2002 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2001 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 2000 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 1999 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 1998 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 1997 Markus Franz Xaver Johannes Oberhumer
+   Copyright (C) 1996 Markus Franz Xaver Johannes Oberhumer
+   All Rights Reserved.
+
+   The LZO library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU General Public License as
+   published by the Free Software Foundation; either version 2 of
+   the License, or (at your option) any later version.
+
+   The LZO library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with the LZO library; see the file COPYING.
+   If not, write to the Free Software Foundation, Inc.,
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+   Markus F.X.J. Oberhumer
+   <markus@oberhumer.com>
+   http://www.oberhumer.com/opensource/lzo/
+ */
+
+/*
+ * NOTE:
+ *   the full LZO package can be found at
+ *   http://www.oberhumer.com/opensource/lzo/
+ */
+#endregion
+
+namespace MdxParser.encrypt
 {
     public static class MiniLZO
     {
