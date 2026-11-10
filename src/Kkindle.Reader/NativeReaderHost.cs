@@ -328,6 +328,9 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     public int CurrentPage => _pageIndex;
 
+    /// <summary>Keep the current page's first text at a page boundary when settings change.</summary>
+    public bool PreservePageStartOnSettingsChange { get; set; }
+
     public bool Vertical => _settings.VerticalWriting;
 
     /// <summary>
@@ -359,6 +362,16 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             ? ViewportReadingPositionMatches() ? _viewportReadingAnchor ?? CaptureViewportReadingAnchor()
                 : CaptureViewportReadingAnchor()
             : null;
+        var anchorPageStart = PreservePageStartOnSettingsChange && readingAnchor is not null
+            && _presentation == ReaderPresentation.Single && DerivePresentation(settings) == ReaderPresentation.Single;
+        if (anchorPageStart)
+        {
+            // Anchor the page's first text, not a saved mid-page reading
+            // offset. Otherwise the lines above the saved position disappear
+            // from the top of the page when typography changes.
+            readingAnchor = CaptureViewportReadingAnchor();
+            anchorPageStart = readingAnchor is { TextOffset: >= 0, ImageIndex: null };
+        }
         _presentation = DerivePresentation(settings);
         _settings = settings;
         _showVerticalDebugBoxes = showVerticalDebugBoxes;
@@ -366,12 +379,12 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         Task<bool>? reload = null;
         if (indentChanged)
         {
-            reload = ReloadChapterForIndentChange(readingAnchor);
+            reload = ReloadChapterForIndentChange(readingAnchor, anchorPageStart);
         }
         else if (_content is not null && (settingsChanged || _layout is null))
         {
             _relayoutTimer?.Stop();
-            await (RelayoutTask = RecomposeAsync(readingAnchor));
+            await (RelayoutTask = RecomposeAsync(readingAnchor, anchorPageStart));
             await RelayoutTask;
             if (_disposed || configurationVersion != _configurationVersion) return;
         }
@@ -1249,6 +1262,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             && Math.Abs(options.LineHeight - expected.LineHeight) < 0.001f
             && options.ParagraphIndent == expected.ParagraphIndent
             && Math.Abs(options.ParagraphSpacingEm - expected.ParagraphSpacingEm) < 0.001f
+            && options.ParagraphSpacingMatchesLineHeight == expected.ParagraphSpacingMatchesLineHeight
             && Math.Abs(options.ViewportWidth - expected.ViewportWidth) < 0.5f
             && Math.Abs(options.ViewportHeight - expected.ViewportHeight) < 0.5f
             && Math.Abs(options.InsetHorizontal - expected.InsetHorizontal) < 0.5f
@@ -1424,13 +1438,17 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         || settings.VerticalWriting != _settings.VerticalWriting
         || settings.ParagraphIndent != _settings.ParagraphIndent
         || Math.Abs(settings.ParagraphSpacing - _settings.ParagraphSpacing) > 0.001
+        || settings.ParagraphSpacingMatchesLineHeight != _settings.ParagraphSpacingMatchesLineHeight
         || !string.Equals(settings.FontFamily, _settings.FontFamily, StringComparison.OrdinalIgnoreCase)
         || settings.FlowMode != _settings.FlowMode
         || settings.TwoPageMode != _settings.TwoPageMode
         || Math.Abs(settings.BodyPadding - _settings.BodyPadding) > 0.001;
 
-    private Task<bool> NavigateCore(string chapterPath, string? fragment, ViewportReadingAnchor? readingAnchor = null)
+    private Task<bool> NavigateCore(string chapterPath, string? fragment, ViewportReadingAnchor? readingAnchor = null,
+        bool anchorPageStart = false)
     {
+        var initialPage = _pageIndex;
+        var initialScroll = _scrollOffset;
         _navigationTarget = null;
         _composePending = true;
         _relayoutTimer?.Stop();
@@ -1446,7 +1464,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         var version = Interlocked.Increment(ref _navigationVersion);
         var navigationSource = Source;
 
-        _pendingFragment = string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment);
+        _pendingFragment = readingAnchor is not null || string.IsNullOrWhiteSpace(fragment) ? null : NormalizeFragment(fragment);
         _pendingRestoreOffset = null;
         _pendingRestorePage = null;
         _pendingRestoreRatio = null;
@@ -1496,7 +1514,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                     var options = BuildOptions(settings, width, height, _showVerticalDebugBoxes);
                     navigationEngine = new TypesetEngine(FontLibrary, ownsFonts: false);
                     SelectReaderMainFont(navigationEngine, settings.FontFamily);
-                    var layout = navigationEngine.Compose(content, options, navigationToken);
+                    var layout = navigationEngine.Compose(content, options, navigationToken,
+                        anchorPageStart ? readingAnchor?.TextOffset : null);
                     return (content, options, layout);
                 }, navigationToken);
 
@@ -1505,6 +1524,10 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 {
                     return;
                 }
+
+                if (readingAnchor is not null && _layout is { Pages.Count: > 0 }
+                    && (_pageIndex != initialPage || Math.Abs(_scrollOffset - initialScroll) > 0.001))
+                    _pendingReadingAnchor = CaptureViewportReadingAnchor();
 
                 lock (_engineGate)
                 {
@@ -1823,6 +1846,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             LineHeight = (float)settings.LineHeight,
             ParagraphIndent = settings.ParagraphIndent,
             ParagraphSpacingEm = (float)settings.ParagraphSpacing,
+            ParagraphSpacingMatchesLineHeight = settings.ParagraphSpacingMatchesLineHeight,
             ViewportWidth = (float)width,
             ViewportHeight = (float)height,
             InsetHorizontal = (float)horizontalInset,
@@ -1903,6 +1927,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         hash.Add(settings.VerticalWriting);
         hash.Add(settings.ParagraphIndent);
         hash.Add(settings.ParagraphSpacing);
+        hash.Add(settings.ParagraphSpacingMatchesLineHeight);
         hash.Add(settings.FontScale);
         hash.Add(settings.LineHeight);
         hash.Add(settings.MaxWidth);
@@ -2044,7 +2069,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
     /// applied by the loader when blocks are built, so Recompose alone never
     /// changes it. Keep the semantic position until the new content is ready.
     /// </summary>
-    private Task<bool> ReloadChapterForIndentChange(ViewportReadingAnchor? readingAnchor)
+    private Task<bool> ReloadChapterForIndentChange(ViewportReadingAnchor? readingAnchor, bool anchorPageStart)
     {
         if (Source is null || _disposed)
         {
@@ -2053,7 +2078,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
         var uri = Source;
         var path = uri.IsFile ? uri.LocalPath : uri.AbsolutePath;
-        return NavigateCore(path, _loadedFootnoteFragment, readingAnchor);
+        return NavigateCore(path, _loadedFootnoteFragment, readingAnchor, anchorPageStart);
     }
 
     // ---- rendering --------------------------------------------------------
@@ -2187,7 +2212,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
         _relayoutTimer.Start();
     }
 
-    private async Task RecomposeAsync(ViewportReadingAnchor? readingAnchor = null)
+    private async Task RecomposeAsync(ViewportReadingAnchor? readingAnchor = null, bool anchorPageStart = false)
     {
         if (_disposed || _content is null)
         {
@@ -2204,6 +2229,8 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
             ? _layout.Pages[_pageIndex].TextStartOffset
             : -1;
 
+        var initialPage = _pageIndex;
+        var initialScroll = _scrollOffset;
         var content = _content;
         var settings = _settings;
         var options = BuildOptions(settings, width, height, _showVerticalDebugBoxes);
@@ -2219,9 +2246,13 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
                 token.ThrowIfCancellationRequested();
                 workerEngine = new TypesetEngine(FontLibrary, ownsFonts: false);
                 SelectReaderMainFont(workerEngine, settings.FontFamily);
-                return workerEngine.Compose(content, options, token);
+                return workerEngine.Compose(content, options, token,
+                    anchorPageStart ? viewportAnchor?.TextOffset : null);
             }, token);
             if (_disposed || token.IsCancellationRequested || !ReferenceEquals(content, _content)) return;
+            if (_layout is { Pages.Count: > 0 }
+                && (_pageIndex != initialPage || Math.Abs(_scrollOffset - initialScroll) > 0.001))
+                viewportAnchor = CaptureViewportReadingAnchor();
             lock (_engineGate)
             {
                 var previous = _engine;

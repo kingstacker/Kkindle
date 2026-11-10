@@ -18,6 +18,7 @@ artifacts/
 /debug-*.ps1
 /debug-senddiag/
 .opensquilla/
+.claude/
 
 # Plugin packaging output
 dist/

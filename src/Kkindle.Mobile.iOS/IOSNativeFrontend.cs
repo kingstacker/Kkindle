@@ -26,6 +26,7 @@ internal sealed partial class IOSNativeFrontend
     private static IOSNativeFrontend? _current;
     private readonly MobileShell _shell;
     private readonly AvaloniaView _readerSurface;
+    private readonly UIWindow _window;
     private readonly Dictionary<long, CancellationTokenSource> _requests = [];
     private readonly Dictionary<long, TaskCompletionSource<bool>> _prompts = [];
     private readonly List<NSObject> _observers = [];
@@ -34,15 +35,17 @@ internal sealed partial class IOSNativeFrontend
     private readonly UIViewController _readerController;
     private long _promptId;
     private ReaderPage? _reader;
+    private string? _readerSessionId;
     private CancellationTokenSource? _readerCancellation;
 
     internal static bool IsAttached => _current is not null;
 
-    private IOSNativeFrontend(MobileShell shell, AvaloniaView readerSurface, UIViewController readerController)
+    private IOSNativeFrontend(MobileShell shell, AvaloniaView readerSurface, UIViewController readerController, UIWindow window)
     {
         _shell = shell;
         _readerSurface = readerSurface;
         _readerController = readerController;
+        _window = window;
         shell.NativeToast = message => Publish(Data(("type", "toast"), ("message", message)));
         shell.NativeConfirmation = ConfirmAsync;
         shell.NativeRestartRequired = () => Publish(Data(("type", "restart")));
@@ -69,7 +72,7 @@ internal sealed partial class IOSNativeFrontend
         var surface = new AvaloniaView();
         var readerController = new DefaultAvaloniaViewController { View = surface };
         surface.InitWithController(readerController);
-        var frontend = new IOSNativeFrontend(shell, surface, readerController);
+        var frontend = new IOSNativeFrontend(shell, surface, readerController, window);
         NativeLibrary.SetDllImportResolver(typeof(IOSNativeFrontend).Assembly, (library, _, _) =>
             library == "__Internal" ? NativeLibrary.GetMainProgramHandle() : IntPtr.Zero);
         _current = frontend;
@@ -154,6 +157,14 @@ internal sealed partial class IOSNativeFrontend
         {
             case "library.get":
                 return await GetLibraryAsync(token);
+            case "library.filterOptions":
+                using (BeginOperation())
+                {
+                    await _shell.Modules.Library.Books.InitializeAsync(token);
+                    return await _shell.Modules.Library.Books.GetFilterOptionsAsync(token);
+                }
+            case "library.filter":
+                return await FilterLibraryAsync(args, token);
             case "library.import":
                 await ImportBooksAsync(token);
                 return Data();
@@ -179,11 +190,28 @@ internal sealed partial class IOSNativeFrontend
                     var jump = args.TryGetProperty("location", out var location)
                         ? location.Deserialize(IOSNativeJsonContext.Default.ReaderProgressRow) : null;
                     _readerCancellation = new CancellationTokenSource();
+                    _readerSessionId = Text(args, "sessionId");
                     _reader = new ReaderPage(book, _shell.Modules, _shell, jump);
                     _reader.NativeStateChanged += state => Publish(Data(("type", "reader"), ("reader", state)));
                     _reader.NativeDialogRequested += dialog => Publish(Data(("type", "readerDialog"), ("dialog", dialog)));
                     _reader.UseNativeFrontend();
+                    var darkAppearance = _shell.Preferences.Current.ThemeMode switch
+                    {
+                        MobileThemeMode.Light => false,
+                        MobileThemeMode.Dark => true,
+                        _ => _window.TraitCollection.UserInterfaceStyle == UIUserInterfaceStyle.Dark
+                    };
+                    _reader.NativeSetAppAppearance(darkAppearance, 0);
                     _readerSurface.Content = _reader;
+                }
+                finally { _readerGate.Release(); }
+                return Data();
+            case "reader.appearance":
+                await _readerGate.WaitAsync(token);
+                try
+                {
+                    if (_reader is { } current && string.Equals(_readerSessionId, Text(args, "sessionId"), StringComparison.Ordinal))
+                        current.NativeSetAppAppearance(Flag(args, "dark"), Number(args, "revision"));
                 }
                 finally { _readerGate.Release(); }
                 return Data();
@@ -217,6 +245,7 @@ internal sealed partial class IOSNativeFrontend
         await reader.PauseAsync();
         _readerSurface.Content = null;
         _reader = null;
+        _readerSessionId = null;
         _readerCancellation?.Dispose();
         _readerCancellation = null;
         _shell.RequestAutoSync(MobileShell.AutoSyncGap.AfterReading);
@@ -234,20 +263,56 @@ internal sealed partial class IOSNativeFrontend
             .ToDictionary(group => group.Key, group => group.Max(item => item.ProgressPercent));
         var continueBookId = dashboard.Books.Where(item => item.IsInLibrary && item.ProgressPercent < 99.5)
             .OrderByDescending(item => item.UpdatedAt).Select(item => (Guid?)item.BookId).FirstOrDefault();
+        IReadOnlyDictionary<Guid, BookSyncStatus>? syncStatuses = null;
+        if (_shell.Preferences.Current.ShowBookSyncStatus)
+        {
+            try
+            {
+                var service = _shell.Modules.Sync.Service;
+                var settings = await service.LoadSettingsAsync(token);
+                syncStatuses = await service.GetBookSyncStatusesAsync(settings.DeviceId, settings.Settings, books, token);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException && !token.IsCancellationRequested)
+            {
+                // An unavailable sync baseline must not prevent opening the library.
+            }
+        }
         return Data(
-            ("books", books.Select(book => BookData(book, progress.GetValueOrDefault(book.Id))).ToArray()),
+            ("books", books.Select(book => BookData(book, progress.GetValueOrDefault(book.Id),
+                syncStatuses != null && syncStatuses.TryGetValue(book.Id, out var status) ? status : null)).ToArray()),
             ("collections", collections.Select(item => Data(
                 ("id", item.Collection.Id), ("name", item.Collection.Name), ("count", item.BookCount),
                 ("automatic", MobileCollections.IsUncollected(item.Collection)))).ToArray()),
             ("preferences", _shell.Preferences.Current), ("continueBookId", continueBookId));
     }
 
-    private object BookData(Book book, double progress) => Data(
+    // The native shelf retains its existing book snapshot; return matching IDs
+    // using the same option and token semantics as the desktop library.
+    private async Task<Guid[]> FilterLibraryAsync(JsonElement args, CancellationToken token)
+    {
+        using var operation = BeginOperation();
+        var books = _shell.Modules.Library.Books;
+        await books.InitializeAsync(token);
+        const int pageSize = 500;
+        var ids = new List<Guid>();
+        for (var pageIndex = 0; ; pageIndex++)
+        {
+            var page = await books.SearchPageAsync(
+                author: Text(args, "author"), tag: Text(args, "tag"), format: Text(args, "format"),
+                category: Text(args, "category"), pageIndex: pageIndex, pageSize: pageSize, cancellationToken: token);
+            ids.AddRange(page.Books.Select(book => book.Id));
+            if (page.Books.Count == 0 || ids.Count >= page.TotalCount) break;
+        }
+        return ids.ToArray();
+    }
+
+    private object BookData(Book book, double progress, BookSyncStatus? syncStatus) => Data(
         ("id", book.Id), ("title", book.Title), ("authors", book.Authors), ("formats", book.FormatSummary),
         ("size", MobileFormat.Size(book.Files.Sum(file => file.Size))),
         ("coverPath", string.IsNullOrWhiteSpace(book.CoverPath) ? null
             : Path.IsPathRooted(book.CoverPath) ? book.CoverPath : Path.Combine(_shell.Modules.Paths.Data, book.CoverPath)),
         ("progress", progress), ("favorite", book.IsFavorite), ("readingStatus", (int)book.ReadingStatus),
+        ("syncStatus", syncStatus is { } status ? (int?)status : null),
         ("collectionIds", book.CollectionIds.ToArray()), ("updatedAt", book.UpdatedAt), ("createdAt", book.CreatedAt),
         ("description", book.Description), ("series", book.Series), ("publisher", book.Publisher),
         ("publishDate", book.PublishDate), ("isbn", book.Isbn), ("pageCount", book.PageCount),

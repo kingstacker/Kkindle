@@ -39,8 +39,8 @@ public sealed partial class S3SyncIntegrationTests
         var book = await a.AddBookAsync();
         await a.SyncAsync();
         var future = bucket.Snapshot(a.SnapshotKey);
-        future.Version = 6;
-        future.MinimumReaderVersion = 5;
+        future.Version = 7;
+        future.MinimumReaderVersion = 6;
         future.ExtensionData = FutureField("snapshot");
         future.Books.Single().ExtensionData = FutureField("book");
         future.Files.Single().ExtensionData = FutureField("file");
@@ -58,8 +58,8 @@ public sealed partial class S3SyncIntegrationTests
         var restarted = new S3SyncService(b.Paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket), TestHelpers.ActivatedFeatures);
         await restarted.SyncAsync(b.Id, b.Settings);
         var result = bucket.Snapshot(b.SnapshotKey);
-        Assert.Equal(5, result.Version);
-        Assert.Equal(5, result.MinimumReaderVersion);
+        Assert.Equal(6, result.Version);
+        Assert.Equal(6, result.MinimumReaderVersion);
         Assert.Equal("snapshot", result.ExtensionData!["FutureFeature"].GetString());
         Assert.Equal("book", result.Books.Single().ExtensionData!["FutureFeature"].GetString());
         Assert.Equal("Local edit", result.Books.Single().Title);
@@ -75,7 +75,7 @@ public sealed partial class S3SyncIntegrationTests
         await using var a = await Device.CreateAsync(bucket);
         await a.SyncAsync();
         var future = bucket.Snapshot(a.SnapshotKey);
-        future.Version = 6;
+        future.Version = 7;
         future.MinimumReaderVersion = null;
         bucket.Objects[a.SnapshotKey] = MemoryBucket.Encode(future);
         await using var b = await Device.CreateAsync(bucket);

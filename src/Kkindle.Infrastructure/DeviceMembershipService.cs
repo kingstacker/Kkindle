@@ -18,11 +18,14 @@ public sealed class DeviceMembershipService(AccountService accounts) : IDeviceFe
     {
         if (!Enum.IsDefined(feature)) throw new ArgumentOutOfRangeException(nameof(feature));
         var device = await accounts.GetDeviceAsync(cancellationToken);
-        var reply = await accounts.MemberRequestAsync(HttpMethod.Post, "devices/" + device.DeviceId + "/features",
+        var officialCloud = feature == DeviceFeature.AccountCloudSync;
+        var reply = await accounts.MemberRequestAsync(officialCloud ? HttpMethod.Get : HttpMethod.Post,
+            "devices/" + device.DeviceId + (officialCloud ? "" : "/features"),
             AccountJsonContext.Default.DeviceFeatureStatus, null, cancellationToken);
         Validate(reply.Value, reply.Scope, device.DeviceId);
         if (reply.Scope.RequiresDataRestart) throw new DeviceFeatureRequiredException("区域已切换，请重新打开应用后使用该区域的账号和功能权益。");
-        if (!reply.Value.CanUseFeatures) throw new DeviceFeatureRequiredException("请登录拥有终生功能会员的账号，并确认本设备仍在 5 台已登录设备内。其他功能免费。");
+        if (officialCloud ? !reply.Value.CanUseAccountCloudSync : !reply.Value.CanUseFeatures)
+            throw new DeviceFeatureRequiredException(officialCloud ? MemberEntitlements.AccountCloudRequirement : MemberEntitlements.SyncRequirement);
     }
 
     public async Task KickAsync(Guid device, CancellationToken token = default)
@@ -49,12 +52,28 @@ public sealed class DeviceMembershipService(AccountService accounts) : IDeviceFe
 
     public Task CancelOrderAsync(Guid order, CancellationToken token = default) => accounts.MemberActionAsync("orders/" + order + "/cancel", token);
 
+    public async Task<ActivationCodeRedemption> RedeemActivationCodeAsync(string code, Guid requestId, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(code) || code.Length > 80) throw new InvalidOperationException(UiText.Get("请输入有效的激活码。"));
+        if (requestId == Guid.Empty) throw new ArgumentException("兑换请求标识无效。", nameof(requestId));
+        var device = await accounts.GetDeviceAsync(token);
+        var reply = await accounts.MemberRequestAsync(HttpMethod.Post, "activation-codes/redeem", AccountJsonContext.Default.ActivationCodeRedemption,
+            JsonContent.Create(new ActivationCodeRedeemRequest { Code = code.Trim(), RequestId = requestId }, AccountJsonContext.Default.ActivationCodeRedeemRequest),
+            token, UiText.Get("请先登录当前区域的账号后兑换激活码。"));
+        if (reply.Value.CodeId == Guid.Empty || reply.Value.Kind is not ("lifetime" or "pro")
+            || (reply.Value.Kind == "pro" ? reply.Value.Years != 1 : reply.Value.Years != 0) || reply.Value.Status is null)
+            throw new InvalidOperationException(UiText.Get("服务器返回了无效的激活结果。"));
+        Validate(reply.Value.Status, reply.Scope, device.DeviceId);
+        return reply.Value;
+    }
+
     private static void Validate(DeviceFeatureStatus status, AccountStatus scope, Guid device)
     {
         if (status.Membership is null || status.Devices is null || status.Membership.AccountId != scope.User?.Id
             || status.Membership.Region != scope.Region || status.CurrentDeviceId != device
             || status.Membership.DeviceLimit != MemberEntitlements.DeviceLimit || status.Membership.Tier is not ("free" or "lifetime" or "pro")
             || status.Membership.LoggedInDeviceCount is < 0 or > MemberEntitlements.DeviceLimit
+            || status.Membership.PendingPlusDays < 0
             || status.Devices.Length > 100 || status.Devices.Any(item => item.DeviceId == Guid.Empty)
             || status.Devices.Select(item => item.DeviceId).Distinct().Count() != status.Devices.Length
             || status.Devices.Any(item => item.State is not ("active" or "signed_out" or "blocked" or "expired"))
@@ -68,5 +87,6 @@ internal sealed class DeniedDeviceFeatureAccess : IDeviceFeatureAccess
 {
     internal static DeniedDeviceFeatureAccess Instance { get; } = new();
     public Task EnsureFeatureAsync(DeviceFeature feature, CancellationToken cancellationToken = default) =>
-        Task.FromException(new DeviceFeatureRequiredException("自定义 S3 和自定义 AI 需要终生功能会员，请在账号页登录会员账号。其他功能免费。"));
+        Task.FromException(new DeviceFeatureRequiredException(feature == DeviceFeature.AccountCloudSync
+            ? MemberEntitlements.AccountCloudRequirement : MemberEntitlements.SyncRequirement));
 }

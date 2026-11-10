@@ -40,6 +40,8 @@ internal sealed class HorizontalComposer
     public void Compose(ChapterContent content)
     {
         var previousBlockWasHeading = false;
+        var previousBlockWasParagraph = false;
+        var blockIndex = 0;
         foreach (var block in content.Blocks)
         {
             _context.CancellationToken.ThrowIfCancellationRequested();
@@ -55,15 +57,18 @@ internal sealed class HorizontalComposer
                     PlaceTable(block);
                     break;
                 default:
-                    PlaceTextBlock(block, previousBlockWasHeading);
+                    PlaceTextBlock(block, previousBlockWasHeading, previousBlockWasParagraph,
+                        blockIndex + 1 < content.Blocks.Count && content.Blocks[blockIndex + 1].Kind == BlockKind.Paragraph);
                     break;
             }
 
             previousBlockWasHeading = block.Kind == BlockKind.Heading;
+            previousBlockWasParagraph = block.Kind == BlockKind.Paragraph;
+            blockIndex++;
         }
     }
 
-    private void PlaceTextBlock(ContentBlock block, bool followsHeading)
+    private void PlaceTextBlock(ContentBlock block, bool followsHeading, bool followsParagraph = false, bool precedesParagraph = false)
     {
         var isHeading = block.Kind == BlockKind.Heading;
         var startsAtPageTop = isHeading
@@ -139,18 +144,25 @@ internal sealed class HorizontalComposer
             _pages.NextIfUsed();
             _cursorY = InsetV;
         }
-        else
+        else if (!(block.Kind == BlockKind.Paragraph && followsParagraph
+            && _context.Options.ParagraphSpacingMatchesLineHeight))
         {
             _cursorY += block.SpaceBeforeLines * BodyLineHeight
                 + block.MarginTopEm * BaseFontSize;
         }
 
-        var lines = BreakLines(cells, availWidth, block.TextIndentEm * BaseFontSize);
+        var lines = BreakLines(cells, availWidth, block.TextIndentEm * BaseFontSize, allowPageAnchor: true);
+        var anchorLineIndex = lines.FindIndex(line => line.StartsAnchoredPage);
 
         var lineIndex = 0;
         while (lineIndex < lines.Count)
         {
             _context.CancellationToken.ThrowIfCancellationRequested();
+            if (lines[lineIndex].StartsAnchoredPage)
+            {
+                _pages.NextIfUsed();
+                _cursorY = InsetV;
+            }
             if (_cursorY + lineHeight > ContentBottom + 0.01f)
             {
                 _pages.NextIfUsed();
@@ -168,6 +180,7 @@ internal sealed class HorizontalComposer
             }
 
             var remaining = lines.Count - lineIndex;
+            if (anchorLineIndex > lineIndex) capacity = Math.Min(capacity, anchorLineIndex - lineIndex);
             if (capacity >= remaining)
             {
                 capacity = remaining;
@@ -234,11 +247,15 @@ internal sealed class HorizontalComposer
             }
         }
 
-        _cursorY += block.SpaceAfterLines * BodyLineHeight
-            + block.MarginBottomEm * BaseFontSize;
-        if (block.Kind == BlockKind.Paragraph)
+        // The last line already advanced the cursor by one line height. In
+        // compact mode, consecutive paragraphs need no additional gap.
+        if (!(block.Kind == BlockKind.Paragraph && precedesParagraph
+            && _context.Options.ParagraphSpacingMatchesLineHeight))
         {
-            _cursorY += _context.Options.ParagraphSpacingEm * BaseFontSize;
+            _cursorY += block.SpaceAfterLines * BodyLineHeight
+                + block.MarginBottomEm * BaseFontSize;
+            if (block.Kind == BlockKind.Paragraph)
+                _cursorY += _context.Options.ParagraphSpacingEm * BaseFontSize;
         }
     }
 
@@ -402,7 +419,7 @@ internal sealed class HorizontalComposer
     /// trailing margin; an opening mark never ends a line — it moves down
     /// together with the character that follows it.
     /// </summary>
-    private List<LineBox> BreakLines(List<LayoutCell> cells, float availWidth, float firstLineIndent)
+    private List<LineBox> BreakLines(List<LayoutCell> cells, float availWidth, float firstLineIndent, bool allowPageAnchor = false)
     {
         var lines = new List<LineBox>();
         var line = new LineBox();
@@ -411,6 +428,14 @@ internal sealed class HorizontalComposer
         foreach (var cell in cells)
         {
             _context.CancellationToken.ThrowIfCancellationRequested();
+            if (allowPageAnchor && _context.StartsAnchoredPage(cell))
+            {
+                if (line.Cells.Count > 0) lines.Add(line);
+                line = new LineBox { StartsAnchoredPage = true };
+                _context.PageStartConsumed = true;
+                // An anchor within a paragraph is a continuation, not a new indent.
+                if (lines.Count > 0) indentApplied = true;
+            }
             if (cell.IsLineBreak)
             {
                 line.EndsWithForcedBreak = true;
@@ -460,12 +485,13 @@ internal sealed class HorizontalComposer
                     line.RemoveLast();
                 }
 
+                var startsAnchoredPage = line.StartsAnchoredPage && line.Cells.Count == 0;
                 if (line.Cells.Count > 0)
                 {
                     lines.Add(line);
                 }
 
-                line = new LineBox();
+                line = new LineBox { StartsAnchoredPage = startsAnchoredPage };
                 line.Indent = 0f;
                 foreach (var pulledCell in pulled)
                 {
@@ -1203,6 +1229,7 @@ internal sealed class HorizontalComposer
         public float Descent { get; private set; }
         public float Indent { get; set; }
         public bool EndsWithForcedBreak { get; set; }
+        public bool StartsAnchoredPage { get; set; }
 
         public void Add(LayoutCell cell)
         {

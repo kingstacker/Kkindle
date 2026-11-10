@@ -80,6 +80,13 @@ internal sealed class ComposerContext
     public required TypesetFontLibrary Fonts { get; init; }
     public required GlyphShaper Shaper { get; init; }
     public CancellationToken CancellationToken { get; init; }
+    public int? PageStartTextOffset { get; init; }
+    public bool PageStartConsumed { get; set; }
+
+    public bool StartsAnchoredPage(LayoutCell cell) => !PageStartConsumed
+        && PageStartTextOffset is { } offset
+        && cell.TextStart >= 0 && cell.TextLength > 0
+        && cell.TextStart <= offset && offset < cell.TextStart + cell.TextLength;
 
     public string MainFont => Fonts.MainFontPath;
 

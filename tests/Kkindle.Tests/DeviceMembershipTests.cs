@@ -10,53 +10,16 @@ namespace Kkindle.Tests;
 public sealed class DeviceMembershipTests
 {
     [Theory]
-    [InlineData("deepseek", "https://api.deepseek.com", false)]
-    [InlineData("deepseek", "https://api.deepseek.com/v1/", false)]
-    [InlineData("openai", "https://api.openai.com/v1", false)]
-    [InlineData("OPENAI", "https://api.openai.com:443/", false)]
-    [InlineData("custom", "https://api.openai.com/v1", true)]
-    [InlineData("openai", "https://example.invalid/v1", true)]
-    [InlineData("deepseek", "https://api.openai.com/v1", true)]
-    [InlineData("openai", "http://api.openai.com/v1", true)]
-    [InlineData("openai", "https://api.openai.com:444/v1", true)]
-    [InlineData("openai", "https://api.openai.com/proxy/v1", true)]
-    [InlineData("deepseek", "https://api.deepseek.com/?redirect=example.invalid", true)]
-    [InlineData("openai", "https://api.openai.com/v1#custom", true)]
-    [InlineData("openai", "https://fictional-user@api.openai.com/v1", true)]
-    [InlineData("unknown", "https://api.deepseek.com", true)]
-    public void OnlyOfficialPresetEndpointsAreFree(string provider, string endpoint, bool requiresMember) =>
-        Assert.Equal(requiresMember, new AiConnectionSettings { Provider = provider, BaseUrl = endpoint }.RequiresDeviceMembership);
-
-    [Theory]
-    [InlineData("models")]
-    [InlineData("completion")]
-    [InlineData("stream")]
-    [InlineData("images")]
-    [InlineData("vision")]
-    [InlineData("test")]
-    public async Task UnlicensedCustomAiIsRejectedBeforeAnyHttpRequest(string operation)
+    [InlineData("custom", "https://example.invalid/v1")]
+    [InlineData("openai", "https://api.openai.com/proxy/v1")]
+    [InlineData("deepseek", "https://api.openai.com/v1")]
+    public async Task CustomAiEndpointsAreFreeWithoutAnAccount(string provider, string url)
     {
-        var requests = 0;
-        using var client = new AiChatClient(new TestHelpers.StubHttpMessageHandler(_ =>
-        {
-            requests++;
-            throw new InvalidOperationException("AI request must not be sent");
-        }));
-        var settings = new AiConnectionSettings { Provider = "custom", BaseUrl = "https://example.invalid/v1",
-            Model = "fictional-model", ApiKey = "<FICTIONAL_API_KEY>" };
-        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(async () =>
-        {
-            switch (operation)
-            {
-                case "models": await client.ListModelsAsync(settings); break;
-                case "completion": await client.CompleteAsync(settings, "system", "question", []); break;
-                case "stream": await foreach (var _ in client.StreamAsync(settings, "system", "question", [])) { } break;
-                case "images": await foreach (var _ in client.StreamAsync(settings, "system", "question", [], images: [new("image/png", [1])])) { } break;
-                case "vision": await foreach (var _ in client.StreamVisionAsync(settings, "system", "question", [], new("image/png", [1]))) { } break;
-                case "test": await client.TestConnectionAsync(settings); break;
-            }
-        });
-        Assert.Equal(0, requests);
+        // The membership plan makes custom AI interfaces free for every tier.
+        using var client = new AiChatClient(new TestHelpers.StubHttpMessageHandler(_ => new()
+        { Content = new StringContent("{\"data\":[{\"id\":\"fictional-model\"}]}", Encoding.UTF8, "application/json") }));
+        Assert.Equal("fictional-model", Assert.Single(await client.ListModelsAsync(new()
+            { Provider = provider, BaseUrl = url, ApiKey = "<FICTIONAL_API_KEY>" })));
     }
 
     [Theory]
@@ -71,10 +34,16 @@ public sealed class DeviceMembershipTests
     }
 
     [Theory]
-    [InlineData("test")]
-    [InlineData("sync")]
-    [InlineData("download")]
-    public async Task UnlicensedCustomS3IsRejectedBeforeCreatingTheObjectStore(string operation)
+    [InlineData(SyncProvider.S3, "test")]
+    [InlineData(SyncProvider.S3, "sync")]
+    [InlineData(SyncProvider.S3, "download")]
+    [InlineData(SyncProvider.WebDav, "test")]
+    [InlineData(SyncProvider.WebDav, "sync")]
+    [InlineData(SyncProvider.WebDav, "download")]
+    [InlineData(SyncProvider.AccountServer, "test")]
+    [InlineData(SyncProvider.AccountServer, "sync")]
+    [InlineData(SyncProvider.AccountServer, "download")]
+    public async Task UnlicensedSyncIsRejectedBeforeCreatingTheObjectStore(SyncProvider provider, string operation)
     {
         var root = TestHelpers.CreateTempDirectory();
         try
@@ -89,8 +58,9 @@ public sealed class DeviceMembershipTests
                 throw new InvalidOperationException("S3 client must not be created");
             };
             var sync = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), factory);
-            var settings = new S3SyncSettings { Enabled = true, Provider = SyncProvider.S3, Bucket = "fictional-bucket",
+            var settings = new S3SyncSettings { Enabled = true, Provider = provider, Bucket = "fictional-bucket",
                 Endpoint = "https://example.invalid", AccessKey = "<FICTIONAL_ACCESS_KEY>", SecretKey = "<FICTIONAL_SECRET_KEY>",
+                WebDavEndpoint = "https://example.invalid/dav", AccountServerUrl = "https://example.invalid", AccountUserId = Guid.NewGuid(),
                 EncryptionKey = "fictional-sync-key", Prefix = "fictional" };
             await Assert.ThrowsAsync<DeviceFeatureRequiredException>(async () =>
             {
@@ -108,12 +78,11 @@ public sealed class DeviceMembershipTests
     }
 
     [Fact]
-    public async Task AccountFeaturesAreCheckedAgainBeforeEveryCustomOperation()
+    public async Task CustomS3IsCheckedAgainstTheServerBeforeEveryOperation()
     {
         using var scope = await AccountScope.CreateAsync();
         await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3);
-        await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomAi);
-        Assert.Equal(2, scope.Handler.FeatureChecks);
+        Assert.Equal(1, scope.Handler.FeatureChecks);
         scope.Handler.Revoked = true;
         var notices = 0; scope.Accounts.DeviceInvalidated += (_, _) => notices++;
         await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3));
@@ -128,7 +97,83 @@ public sealed class DeviceMembershipTests
         var status = await scope.Membership.RefreshAsync();
         Assert.Equal("free", status.Membership.Tier); Assert.Equal(2, status.Membership.LoggedInDeviceCount);
         Assert.False(status.CanUseFeatures);
-        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomAi));
+        Assert.False(status.CanUseAccountCloudSync);
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3));
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomWebDav));
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.AccountCloudSync));
+        Assert.True((await scope.Accounts.GetStatusAsync()).IsLoggedIn);
+    }
+
+    [Fact]
+    public async Task SixActiveDevicesAreAcceptedAndSeventhIsRejected()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        for (var index = scope.Handler.Devices.Count; index < 6; index++)
+            scope.Handler.Devices.Add(new(Guid.NewGuid(), "Fictional additional device", "Test", "active", scope.Clock.UtcNow, scope.Clock.UtcNow));
+        var status = await scope.Membership.RefreshAsync();
+        Assert.Equal(6, status.Membership.DeviceLimit);
+        Assert.Equal(6, status.Membership.LoggedInDeviceCount);
+        await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3);
+        scope.Handler.Devices.Add(new(Guid.NewGuid(), "Fictional seventh device", "Test", "active", scope.Clock.UtcNow, scope.Clock.UtcNow));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Membership.RefreshAsync());
+    }
+
+    [Fact]
+    public async Task FeatureUnlockUsesOwnStorageAndOnlyActivePlusUsesOfficialCloud()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3);
+        await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomWebDav);
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.AccountCloudSync));
+        scope.Handler.LifetimeFeatures = false;
+        scope.Handler.ProExpiresAt = scope.Handler.Now.AddDays(1);
+        await scope.Membership.EnsureFeatureAsync(DeviceFeature.AccountCloudSync);
+        await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomWebDav);
+        scope.Handler.Now = scope.Handler.ProExpiresAt.Value;
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.AccountCloudSync));
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3));
+        scope.Handler.LifetimeFeatures = true;
+        await scope.Membership.EnsureFeatureAsync(DeviceFeature.CustomS3);
+        await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.EnsureFeatureAsync(DeviceFeature.AccountCloudSync));
+    }
+
+    [Fact]
+    public async Task PlusExpiryIsAnnouncedOnceAcrossRestartsWithoutSigningTheAccountOut()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        scope.Handler.LifetimeFeatures = false;
+        scope.Handler.ProExpiresAt = scope.Clock.UtcNow.AddDays(-1);
+        var notices = new List<AccountMembershipExpiredEventArgs>();
+        using (var monitor = new AccountDeviceMonitor(scope.Accounts, scope.Paths, scope.Clock))
+        {
+            monitor.MembershipExpired += (_, notice) => notices.Add(notice);
+            Assert.True(await monitor.CheckIfDueAsync());
+        }
+        var notice = Assert.Single(notices);
+        Assert.Equal(scope.Handler.ProExpiresAt.Value.AddMonths(1), notice.CloudRetentionEndsAt);
+        Assert.True((await scope.Accounts.GetStatusAsync()).IsLoggedIn);
+        scope.Clock.Advance(TimeSpan.FromDays(1));
+        using (var monitor = new AccountDeviceMonitor(scope.Accounts, scope.Paths, scope.Clock))
+        {
+            monitor.MembershipExpired += (_, next) => notices.Add(next);
+            await monitor.CheckIfDueAsync();
+        }
+        Assert.Single(notices);
+    }
+
+    [Fact]
+    public async Task KnownPlusExpiryIsCheckedBeforeTheNextDailyHeartbeat()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        scope.Handler.LifetimeFeatures = false;
+        scope.Handler.ProExpiresAt = scope.Clock.UtcNow.AddHours(2);
+        using var monitor = new AccountDeviceMonitor(scope.Accounts, scope.Paths, scope.Clock);
+        var notices = 0; monitor.MembershipExpired += (_, _) => notices++;
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Equal(0, notices);
+        scope.Clock.Advance(TimeSpan.FromHours(2)); scope.Handler.Now = scope.Clock.UtcNow;
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Equal(1, notices);
         Assert.True((await scope.Accounts.GetStatusAsync()).IsLoggedIn);
     }
 
@@ -148,8 +193,8 @@ public sealed class DeviceMembershipTests
             "account" => status with { Membership = status.Membership with { AccountId = Guid.NewGuid() } },
             "region" => status with { Membership = status.Membership with { Region = AccountRegion.International } },
             "device" => status with { CurrentDeviceId = Guid.NewGuid() },
-            "limit" => status with { Membership = status.Membership with { DeviceLimit = 6 } },
-            "count" => status with { Membership = status.Membership with { LoggedInDeviceCount = 5 } },
+            "limit" => status with { Membership = status.Membership with { DeviceLimit = MemberEntitlements.DeviceLimit + 1 } },
+            "count" => status with { Membership = status.Membership with { LoggedInDeviceCount = MemberEntitlements.DeviceLimit + 1 } },
             "duplicate" => status with { Devices = [status.Devices[0], status.Devices[0]] },
             "inactive" => status with { Devices = status.Devices.Select(device => device with { State = "signed_out" }).ToArray(),
                 Membership = status.Membership with { LoggedInDeviceCount = 0, ActivatedDeviceCount = 0 } },
@@ -315,6 +360,68 @@ public sealed class DeviceMembershipTests
         }
     }
 
+    [Fact]
+    public async Task ActivationRequiresLoginAndDoesNotSendTheCodeWhileSignedOut()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        await scope.Accounts.SignOutAsync();
+        var error = await Assert.ThrowsAsync<DeviceFeatureRequiredException>(() => scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", Guid.NewGuid()));
+        Assert.Contains("登录", error.Message); Assert.Equal(0, scope.Handler.ActivationAttempts);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Membership.RedeemActivationCodeAsync(" ", Guid.NewGuid()));
+        Assert.Equal(0, scope.Handler.ActivationAttempts);
+    }
+
+    [Fact]
+    public async Task ActivationReturnsValidatedRightsAndLostResponsesCanBeRetriedWithoutExtendingAgain()
+    {
+        using var scope = await AccountScope.CreateAsync(); scope.Handler.LifetimeFeatures = false;
+        scope.Handler.LoseNextActivationResponse = true;
+        var request = Guid.NewGuid(); var now = scope.Handler.Now;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", request));
+        var result = await scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", request);
+        Assert.Equal("pro", result.Kind); Assert.Equal(1, result.Years); Assert.True(result.Status.CanUseAccountCloudSync);
+        Assert.True(result.AlreadyRedeemed);
+        Assert.Equal(now.AddDays(365), result.Status.Membership.ProExpiresAt);
+        Assert.Equal(scope.Handler.CurrentDeviceId, result.Status.CurrentDeviceId); Assert.Equal(scope.Handler.User.Id, result.Status.Membership.AccountId);
+        Assert.Equal(2, scope.Handler.ActivationAttempts);
+        var used = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", Guid.NewGuid()));
+        Assert.Contains("已使用", used.Message);
+        scope.Handler.ProExpiresAt = now;
+        Assert.Equal("free", (await scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", request)).Status.Membership.Tier);
+    }
+
+    [Theory]
+    [InlineData("account")] [InlineData("region")] [InlineData("device")] [InlineData("years")] [InlineData("id")] [InlineData("pending")]
+    public async Task ActivationRejectsMalformedOrMismatchedServerRights(string field)
+    {
+        using var scope = await AccountScope.CreateAsync(); scope.Handler.LifetimeFeatures = false;
+        scope.Handler.TransformRedemption = value => field switch
+        {
+            "account" => value with { Status = value.Status with { Membership = value.Status.Membership with { AccountId = Guid.NewGuid() } } },
+            "region" => value with { Status = value.Status with { Membership = value.Status.Membership with { Region = AccountRegion.International } } },
+            "device" => value with { Status = value.Status with { CurrentDeviceId = Guid.NewGuid() } },
+            "years" => value with { Years = 5 }, "id" => value with { CodeId = Guid.Empty },
+            _ => value with { Status = value.Status with { Membership = value.Status.Membership with { PendingPlusDays = -1 } } }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task FiveYearRenewalUiRuleIncludesPendingOrdersAndPreservesExpiredMembershipHistory()
+    {
+        using var scope = await AccountScope.CreateAsync(); var now = scope.Handler.Now;
+        var member = (await scope.Membership.RefreshAsync()).Membership;
+        Assert.True(MemberEntitlements.CanExtendPlus(member, 1825, now));
+        Assert.True(MemberEntitlements.CanExtendPlus(member with { ProExpiresAt = now.AddDays(-10) }, 365, now));
+        Assert.False(MemberEntitlements.CanExtendPlus(member with { ProExpiresAt = now.AddDays(1825) }, 365, now));
+        Assert.False(MemberEntitlements.CanExtendPlus(member with { ProExpiresAt = now.AddDays(1460), PendingPlusDays = 365 }, 365, now));
+        Assert.True(MemberEntitlements.CanExtendPlus(member with { ProExpiresAt = now.AddDays(1460) }, 365, now));
+        Assert.False(MemberEntitlements.CanExtendPlus(member, 1826, now));
+        scope.Handler.ActivationFailureCode = "membership_limit";
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Membership.RedeemActivationCodeAsync("fictional-plus-code", Guid.NewGuid()));
+        Assert.Contains("5 年", error.Message); Assert.Null(scope.Handler.ProExpiresAt);
+    }
+
     private sealed class AccountScope : IDisposable
     {
         public string Root { get; } = TestHelpers.CreateTempDirectory();
@@ -333,7 +440,7 @@ public sealed class DeviceMembershipTests
         public static async Task<AccountScope> CreateAsync()
         {
             var scope = new AccountScope();
-            try { await scope.Accounts.SignInAsync(AccountRegions.DefaultServerUrl(AccountRegion.China), scope.Handler.User.Username, MembershipHttpHandler.Password, true); return scope; }
+            try { await scope.Accounts.SignInAsync(AccountRegions.DefaultServerUrl(AccountRegion.China), scope.Handler.User.Username, MembershipHttpHandler.Password, true, email: scope.Handler.User.Email, confirmPassword: MembershipHttpHandler.Password); return scope; }
             catch { scope.Dispose(); throw; }
         }
         public void Dispose() { Accounts.Dispose(); Http.Dispose(); SqliteConnection.ClearAllPools(); TestHelpers.TryDelete(Root); }

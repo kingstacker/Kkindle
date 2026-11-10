@@ -39,7 +39,7 @@
 - Kreader 的 EPUB/MOBI/AZW3 使用 `NativeReaderHost` + `Kkindle.Layout` 自绘，PDF 使用 `NativePdfReaderHost` + PDFium 自绘。
 - 阅读器支持分页、滚动、单页/双页、竖排、目录、搜索、书签、批注、阅读进度、AI 助手、词典/Wikipedia、翻译、拼音、听书和阅读统计。PDF 支持连续/单页/双页、缩放、旋转、文本选择、搜索、书签及任意页面位置批注，不提供 OCR。
 - 阅读进度使用 `ReaderContentPosition` 保存正文偏移、图片序号、备用页索引和页内位置；不得只依赖 `ScrollPosition` 数值跨模式恢复。
-- S3/WebDAV 共用版本 5 同步协议，支持增量快照、独立 gzip 基线、未知字段保留、同步详情和按需下载；兼容性规则见 `docs/s3-snapshot-compatibility.md` 与 `docs/s3-sync-extension.md`。
+- S3/WebDAV/账号云同步共用版本 6 同步协议（密钥派生对象名、`KKINDLE-SYNC3` 长度补齐），支持增量快照、独立 gzip 基线、未知字段保留、同步详情和按需下载；兼容性规则见 `docs/s3-snapshot-compatibility.md` 与 `docs/s3-sync-extension.md`。
 - 耗时操作统一进入后台任务中心；传输、导入、转换、同步等进度和完成记录应继续沿用该入口，避免重新把临时进度面板分散到主窗口。
 - Windows 支持 WPD/MTP Kindle；Linux/macOS 只支持以文件系统挂载方式出现的 Kindle。
 
@@ -50,7 +50,7 @@
 - 正文偏移必须遵循 `XhtmlChapterLoader` 的 `textContent` 约定，否则旧批注、搜索、书签和进度会错位。
 - 竖排分页是固定字格布局；`VerticalWriting` 与双页、滚动模式的组合规则不能随意放宽。数字、拉丁字符、禁则和标点规则集中在 `src/Kkindle.Layout`。
 - SQLite 新表和索引使用 `IF NOT EXISTS`；旧表加列前检查 `PRAGMA table_info`。新增同步实体必须在 `S3SyncService.EntityRegistry.cs` 注册，并补齐增量、合并、删除、清理和对象引用测试。
-- 同步协议新增可选字段时保持版本 5，并保留未知字段及原始时间戳；字段改名、删除、类型变化或语义变化必须提高最低读取协议。存在未知数据时不得自动淘汰远端快照或清理对象。
+- 同步协议新增可选字段时保持当前版本 6，并保留未知字段及原始时间戳；字段改名、删除、类型变化或语义变化必须提高最低读取协议。存在未知数据时不得自动淘汰远端快照或清理对象。
 - Windows WebView2 指针由 Avalonia 管理，不得手动释放或反射操作 COM 类型。
 - AXAML 初始化期间可能触发 UI 事件，保留空值和就绪状态守卫。
 - UI 保持现有黑白灰、直角细线和低干扰视觉风格。新增可操作控件应补充 `AutomationProperties.Name`。

@@ -17,11 +17,7 @@ internal static class KindleAnnotationMountedWriter
         IReadOnlyList<KindleAnnotationMutation> mutations, CancellationToken cancellationToken,
         IProgress<KindleAnnotationSyncProgress>? progress = null)
     {
-        RejectSideFiles(database);
-        var header = new byte[20];
-        using (var stream = File.OpenRead(database)) stream.ReadExactly(header);
-        if (header[18] == 2 || header[19] == 2)
-            throw new IOException("设备批注数据库使用 WAL，暂不能安全同步。");
+        ValidateSnapshotSource(database);
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = database, Mode = SqliteOpenMode.ReadWrite,
@@ -84,6 +80,16 @@ internal static class KindleAnnotationMountedWriter
         await transaction.CommitAsync(cancellationToken);
         await using var readback = OpenSharedRead(database);
         return (Convert.ToHexString(await SHA256.HashDataAsync(readback, cancellationToken)).ToLowerInvariant(), deviceBackup);
+    }
+
+    internal static void ValidateSnapshotSource(string database)
+    {
+        KindleAnnotationDatabaseReader.RejectLinkedPath(database);
+        RejectSideFiles(database);
+        var header = new byte[20];
+        using (var stream = File.OpenRead(database)) stream.ReadExactly(header);
+        if (header[18] == 2 || header[19] == 2)
+            throw new IOException("设备批注数据库使用 WAL，暂不能安全同步。");
     }
 
     private static void RejectSideFiles(string database)

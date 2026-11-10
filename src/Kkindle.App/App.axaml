@@ -9,6 +9,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="avares://Kkindle.App/ScrollBarTheme.axaml" />
+                <ResourceInclude Source="avares://Kkindle.App/AccountVisualResources.axaml" />
             </ResourceDictionary.MergedDictionaries>
 
         <!-- Default black, white and grey resources; AppAppearanceResources supplies themes.
@@ -1274,7 +1275,7 @@
                         <Grid ColumnDefinitions="*,20" ColumnSpacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{TemplateBinding Content}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                <TextBlock Text="{TemplateBinding Tag}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="SettingsExpanderDescription" Text="{TemplateBinding Tag}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                             </StackPanel>
                             <Path x:Name="SettingsExpanderChevron" Grid.Column="1" Width="10" Height="10"
                                   Data="M 2,1 L 6,5 L 2,9" Stroke="{DynamicResource InkBrush}"

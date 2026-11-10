@@ -21,7 +21,7 @@ struct NativeDictionary: View {
             Section("词典管理") {
                 ForEach(dictionaries) { dictionary in
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle(dictionary.name + " · \(dictionary.entryCount) 条", isOn: Binding(get: { dictionary.enabled }, set: { enabled in action("toggle", ["id": dictionary.id, "enabled": enabled]) }))
+                        Toggle(dictionary.name + " · \(dictionary.entryCount) 条", isOn: Binding(get: { dictionary.enabled }, set: { enabled in action("toggle", ["id": dictionary.id, "enabled": enabled]) })).tint(NativeTheme.systemSwitchTint)
                         Button("移除", role: .destructive) { action("remove", ["id": dictionary.id]) }.buttonStyle(.borderless)
                     }
                 }
@@ -115,7 +115,7 @@ struct NativeTxtReview: View {
                     Picker("编码", selection: $rules.encoding) { Text("自动识别").tag(0); Text("UTF-8").tag(1); Text("UTF-16 LE").tag(2); Text("UTF-16 BE").tag(3); Text("GB18030").tag(4) }
                     Picker("章节规则", selection: $rules.headingPreset) { Text("自动识别").tag(0); Text("中文章节").tag(1); Text("英文章节").tag(2); Text("序言和尾声").tag(3); Text("不识别章节").tag(4); Text("自定义正则").tag(5) }
                     if rules.headingPreset == 5 { TextField("章节正则", text: $rules.customHeadingPattern).textInputAutocapitalization(.never).disableAutocorrection(true) }
-                    Toggle("识别分卷", isOn: $rules.recognizeVolumes)
+                    Toggle("识别分卷", isOn: $rules.recognizeVolumes).tint(NativeTheme.systemSwitchTint)
                 }
                 Section("目录预览") {
                     if let preview {

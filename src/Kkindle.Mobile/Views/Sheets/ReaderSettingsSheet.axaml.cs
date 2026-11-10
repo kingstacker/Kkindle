@@ -34,9 +34,10 @@ public partial class ReaderSettingsSheet : UserControl
     private void Present()
     {
         var current = _preferences!.Current;
-        PaperWhite.Classes.Set("on", current.ReaderTheme == ReaderTheme.Classic);
-        PaperBeige.Classes.Set("on", current.ReaderTheme == ReaderTheme.Beige);
-        PaperInk.Classes.Set("on", current.ReaderTheme == ReaderTheme.Ink);
+        PaperFollow.Classes.Set("on", current.ReaderThemeFollowsAppearance);
+        PaperWhite.Classes.Set("on", !current.ReaderThemeFollowsAppearance && current.ReaderTheme == ReaderTheme.Classic);
+        PaperBeige.Classes.Set("on", !current.ReaderThemeFollowsAppearance && current.ReaderTheme == ReaderTheme.Beige);
+        PaperInk.Classes.Set("on", !current.ReaderThemeFollowsAppearance && current.ReaderTheme == ReaderTheme.Ink);
         AnimationNone.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.None);
         AnimationFade.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.Fade);
         AnimationSlide.Classes.Set("on", current.ReaderPageAnimation == MobilePageAnimation.Slide);
@@ -81,13 +82,19 @@ public partial class ReaderSettingsSheet : UserControl
 
     private void OnPaperClick(object? sender, RoutedEventArgs e)
     {
+        if (sender is Button { Name: nameof(PaperFollow) })
+        {
+            Change(value => value with { ReaderThemeFollowsAppearance = true });
+            return;
+        }
+
         var theme = sender switch
         {
             Button { Name: nameof(PaperBeige) } => ReaderTheme.Beige,
             Button { Name: nameof(PaperInk) } => ReaderTheme.Ink,
             _ => ReaderTheme.Classic
         };
-        Change(value => value with { ReaderTheme = theme });
+        Change(value => value with { ReaderTheme = theme, ReaderThemeFollowsAppearance = false });
     }
 
     private void OnZoomClick(object? sender, RoutedEventArgs e)

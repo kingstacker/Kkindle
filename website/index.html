@@ -41,7 +41,7 @@
     <link rel="icon" type="image/png" href="assets/kkindle.png?v=20261107" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20261107" />
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
-    <link rel="stylesheet" href="styles.css?v=20261107-icon" />
+    <link rel="stylesheet" href="styles.css?v=20261109-membership" />
     <title>Kkindle — 个人电子书与 Kindle 工作台</title>
     <script type="application/ld+json">
       {
@@ -91,6 +91,7 @@
         <nav class="main-nav" id="main-nav" aria-label="主导航">
           <a href="#product" data-i18n="navProduct">产品</a>
           <a href="#features" data-i18n="navFeatures">功能</a>
+          <a href="#membership" data-i18n="navMembership">会员</a>
           <a href="#downloads" data-i18n="navDownload">下载</a>
           <a href="manual/index.html" data-i18n="navManual">使用手册</a>
           <a href="#changelog" data-i18n="navChangelog">更新日志</a>
@@ -342,6 +343,203 @@
         </div>
       </section>
 
+      <section class="section membership" id="membership">
+        <div class="wrap">
+          <div class="section-head">
+            <p class="label" data-i18n="membershipKicker">MEMBERSHIP</p>
+            <h2 data-i18n="membershipTitle">选择适合你的阅读方式。</h2>
+            <p class="lead" data-i18n="membershipLead">
+              会员绑定 Kkindle 账号。中国区与国际区的账号和同步数据相互独立，不互通。
+            </p>
+          </div>
+
+          <div class="region-tabs" role="tablist" aria-label="服务器区域" data-i18n-label="membershipRegionLabel">
+            <button
+              class="region-tab"
+              id="region-tab-china"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="region-panel-china"
+              data-region-tab
+            >
+              <span data-i18n="regionChina">中国区</span>
+            </button>
+            <button
+              class="region-tab"
+              id="region-tab-international"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="region-panel-international"
+              tabindex="-1"
+              data-region-tab
+            >
+              <span data-i18n="regionInternational">国际区</span>
+              <span class="region-tab-badge" data-i18n="regionUnavailable">暂未上线</span>
+            </button>
+          </div>
+
+          <div class="region-panel" id="region-panel-china" role="tabpanel" aria-labelledby="region-tab-china" tabindex="0">
+            <div class="plans">
+              <article class="plan">
+                <h3 class="plan-name">Free</h3>
+                <p class="plan-tagline" data-i18n="planFreeTagline">让阅读自由开始</p>
+                <p class="plan-price">¥0</p>
+                <p class="plan-period" data-i18n="planFreePeriod">永久免费</p>
+                <ul class="plan-features">
+                  <li data-i18n="planFreeFeature1">畅享完整本地阅读体验</li>
+                  <li data-i18n="planFreeFeature2">USB Kindle 书籍双向同步</li>
+                  <li data-i18n="planFreeFeature3">USB Kindle 批注双向同步</li>
+                  <li data-i18n="planFreeFeature4">插件扩展与自定义 AI 接口</li>
+                </ul>
+                <p class="plan-foot" data-i18n="planFreeFoot">不含跨端同步与官方云空间</p>
+              </article>
+
+              <article class="plan">
+                <h3 class="plan-name" data-i18n="planUnlockName">功能解锁</h3>
+                <p class="plan-tagline" data-i18n="planUnlockTagline">你的书库，由你掌控</p>
+                <p class="plan-price">¥88</p>
+                <p class="plan-period" data-i18n="planUnlockPeriod">一次购买，永久使用</p>
+                <ul class="plan-features">
+                  <li data-i18n="planUnlockFeature1">包含全部 Free 权益</li>
+                  <li data-i18n="planUnlockFeature2">解锁自定义 S3 云同步</li>
+                  <li data-i18n="planUnlockFeature3">进度与批注完整同步</li>
+                  <li data-i18n="planUnlockFeature4">存储容量由自己掌控</li>
+                  <li data-i18n="planUnlockFeature5">一次买断，无需续费</li>
+                </ul>
+                <p class="plan-foot" data-i18n="planUnlockFoot">需自行配置 S3 兼容存储服务，存储与流量费用由用户承担</p>
+              </article>
+
+              <article class="plan plan-featured">
+                <h3 class="plan-name">Plus</h3>
+                <p class="plan-tagline" data-i18n="planPlusTagline">让每一本书，随你而行</p>
+                <p class="plan-price">¥128<span class="plan-price-unit" data-i18n="planPerYear">/年</span></p>
+                <p class="plan-period" data-i18n="planPlusPeriod">折合约 ¥10.67/月 · 按年支付</p>
+                <ul class="plan-features">
+                  <li data-i18n="planPlusFeature1">10GB 私人书籍云空间</li>
+                  <li data-i18n="planPlusFeature2">书籍与阅读数据自动同步</li>
+                  <li data-i18n="planPlusFeature3">无需配置存储桶，登录即用</li>
+                  <li data-i18n="planPlusFeature4">多平台书库随时访问</li>
+                  <li data-i18n="planPlusFeature5">包含全部功能解锁权益</li>
+                </ul>
+                <p class="plan-foot" data-i18n="planPlusFoot">10GB 云空间 · 每会员年度 150GB 官方云下载额度 · 最多同步 6 台设备</p>
+              </article>
+            </div>
+
+            <!-- is-yes / is-no cells draw their mark in CSS; the hidden text is what screen readers read. -->
+            <table class="compare-table">
+              <caption class="visually-hidden" data-i18n="compareCaption">中国区会员权益对比</caption>
+              <thead>
+                <tr>
+                  <th scope="col" data-i18n="compareFeature">功能</th>
+                  <th scope="col">Free</th>
+                  <th scope="col" data-i18n="planUnlockName">功能解锁</th>
+                  <th scope="col">Plus</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row" data-i18n="comparePrice">价格</th>
+                  <td data-i18n="compareFreePrice">免费</td>
+                  <td data-i18n="compareUnlockPrice">¥88 永久</td>
+                  <td data-i18n="comparePlusPrice">¥128/年</td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareLocal">本地书库管理与阅读</th>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareUsbBooks">USB Kindle 书籍双向同步</th>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareUsbNotes">USB Kindle 批注双向同步</th>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="comparePlugins">插件功能</th>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareAi">自定义 AI 接口</th>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareProgress">跨端阅读进度同步</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareNotes">跨端书签、批注云同步</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareBooks">跨端书籍文件云同步</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareDevices">云同步设备数量</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td data-i18n="compareDeviceCount">6 台</td>
+                  <td data-i18n="compareDeviceCount">6 台</td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareS3">自定义 S3</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                  <td class="is-yes"><span class="visually-hidden" data-i18n="compareIncluded">包含</span></td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareStorage">官方云空间</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td>10GB</td>
+                </tr>
+                <tr>
+                  <th scope="row" data-i18n="compareTraffic">官方云下载流量</th>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td class="is-no"><span class="visually-hidden" data-i18n="compareExcluded">不包含</span></td>
+                  <td data-i18n="compareTrafficValue">150GB/年</td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="compare-note" data-i18n="compareNote">
+              功能解锁用户使用自备 S3，同步存储与流量费用自行承担。USB Kindle 双向批注同步的兼容范围因设备型号和书籍格式而异。
+            </p>
+          </div>
+
+          <div
+            class="region-panel"
+            id="region-panel-international"
+            role="tabpanel"
+            aria-labelledby="region-tab-international"
+            tabindex="0"
+            hidden
+          >
+            <div class="region-soon">
+              <h3 class="region-soon-title" data-i18n="intlTitle">国际区会员暂未上线</h3>
+              <p class="region-soon-body" data-i18n="intlBody">上线后将在这里公布国际区的价格与会员权益。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="section changelog" id="changelog">
         <div class="wrap changelog-grid">
           <div class="section-head">
@@ -442,7 +640,7 @@
       <section class="section about" id="about">
         <div class="wrap">
           <div class="section-head">
-            <p class="label" data-i18n="aboutKicker">ABOUT KKINDLE</p>
+            <p class="label label-brand" data-i18n="aboutKicker">About Kkindle</p>
             <h2 data-i18n="aboutTitle">面向个人阅读的开源桌面工作台。</h2>
             <p class="lead" data-i18n="aboutBody">
               Kkindle 是一款面向 Windows、Linux、macOS、Android 和 iOS 的开源电子书书库与 Kindle 管理工具。它将书库整理、阅读、批注和设备传输放在同一个本地优先的工作流中。
@@ -507,6 +705,6 @@
     <noscript>
       <div class="noscript-note">请启用 JavaScript 以加载最新版本下载信息；镜像下载同样可用。</div>
     </noscript>
-    <script src="app.js?v=20261106-old" defer></script>
+    <script src="app.js?v=20261109-membership" defer></script>
   </body>
 </html>

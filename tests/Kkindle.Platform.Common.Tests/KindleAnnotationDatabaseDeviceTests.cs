@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Kkindle.Platform.Common.Tests;
 
-public sealed class KindleAnnotationDatabaseDeviceTests
+public sealed partial class KindleAnnotationDatabaseDeviceTests
 {
     [Fact]
     public async Task MountedKindleReadsAccountAnnotationDatabaseAsReadOnlyResources()
@@ -56,7 +56,7 @@ public sealed class KindleAnnotationDatabaseDeviceTests
         finally { TryDelete(root); }
     }
 
-    private static async Task CreateDatabaseAsync(string path, string payload)
+    private static async Task CreateDatabaseAsync(string path, string payload, string annotationId = "note-id")
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
@@ -77,7 +77,7 @@ public sealed class KindleAnnotationDatabaseDeviceTests
                 serialized_payload TEXT NOT NULL
             );
             INSERT INTO nonsyncable_annotations VALUES (
-                'note-id',
+                $id,
                 '02b1ec32-aa42-4477-b395-b0dc41131082-EBOK-Gui_Mo:97D7128C-0',
                 3,
                 '{"longPosition":"40689","shortPosition":40689}',
@@ -88,6 +88,7 @@ public sealed class KindleAnnotationDatabaseDeviceTests
             );
             """;
         command.Parameters.AddWithValue("$payload", payload);
+        command.Parameters.AddWithValue("$id", annotationId);
         await command.ExecuteNonQueryAsync();
     }
 

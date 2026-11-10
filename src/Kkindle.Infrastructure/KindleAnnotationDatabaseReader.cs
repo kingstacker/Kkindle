@@ -32,7 +32,8 @@ internal static class KindleAnnotationDatabaseReader
     public static async Task<IReadOnlyList<KindleAnnotationDatabaseRecord>> ReadRecordsAsync(
         string databasePath,
         int maxItems = int.MaxValue,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireCompleteSnapshot = false)
     {
         if (maxItems <= 0 || !File.Exists(databasePath)) return [];
         RejectLinkedPath(databasePath);
@@ -50,11 +51,25 @@ internal static class KindleAnnotationDatabaseReader
             await queryOnly.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        if (!await TableExistsAsync(connection, cancellationToken)) return [];
+        if (!await TableExistsAsync(connection, cancellationToken))
+        {
+            if (requireCompleteSnapshot)
+                throw new NotSupportedException(UiText.Get("当前 Kindle 批注数据库版本暂不支持。"));
+            return [];
+        }
         var columns = await ColumnsAsync(connection, cancellationToken);
-        string[] required = ["annotation_id", "book_id", "dataset", "serialized_payload"];
+        string[] required = requireCompleteSnapshot
+            ? ["annotation_id", "book_id", "dataset", "serialized_payload", "start_position", "end_position", "created_time", "modified_time"]
+            : ["annotation_id", "book_id", "dataset", "serialized_payload"];
         if (required.Any(column => !columns.Contains(column)))
             throw new NotSupportedException(UiText.Get("当前 Kindle 批注数据库版本暂不支持。"));
+        if (requireCompleteSnapshot)
+        {
+            using var count = connection.CreateCommand();
+            count.CommandText = $"SELECT COUNT(*) FROM {AnnotationTable} WHERE dataset IN (1, 3);";
+            if (Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken)) > Math.Clamp(maxItems, 1, 100_000))
+                throw new NotSupportedException(UiText.Get("Kindle 批注超过安全同步上限，不能只同步部分数据库。笔记仍可查看和导出。"));
+        }
 
         var modifiedExpression = columns.Contains("modified_time") ? "modified_time" : "0";
         var orderExpression = columns.Contains("modified_time")
@@ -75,10 +90,13 @@ internal static class KindleAnnotationDatabaseReader
         command.Parameters.AddWithValue("$limit", Math.Clamp(maxItems, 1, 100_000));
 
         var records = new List<KindleAnnotationDatabaseRecord>();
+        var keys = new HashSet<(string Id, string Book)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var record = ParseRecord(reader);
+            var record = ParseRecord(reader, requireCompleteSnapshot);
+            if (requireCompleteSnapshot && (record is null || !keys.Add((record.Id, record.Book.BookId))))
+                throw new NotSupportedException(UiText.Get("Kindle 批注数据库含有无法安全解析的记录，已停止同步。笔记仍可查看和导出。"));
             if (record is not null) records.Add(record);
         }
         return records;
@@ -117,7 +135,7 @@ internal static class KindleAnnotationDatabaseReader
         }).ToArray();
     }
 
-    private static KindleAnnotationDatabaseRecord? ParseRecord(SqliteDataReader row)
+    private static KindleAnnotationDatabaseRecord? ParseRecord(SqliteDataReader row, bool strict)
     {
         var id = row.GetString(0);
         var bookId = row.GetString(1);
@@ -130,8 +148,11 @@ internal static class KindleAnnotationDatabaseReader
         {
             using var document = JsonDocument.Parse(serializedPayload);
             var payload = document.RootElement;
+            if (payload.ValueKind != JsonValueKind.Object) return null;
             var type = ParseType(GetString(payload, "type"), dataset);
             if (type is not (KindleClippingType.Highlight or KindleClippingType.Note)) return null;
+            if (strict && (dataset == 1 && type != KindleClippingType.Highlight
+                || dataset == 3 && type != KindleClippingType.Note)) return null;
 
             var bookData = GetElement(payload, "book_data") ?? GetElement(payload, "bookData");
             var asin = bookData is { } asinElement ? GetString(asinElement, "asin") : null;
@@ -151,6 +172,7 @@ internal static class KindleAnnotationDatabaseReader
             if (start is null) start = ReadPositionText(row.IsDBNull(4) ? null : row.GetString(4));
             var end = ReadPosition(payload, "end_position");
             if (end is null) end = ReadPositionText(row.IsDBNull(5) ? null : row.GetString(5));
+            if (strict && (start is null || end is null || start < 0 || end < start)) return null;
             var startValue = Math.Max(0, start ?? 0);
             var endValue = Math.Max(startValue, end ?? startValue);
             var created = ReadUnixMilliseconds(payload, "created_time")
@@ -166,7 +188,7 @@ internal static class KindleAnnotationDatabaseReader
                 type,
                 startValue,
                 endValue,
-                ReadNoteText(payload),
+                ReadNoteText(payload, strict),
                 created,
                 updated,
                 serializedPayload);
@@ -180,7 +202,7 @@ internal static class KindleAnnotationDatabaseReader
         }
     }
 
-    private static string ReadNoteText(JsonElement payload)
+    private static string ReadNoteText(JsonElement payload, bool strict)
     {
         var metadata = GetElement(payload, "json_metadata") ?? GetElement(payload, "jsonMetadata");
         if (metadata is not { } value) return string.Empty;
@@ -195,7 +217,7 @@ internal static class KindleAnnotationDatabaseReader
                     ?? GetString(nested.RootElement, "noteText")
                     ?? string.Empty).Trim();
             }
-            catch (JsonException)
+            catch (JsonException) when (!strict)
             {
                 return string.Empty;
             }
@@ -210,12 +232,13 @@ internal static class KindleAnnotationDatabaseReader
         {
             "HIGHLIGHT" => KindleClippingType.Highlight,
             "NOTE" => KindleClippingType.Note,
-            _ => dataset switch
+            _ when string.IsNullOrWhiteSpace(value) => dataset switch
             {
                 1 => KindleClippingType.Highlight,
                 3 => KindleClippingType.Note,
                 _ => KindleClippingType.Unknown
-            }
+            },
+            _ => KindleClippingType.Unknown
         };
 
     private static long? ReadPosition(JsonElement payload, string propertyName)
@@ -326,7 +349,7 @@ internal static class KindleAnnotationDatabaseReader
     private static string? EmptyToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static void RejectLinkedPath(string databasePath)
+    internal static void RejectLinkedPath(string databasePath)
     {
         if ((File.GetAttributes(databasePath) & FileAttributes.ReparsePoint) != 0)
             throw new IOException(UiText.Get("设备笔记目录不能是链接或联接点。"));

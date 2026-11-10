@@ -323,7 +323,8 @@ public partial class MainWindow
 
         foreach (var (category, categoryLabel, section) in sections)
         {
-            var descendants = section.GetSelfAndLogicalDescendants().OfType<Control>().ToArray();
+            var descendants = section.GetSelfAndLogicalDescendants().OfType<Control>()
+                .Where(IsSettingsSearchControlAvailable).ToArray();
             foreach (var expander in descendants.OfType<Expander>())
             {
                 var title = DisplayValue(expander.Header) ?? "";
@@ -340,7 +341,8 @@ public partial class MainWindow
             foreach (var child in section.GetLogicalChildren().OfType<Control>())
             {
                 if (child is Expander) continue;
-                var controls = child.GetSelfAndLogicalDescendants().OfType<Control>().ToArray();
+                var controls = child.GetSelfAndLogicalDescendants().OfType<Control>()
+                    .Where(IsSettingsSearchControlAvailable).ToArray();
                 var corpus = CollectSettingsText(controls);
                 var title = controls.Select(GetSettingsControlTitle).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
                 if (string.IsNullOrWhiteSpace(title)) continue;
@@ -380,10 +382,14 @@ public partial class MainWindow
         }
     }
 
+    private static bool IsSettingsSearchControlAvailable(Control control) =>
+        !control.GetSelfAndLogicalAncestors().OfType<Control>()
+            .Any(ancestor => ancestor.Classes.Contains("syncProviderHidden"));
+
     private static string CollectSettingsText(IEnumerable<Control> controls)
     {
         var values = new List<string>();
-        foreach (var control in controls)
+        foreach (var control in controls.Where(IsSettingsSearchControlAvailable))
         {
             switch (control)
             {
@@ -811,13 +817,34 @@ public partial class MainWindow
     {
         var webDav = SyncProviderBox.SelectedIndex == (int)SyncProvider.WebDav;
         var account = SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer;
-        S3ConnectionPanel.IsVisible = !webDav && !account;
-        WebDavConnectionPanel.IsVisible = webDav;
-        AccountSyncConnectionPanel.IsVisible = account;
-        S3RegionRow.IsVisible = !webDav && !account;
-        S3PathStyleCheck.IsVisible = !webDav && !account;
-        S3SkipTlsVerifyCheck.IsVisible = !account;
+        SettingsS3Expander.Classes.Set("officialCloud", account);
+        SyncSettingsForm.Spacing = account ? 4 : 14;
+        SetProviderVisibility(S3ConnectionPanel, !webDav && !account);
+        SetProviderVisibility(WebDavConnectionPanel, webDav);
+        SetProviderVisibility(AccountSyncNoticeText, account);
+        SetProviderVisibility(AccountSyncEncryptionKeyPanel, account);
+        SetProviderVisibility(S3EncryptionKeyBox, !account);
+        SetProviderVisibility(S3CustomSettingsHelpText, !account);
+        SetProviderVisibility(S3DownloadBookFilesHelpText, !account);
+        SetProviderVisibility(S3SyncIntervalRow, !account);
+        SetProviderVisibility(SettingsS3AdvancedExpander, !account);
+        SetProviderVisibility(SettingsS3ProfileExpander, !account);
+        SetProviderVisibility(S3RegionRow, !webDav && !account);
+        SetProviderVisibility(S3PathStyleCheck, !webDav && !account);
+        SetProviderVisibility(S3SkipTlsVerifyCheck, !account);
         S3ExportConnectionProfileButton.IsEnabled = !account;
+        _settingsSearchCache.Clear();
+        if (!string.IsNullOrWhiteSpace(SettingsSearchBox.Text))
+            SettingsSearchBox_TextChanged(null, new TextChangedEventArgs(TextBox.TextChangedEvent));
+        UpdateAccountSyncPresentation();
+
+        static void SetProviderVisibility(Control control, bool visible)
+        {
+            control.IsVisible = visible;
+            // Category visibility and collapsed expanders remain searchable;
+            // only options belonging to another provider are excluded.
+            control.Classes.Set("syncProviderHidden", !visible);
+        }
     }
 
     private void S3SettingsFieldChanged()
@@ -838,17 +865,24 @@ public partial class MainWindow
     private void UpdateS3SettingsActions()
     {
         if (SettingsS3ActionBar is null) return;
+        var account = SyncProviderBox.SelectedIndex == (int)SyncProvider.AccountServer;
         SettingsS3ActionBar.IsVisible = _activeSettingsCategory.Equals("Data", StringComparison.OrdinalIgnoreCase)
             && SettingsS3Expander.IsExpanded;
-        S3DraftStatusText.Text = ReadS3SyncSettingsFromControls().ProviderName + " · " + (_s3SettingsSaving ? T("正在保存同步设置…")
+        var draftStatus = _s3SettingsSaving ? T("正在保存同步设置…")
             : _s3SettingsDirty ? T("有未保存的修改 · 保存后生效")
             : _s3SyncStoredSettings.Settings.IsConfigured ? T("配置已保存 · 立即同步使用当前保存的配置")
-            : T("尚未配置 · 填写连接信息后保存"));
+            : T("尚未配置 · 填写连接信息后保存");
+        S3DraftStatusText.Text = account ? draftStatus : ReadS3SyncSettingsFromControls().ProviderName + " · " + draftStatus;
+        S3DraftStatusText.IsVisible = !account || _s3SettingsDirty || _s3SettingsSaving;
+        S3SaveSettingsButton.IsVisible = !account || _s3SettingsDirty || _s3SettingsSaving;
+        S3DiscardSettingsButton.IsVisible = !account || _s3SettingsDirty || _s3SettingsSaving;
+        S3TestConnectionButton.IsVisible = !account;
+        S3SyncNowButton.Classes.Set("quiet", !account);
         S3SaveSettingsButton.IsEnabled = !_s3SyncBusy && !_s3SettingsSaving && _s3SettingsDirty;
         S3DiscardSettingsButton.IsEnabled = !_s3SyncBusy && !_s3SettingsSaving && _s3SettingsDirty;
         S3TestConnectionButton.IsEnabled = !_s3SyncBusy && !_s3SettingsSaving && _s3TestConnectionCancellation is null;
         S3SyncNowButton.IsEnabled = !_s3SyncBusy && !_s3SettingsSaving && !_s3SettingsDirty
-            && _s3SyncStoredSettings.Settings.IsConfigured;
+            && _s3SyncStoredSettings.Settings.IsConfigured && (!account || !IsAccountSyncKnownUnavailable());
     }
 
     private void S3DiscardSettingsButton_Click(object? sender, RoutedEventArgs e)

@@ -96,6 +96,63 @@ public sealed class KkindleLayoutEngineTests : IDisposable
     };
 
     [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb, false)]
+    [InlineData(TypesetWritingMode.HorizontalTb, true)]
+    [InlineData(TypesetWritingMode.VerticalRl, false)]
+    [InlineData(TypesetWritingMode.VerticalRl, true)]
+    public void AnchoredPageBreakKeepsEveryTextOffsetExactlyOnce(TypesetWritingMode mode, bool compact)
+    {
+        var path = WriteChapter(string.Concat(Enumerable.Range(0, 24).Select(_ =>
+            "<p>" + string.Concat(Enumerable.Repeat("春风吹过山林读书应当记住眼前这一行文字", 9)) + "</p>")));
+        var oldContent = new XhtmlChapterLoader(false).Load(path);
+        var newContent = new XhtmlChapterLoader(true).Load(path);
+        using var engine = CreateEngine();
+        var original = engine.Compose(oldContent, Options(mode, 300, 300));
+        var anchor = original.Pages[original.Pages.Count / 2].TextStartOffset;
+        var options = new TypesetLayoutOptions
+        {
+            WritingMode = mode, ViewportWidth = 300, ViewportHeight = 300,
+            InsetHorizontal = 24, InsetVertical = 24, BaseFontSize = 22, LineHeight = 1.8f,
+            ParagraphIndent = true, ParagraphSpacingEm = compact ? 0 : 0.7f,
+            ParagraphSpacingMatchesLineHeight = compact,
+        };
+        var ordinary = engine.Compose(newContent, options);
+        var anchored = engine.Compose(newContent, options, pageStartTextOffset: anchor);
+        var page = anchored.GetPageIndexOfOffset(anchor);
+        Assert.True(page > 0);
+        Assert.Equal(anchor, anchored.Pages[page].TextStartOffset);
+        Assert.True(page < anchored.Pages.Count - 1);
+
+        static int[] PageOffsets(LayoutPage p) => p.Runs
+            .Where(run => run.TextStart >= 0 && run.TextLength > 0)
+            .SelectMany(run => Enumerable.Range(run.TextStart, run.TextLength)).ToArray();
+        var expected = ordinary.Pages.SelectMany(PageOffsets).ToArray();
+        var actual = anchored.Pages.SelectMany(PageOffsets).ToArray();
+        Assert.Equal(expected, actual);
+        Assert.Equal(actual.Length, actual.Distinct().Count());
+        var adjacent = anchored.Pages.Skip(page - 1).Take(3).SelectMany(PageOffsets).ToArray();
+        var adjacentStart = Array.IndexOf(expected, adjacent[0]);
+        Assert.Equal(expected.Skip(adjacentStart).Take(adjacent.Length), adjacent);
+        Assert.Equal(anchor, PageOffsets(anchored.Pages[page])[0]);
+    }
+
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb)]
+    [InlineData(TypesetWritingMode.VerticalRl)]
+    public void AnchorInsideAtomicTextUsesTheStartOfTheUnit(TypesetWritingMode mode)
+    {
+        var text = string.Concat(Enumerable.Repeat("中文段落内容", 100)) + " alphabetic 中文结束";
+        var content = new XhtmlChapterLoader().Load(WriteChapter($"<p>{text}</p>"));
+        var word = content.BodyText.IndexOf("alphabetic", StringComparison.Ordinal);
+        using var engine = CreateEngine();
+        var layout = engine.Compose(content, Options(mode, 300, 300), pageStartTextOffset: word + 3);
+        var page = layout.GetPageIndexOfOffset(word + 3);
+        Assert.True(page > 0);
+        Assert.Equal(word, layout.Pages[page].TextStartOffset);
+        Assert.Contains(layout.Pages[page].Runs, run => run.TextStart == word && run.TextLength >= 10);
+    }
+
+    [Theory]
     [InlineData(TypesetWritingMode.HorizontalTb)]
     [InlineData(TypesetWritingMode.VerticalRl)]
     public void CancellingCompositionStopsAnInProgressChapter(TypesetWritingMode mode)
@@ -190,6 +247,48 @@ public sealed class KkindleLayoutEngineTests : IDisposable
             initialOffsets ??= offsets;
             Assert.Equal(initialOffsets, offsets);
         }
+    }
+
+    [Theory]
+    [InlineData(TypesetWritingMode.HorizontalTb)]
+    [InlineData(TypesetWritingMode.VerticalRl)]
+    public void CompactParagraphSpacingUsesNormalLinePitchAndKeepsFirstLine(TypesetWritingMode mode)
+    {
+        var source = new XhtmlChapterLoader(paragraphIndent: false).Load(WriteChapter(
+            "<p>甲甲<br/>甲甲</p><p>甲甲</p>"));
+        var content = new ChapterContent
+        {
+            ChapterPath = source.ChapterPath,
+            BodyText = source.BodyText,
+            Blocks =
+            [
+                new ContentBlock { Items = source.Blocks[0].Items, SpaceBeforeLines = 0.5f,
+                    SpaceAfterLines = 0.8f, MarginBottomEm = 0.6f },
+                new ContentBlock { Items = source.Blocks[1].Items, SpaceBeforeLines = 0.7f,
+                    MarginTopEm = 0.4f }
+            ]
+        };
+        using var engine = CreateEngine();
+        ChapterLayout Compose(bool compact) => engine.Compose(content, new TypesetLayoutOptions
+        {
+            WritingMode = mode,
+            BaseFontSize = 17f,
+            LineHeight = 1.8f,
+            ParagraphSpacingMatchesLineHeight = compact,
+            ViewportWidth = 400f,
+            ViewportHeight = 600f
+        });
+        float[] Positions(ChapterLayout layout) => Assert.Single(layout.Pages).Runs
+            .Select(run => mode == TypesetWritingMode.HorizontalTb ? run.OriginY : -run.OriginX)
+            .Distinct().Order().ToArray();
+
+        var compact = Positions(Compose(true));
+        var normal = Positions(Compose(false));
+        Assert.Equal(3, compact.Length);
+        Assert.Equal(3, normal.Length);
+        Assert.InRange(Math.Abs(compact[0] - normal[0]), 0f, 0.01f);
+        Assert.InRange(Math.Abs((compact[2] - compact[1]) - (compact[1] - compact[0])), 0f, 0.02f);
+        Assert.True(normal[2] - normal[1] > compact[2] - compact[1]);
     }
 
     [Theory]

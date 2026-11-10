@@ -428,8 +428,12 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
         {
             var local = await WithSessionAsync(device, session =>
             {
-                var database = FindAnnotationDatabases(session).FirstOrDefault();
-                if (database is null) return null;
+                var databases = FindAnnotationDatabases(session);
+                if (databases.Count == 0) return null;
+                if (databases.Count > 1)
+                    throw new NotSupportedException(UiText.Get("Kindle 上存在多个账户批注数据库，无法确认当前账户，已停止同步。笔记仍可查看和导出。"));
+                var database = databases[0];
+                RejectAnnotationSideFiles(session, database);
                 var destination = Path.Combine(stagingDirectory, AnnotationFileName);
                 session.Download(database, destination, cancellationToken: cancellationToken);
                 return new LocalAnnotationDatabase(
@@ -439,8 +443,9 @@ public sealed class MtpKindleDeviceService : IKindleDeviceService
             }, cancellationToken).ConfigureAwait(false);
             if (local is null) return null;
 
+            KindleAnnotationMountedWriter.ValidateSnapshotSource(local.LocalPath);
             var records = await KindleAnnotationDatabaseReader.ReadRecordsAsync(
-                local.LocalPath, 100_000, cancellationToken).ConfigureAwait(false);
+                local.LocalPath, 100_000, cancellationToken, requireCompleteSnapshot: true).ConfigureAwait(false);
             var titleResolver = KindleAnnotationBookTitleResolver.Create(local.SdrFolders);
             var snapshotRecords = records.Select(record => new KindleAnnotationRecord(
                 record.Id,

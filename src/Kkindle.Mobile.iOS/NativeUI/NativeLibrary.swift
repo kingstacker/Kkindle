@@ -26,7 +26,7 @@ struct NativeNameSheet: View {
                     .accessibilityIdentifier("name.input")
                 if let error { Text(error).font(NativeTheme.font(13)).foregroundStyle(NativeTheme.muted) }
                 Spacer()
-            }.padding(24).background(NativeTheme.page)
+            }.padding(24).background(NativeAmbientBackground())
                 .navigationTitle(title).navigationBarTitleDisplayMode(.inline).navigationBarHidden(false)
                 .modifier(NativeKeyboardDone())
                 .toolbar {
@@ -111,7 +111,7 @@ struct NativeBookDetailPage: View {
                 }.buttonStyle(NativePrimaryButtonStyle()).disabled(store.openingReader).accessibilityIdentifier("book.read")
                     .padding(.horizontal, 28).padding(.top, 8).padding(.bottom, 14)
             }
-        }.background(NativeTheme.page).navigationBarHidden(true).modifier(NativeHideTabBar())
+        }.background(NativeAmbientBackground()).navigationBarHidden(true).modifier(NativeHideTabBar())
             .sheet(isPresented: $editor) { if let book { NativeBookEditor(store: store, book: book) } }
             .sheet(isPresented: $folders) { NativeBookCollections(store: store, bookId: bookId) }
             .sheet(isPresented: $rename) {
@@ -197,7 +197,7 @@ struct NativeBookCollections: View {
                     Toggle(folder.name, isOn: Binding(get: { store.library.first { $0.id == bookId }?.collectionIds.contains(folder.id) ?? false }, set: { member in
                         busy = true
                         store.perform { defer { busy = false }; try await store.command("collection.membership", ["bookId": bookId, "collectionId": folder.id, "member": member]); try await store.refreshLibrary() }
-                    }))
+                    })).tint(NativeTheme.systemSwitchTint)
                 }
                 Section("新建收藏夹") {
                     TextField("名称", text: $name)
@@ -280,7 +280,7 @@ struct NativeCollectionPage: View {
                     catch { if !Task.isCancelled { store.failure = error.localizedDescription } }
                 }
             }
-        }.background(NativeTheme.page).disabled(busy).navigationBarHidden(true)
+        }.background(NativeAmbientBackground()).disabled(busy).navigationBarHidden(true)
             .modifier(NativeHideTabBar())
             .sheet(isPresented: $rename) {
                 NativeNameSheet(store: store, title: "重命名收藏夹", initial: folder?.name ?? "", button: "保存") { name in

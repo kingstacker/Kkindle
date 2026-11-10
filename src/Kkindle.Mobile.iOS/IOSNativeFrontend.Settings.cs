@@ -33,13 +33,17 @@ internal sealed partial class IOSNativeFrontend
                 if (args.TryGetProperty("region", out var loginRegion))
                     await modules.Accounts.Service.SelectRegionAsync((AccountRegion)loginRegion.GetInt32(), token);
                 return await modules.Accounts.Service.SignInAsync(Text(args, "serverUrl"), Text(args, "username"),
-                    Text(args, "password"), command == "settings.account.register", token);
+                    Text(args, "password"), command == "settings.account.register", token,
+                    command == "settings.account.register" ? Text(args, "email") : null,
+                    command == "settings.account.register" ? Text(args, "confirmPassword") : null);
             case "settings.account.logout":
                 var revoked = await modules.Accounts.Service.SignOutAsync(token);
                 return Data(("message", revoked ? "已退出登录。" : "已在本机退出；服务器暂时不可用，远端会话将在到期后失效。"));
             case "settings.membership.get": return await modules.Accounts.Membership.RefreshAsync(token);
             case "settings.membership.products": return await modules.Accounts.Membership.ProductsAsync(token);
             case "settings.membership.orders": return await modules.Accounts.Membership.OrdersAsync(token);
+            case "settings.membership.redeem":
+                return await modules.Accounts.Membership.RedeemActivationCodeAsync(Text(args, "code"), Guid.Parse(Text(args, "requestId")), token);
             case "settings.membership.purchase":
                 return await modules.Accounts.Membership.PurchaseAsync(Text(args, "productId"), Guid.Parse(Text(args, "requestId")), token);
             case "settings.membership.cancel":
@@ -154,7 +158,8 @@ internal sealed partial class IOSNativeFrontend
 
     private async Task<string> SyncSummaryAsync(S3SyncStoredSettings stored, CancellationToken token)
     {
-        if (!stored.Settings.IsConfigured) return "填写连接信息后可与其他设备同步";
+        if (!stored.Settings.IsConfigured) return stored.Settings.Provider == SyncProvider.AccountServer
+            ? "登录账号并设置同步密钥后可与其他设备同步" : "填写连接信息后可与其他设备同步";
         var status = await _shell.Modules.Sync.Service.GetStatusAsync(stored.DeviceId, stored.Settings, token);
         return status.LastSyncAt is { } last
             ? $"上次同步 {last.LocalDateTime:yyyy/MM/dd HH:mm} · {status.SnapshotBookCount} 本"

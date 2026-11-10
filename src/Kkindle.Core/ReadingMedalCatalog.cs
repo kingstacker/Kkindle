@@ -56,35 +56,63 @@ public static class ReadingMedalCatalog
             (L("百卷书心", "Hundred books"), L("读完 100 本书", "Finish 100 books"), dashboard.BooksFinished, 100,
                 "M3,7 L7,11 L12,3 L17,11 L21,7 L19,20 L5,20 Z M6,16 L18,16")
         }.ToList();
-        // Milestone families can grow independently without changing rendering or sync storage.
+        // Give every milestone its own silhouette, including milestones in the same family.
         void AddMilestones(long value, int[] targets, string[] names, string[] englishNames,
-            string chineseRule, string englishRule, long multiplier, string icon)
+            string chineseRule, string englishRule, long multiplier, string[] icons)
         {
             for (var i = 0; i < targets.Length; i++)
                 medals.Add((L(names[i], englishNames[i]),
                     L(string.Format(chineseRule, targets[i]), string.Format(englishRule, targets[i])),
-                    value, targets[i] * multiplier, icon));
+                    value, targets[i] * multiplier, icons[i]));
         }
         AddMilestones(dashboard.TotalSeconds, [2, 75, 300, 500, 2000],
             ["两时清欢", "静读流年", "三百晨昏", "五百灯火", "岁月书航"],
             ["Two quiet hours", "Seventy-five hours", "Three hundred hours", "Five hundred hours", "Two thousand hours"],
             "累计阅读 {0} 小时", "Read for {0} hours", 3600,
-            "M12,2 A10,10 0 1 1 11.99,2 M12,5 L12,12 L17,12 M12,19 L12,21 M3,12 L5,12 M19,12 L21,12");
+            [
+                // Tea, hourglass, sunrise, reading lamp, and a sailboat.
+                "M3,8 H17 V14 Q17,19 10,19 Q3,19 3,14 Z M17,9 H19 Q23,9 23,12 Q23,15 17,15 M2,22 H19 M7,2 V5 M12,2 V5",
+                "M5,2 H19 M5,22 H19 M6,2 V6 Q6,9 12,12 Q18,9 18,6 V2 M6,22 V18 Q6,15 12,12 Q18,15 18,18 V22 M8,5 H16 M8,19 L12,15 L16,19 Z",
+                "M2,16 H22 M4,21 H20 M6,16 A6,6 0 0 1 18,16 M12,2 V5 M4,7 L6,9 M20,7 L18,9 M1,12 H3 M21,12 H23",
+                "M6,11 L8,3 H16 L18,11 Z M12,11 V20 M7,21 H17 M3,15 L5,13 M21,15 L19,13",
+                "M12,2 V16 M12,3 L3,14 H12 M15,6 L21,14 H15 Z M2,17 H22 L18,21 H6 Z"
+            ]);
         AddMilestones(dashboard.BooksFinished, [2, 15, 30, 75, 200],
             ["双卷同行", "十五扇窗", "三十重山", "七五书旅", "二百世界"],
             ["Two volumes", "Fifteen windows", "Thirty summits", "Seventy-five journeys", "Two hundred worlds"],
             "读完 {0} 本书", "Finish {0} books", 1,
-            "M4,3 L18,3 L18,19 L6,19 Q2,19 2,21 Q2,23 6,23 L20,23 M4,3 L4,19 M8,7 L14,7 M8,11 L14,11");
+            [
+                // Linked journeys, a window, compass, travel case, and the world.
+                "M9,15 L15,9 M11,6 L14,3 Q18,0 21,4 Q24,8 21,11 L18,14 M6,11 L3,14 Q0,18 4,21 Q8,24 11,21 L14,18",
+                "M5,21 V9 A7,7 0 0 1 19,9 V21 Z M12,2 V21 M5,12 H19",
+                "M12,2 A10,10 0 1 1 12,22 A10,10 0 1 1 12,2 M16,8 L14,14 L8,16 L10,10 Z",
+                "M8,6 V4 Q8,2 10,2 H14 Q16,2 16,4 V6 M5,6 H19 Q21,6 21,8 V19 Q21,21 19,21 H5 Q3,21 3,19 V8 Q3,6 5,6 Z M8,6 V21 M16,6 V21",
+                "M12,2 A10,10 0 1 1 12,22 A10,10 0 1 1 12,2 M2,12 H22 M12,2 C6,7 6,17 12,22 C18,17 18,7 12,2"
+            ]);
         AddMilestones(dashboard.BookmarkCount, [1, 5, 25, 50, 100],
             ["一页珍藏", "五处书影", "页间足迹", "五十路标", "百页珍藏"],
             ["First bookmark", "Five places", "Twenty-five places", "Fifty signposts", "Hundred bookmarks"],
             "收藏 {0} 枚书签", "Save {0} bookmarks", 1,
-            "M5,2 L19,2 L19,22 L12,17 L5,22 Z M9,7 L15,7 M12,4 L12,10");
+            [
+                // A saved page, picture, footsteps, signpost, and a treasured gem.
+                "M14,2 H5 V22 H19 V7 Z M14,2 V7 H19 M8,12 H16 M8,16 H13",
+                "M3,4 H21 V20 H3 Z M3,16 L8,11 L13,16 L17,12 L21,16 M14,8 A1.5,1.5 0 1 0 17,8 A1.5,1.5 0 1 0 14,8",
+                "M7,2 C3,2 3,7 4,10 L5,12 Q6,14 8,13 Q10,12 9,10 V6 Q9,2 7,2 Z M5,16 Q7,15 9,16 V19 Q7,21 5,19 Z M17,6 C21,6 21,11 20,14 L19,16 Q18,18 16,17 Q14,16 15,14 V10 Q15,6 17,6 Z M15,20 Q17,19 19,20 V22 H15 Z",
+                "M12,2 V22 M4,5 H18 L22,8 L18,11 H4 Z M20,13 H6 L2,16 L6,19 H20 Z",
+                "M3,8 L7,3 H17 L21,8 L12,21 Z M3,8 H21 M7,3 L12,21 L17,3"
+            ]);
         AddMilestones(dashboard.AnnotationCount, [5, 25, 50, 250, 500],
             ["五笔灵感", "廿五回声", "五十思绪", "字间对话", "五百心语"],
             ["Five thoughts", "Twenty-five echoes", "Fifty reflections", "Conversations in print", "Five hundred thoughts"],
             "留下 {0} 条批注", "Write {0} annotations", 1,
-            "M3,4 L21,4 L21,17 L15,17 L12,21 L9,17 L3,17 Z M7,8 L17,8 M7,12 L14,12");
+            [
+                // Inspiration, echoes, reflection, conversation, and a letter.
+                "M8,15 C3,11 5,3 12,3 C19,3 21,11 16,15 V18 H8 Z M9,21 H15 M12,7 V12",
+                "M3,8 H7 L12,4 V20 L7,16 H3 Z M16,8 Q20,12 16,16 M19,4 Q27,12 19,20",
+                "M12,5 C9,1 5,2 5,6 C1,7 2,12 4,13 C1,17 5,22 9,20 Q12,22 12,18 V5 M12,5 C15,1 19,2 19,6 C23,7 22,12 20,13 C23,17 19,22 15,20 Q12,22 12,18 M5,6 Q8,6 8,9 M4,13 Q8,11 8,15 M19,6 Q16,6 16,9 M20,13 Q16,11 16,15",
+                "M12,3 H4 Q2,3 2,5 V11 Q2,13 4,13 H6 L9,16 V13 H12 Q14,13 14,11 V5 Q14,3 12,3 Z M17,8 H20 Q22,8 22,10 V16 Q22,18 20,18 H18 L15,21 V18 H12 Q10,18 10,16",
+                "M3,5 H21 V19 H3 Z M3,5 L12,12 L21,5 M3,19 L9,12 M21,19 L15,12"
+            ]);
         return medals.Select(m => new ReadingMedal(m.Name, m.Rule, m.Value, m.Target, m.Icon)).ToList();
     }
 

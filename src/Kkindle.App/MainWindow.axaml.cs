@@ -613,6 +613,7 @@ public partial class MainWindow : Window
 
         RefreshInteractiveControlToolTips();
         UpdateS3SyncIndicator(_s3SyncIndicatorState, _s3SyncIndicatorError);
+        UpdateAccountSyncPresentation();
         UpdateS3SettingsActions();
         S3SyncDeviceText.Text = T("当前设备 ID：{0}", _s3SyncStoredSettings.DeviceId[..Math.Min(12, _s3SyncStoredSettings.DeviceId.Length)]);
         RefreshOnboardingLocalizedChoices();
@@ -1028,6 +1029,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _accountCenterView?.Dispose();
         _backgroundTaskFlyout?.Hide();
         _settingsSearchCancellation?.Cancel();
         _txtImportRulesCompletion?.TrySetResult(null);
@@ -4032,6 +4034,7 @@ public partial class MainWindow : Window
             || DevicePromptOverlay.IsVisible || DeviceModelInputOverlay.IsVisible
             || ImportFormatSelectionOverlay.IsVisible || ImportConflictOverlay.IsVisible)
             return;
+        if (TryExitReadingMaterialsExport(e)) return;
         if (TryHandleReaderPdfHistoryKey(e)) return;
         if (e.Key == Key.F1)
         {

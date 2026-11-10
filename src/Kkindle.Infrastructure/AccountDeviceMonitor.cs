@@ -6,7 +6,7 @@ using Kkindle.Core;
 
 namespace Kkindle.Infrastructure;
 
-/// <summary>At most one successful server device check per account every 24 hours, across app restarts.</summary>
+/// <summary>Checks devices every 24 hours and at a known Plus expiry, across app restarts.</summary>
 public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths, TimeProvider? timeProvider = null) : IDisposable
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
@@ -15,6 +15,8 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
     private int _started;
     private Task? _worker;
     private string Checkpoint => Path.Combine(paths.Data, "device-check.json");
+
+    public event EventHandler<AccountMembershipExpiredEventArgs>? MembershipExpired;
 
     public void Start()
     {
@@ -42,11 +44,32 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
                 catch (JsonException) { }
             }
             var now = _clock.GetUtcNow();
-            if (checks.TryGetValue(key, out var previous) && previous <= now && now-previous < TimeSpan.FromDays(1)) return false;
+            var activeExpiryKey = "plus-active-expiry:" + key;
+            var expiryDue = checks.TryGetValue(activeExpiryKey, out var activeExpiry) && activeExpiry <= now;
+            if (!expiryDue && checks.TryGetValue(key, out var previous) && previous <= now && now-previous < TimeSpan.FromDays(1)) return false;
             // Connection failures don't erase a valid local session or record a successful check.
             var checkedAccount = await accounts.GetStatusAsync(validateSession: true, cancellationToken: token);
             if (checkedAccount.Region != account.Region || checkedAccount.ServerUrl != account.ServerUrl
                 || (checkedAccount.IsLoggedIn && checkedAccount.User?.Id != account.User?.Id)) return false;
+            AccountMembershipExpiredEventArgs? notice = null;
+            if (checkedAccount.IsLoggedIn)
+            {
+                var status = await new DeviceMembershipService(accounts).RefreshAsync(token);
+                now = _clock.GetUtcNow();
+                if (status.Membership.Tier == "pro" && status.Membership.ProExpiresAt is { } nextExpiry && nextExpiry > now)
+                    checks[activeExpiryKey] = nextExpiry;
+                else
+                    checks.Remove(activeExpiryKey);
+                if (status.Membership.ProExpiresAt is { } expiry && expiry <= now && status.Membership.Tier != "pro")
+                {
+                    var noticeKey = "plus-expiry:" + key;
+                    if (!checks.TryGetValue(noticeKey, out var notifiedExpiry) || notifiedExpiry != expiry)
+                    {
+                        checks[noticeKey] = expiry;
+                        notice = new(expiry, MemberEntitlements.CloudRetentionEndsAt(expiry), MemberEntitlements.PlusExpiryMessage(expiry, now));
+                    }
+                }
+            }
             checks[key] = now;
             checks = checks.OrderByDescending(item => item.Value).Take(64).ToDictionary(item => item.Key, item => item.Value);
             using var lease = await SettingsWriteLock.AcquireAsync(paths, token);
@@ -59,6 +82,7 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
                 File.Move(temporary, Checkpoint, overwrite: true);
             }
             finally { File.Delete(temporary); }
+            if (notice is not null) MembershipExpired?.Invoke(this, notice);
             return true;
         }
         finally { _gate.Release(); }
@@ -86,6 +110,8 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
         _ = _worker;
     }
 }
+
+public sealed record AccountMembershipExpiredEventArgs(DateTimeOffset ExpiredAt, DateTimeOffset CloudRetentionEndsAt, string Message);
 
 [JsonSerializable(typeof(Dictionary<string, DateTimeOffset>))]
 internal partial class DeviceCheckJsonContext : JsonSerializerContext;

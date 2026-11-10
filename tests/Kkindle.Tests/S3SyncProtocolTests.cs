@@ -16,7 +16,7 @@ public sealed partial class S3SyncIntegrationTests
         await a.AddBookAsync();
         await a.SyncAsync();
         var snapshot = bucket.Snapshot(a.SnapshotKey);
-        Assert.Equal(5, snapshot.Version);
+        Assert.Equal(6, snapshot.Version);
         snapshot.Version++;
         snapshot.MinimumReaderVersion = snapshot.Version;
         bucket.Objects[a.SnapshotKey] = MemoryBucket.Encode(snapshot);
@@ -25,6 +25,30 @@ public sealed partial class S3SyncIntegrationTests
         var before = bucket.Objects.ToDictionary(pair => pair.Key, pair => pair.Value);
         var writes = bucket.WriteCount;
         await Assert.ThrowsAsync<InvalidDataException>(() => b.SyncAsync());
+        await Assert.ThrowsAsync<InvalidDataException>(() => b.Service.TestConnectionAsync(b.Settings));
+        Assert.Equal(writes, bucket.WriteCount);
+        Assert.Equal(before.Count, bucket.Objects.Count);
+        foreach (var (key, bytes) in before) Assert.Equal(bytes, bucket.Objects[key]);
+    }
+
+    [Fact]
+    public async Task ConnectionTestChecksEveryDeviceBeforeWritingItsProbe()
+    {
+        var bucket = new MemoryBucket();
+        await using var a = await Device.CreateAsync(bucket);
+        await a.AddBookAsync();
+        await a.SyncAsync();
+        var future = bucket.Snapshot(a.SnapshotKey);
+        future.DeviceId = "zz-future-device";
+        future.Version = 7;
+        future.MinimumReaderVersion = 7;
+        // Keep the compatible snapshot first, both in insertion and lexical
+        // order. Reading only that snapshot must not authorise any cloud write.
+        bucket.Objects[$"{a.Settings.Prefix}/devices/zz-future-device/snapshot.bin"] = MemoryBucket.Encode(future);
+        await using var b = await Device.CreateAsync(bucket);
+        var writes = bucket.WriteCount;
+        var before = bucket.Objects.ToDictionary(pair => pair.Key, pair => pair.Value);
+        await Assert.ThrowsAsync<InvalidDataException>(() => b.Service.TestConnectionAsync(b.Settings));
         Assert.Equal(writes, bucket.WriteCount);
         Assert.Equal(before.Count, bucket.Objects.Count);
         foreach (var (key, bytes) in before) Assert.Equal(bytes, bucket.Objects[key]);

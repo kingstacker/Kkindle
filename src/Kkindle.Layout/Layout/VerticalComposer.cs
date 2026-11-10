@@ -57,6 +57,8 @@ internal sealed class VerticalComposer
     public void Compose(ChapterContent content)
     {
         var previousBlockWasHeading = false;
+        var previousBlockWasParagraph = false;
+        var blockIndex = 0;
         foreach (var block in content.Blocks)
         {
             _context.CancellationToken.ThrowIfCancellationRequested();
@@ -71,15 +73,18 @@ internal sealed class VerticalComposer
                     PlaceRule(block);
                     break;
                 default:
-                    PlaceTextBlock(block, previousBlockWasHeading);
+                    PlaceTextBlock(block, previousBlockWasHeading, previousBlockWasParagraph,
+                        blockIndex + 1 < content.Blocks.Count && content.Blocks[blockIndex + 1].Kind == BlockKind.Paragraph);
                     break;
             }
 
             previousBlockWasHeading = block.Kind == BlockKind.Heading;
+            previousBlockWasParagraph = block.Kind == BlockKind.Paragraph;
+            blockIndex++;
         }
     }
 
-    private void PlaceTextBlock(ContentBlock block, bool followsHeading)
+    private void PlaceTextBlock(ContentBlock block, bool followsHeading, bool followsParagraph, bool precedesParagraph)
     {
         var isHeading = block.Kind == BlockKind.Heading;
         var startsAtPageTop = isHeading
@@ -123,7 +128,8 @@ internal sealed class VerticalComposer
             _pages.NextIfUsed();
             _cursorX = ContentRight;
         }
-        else
+        else if (!(block.Kind == BlockKind.Paragraph && followsParagraph
+            && _context.Options.ParagraphSpacingMatchesLineHeight))
         {
             _cursorX -= block.SpaceBeforeLines * ColumnPitch;
         }
@@ -134,6 +140,12 @@ internal sealed class VerticalComposer
         while (index < cells.Count)
         {
             _context.CancellationToken.ThrowIfCancellationRequested();
+            if (_context.StartsAnchoredPage(cells[index]))
+            {
+                _pages.NextIfUsed();
+                _cursorX = ContentRight;
+                _context.PageStartConsumed = true;
+            }
             EnsureColumnSpace();
             if (firstColumnOfBlock)
             {
@@ -160,10 +172,13 @@ internal sealed class VerticalComposer
             _cursorX -= ColumnPitch;
         }
 
-        _cursorX -= block.SpaceAfterLines * ColumnPitch;
-        if (block.Kind == BlockKind.Paragraph)
+        // Each column has already advanced the cursor by its pitch.
+        if (!(block.Kind == BlockKind.Paragraph && precedesParagraph
+            && _context.Options.ParagraphSpacingMatchesLineHeight))
         {
-            _cursorX -= _context.Options.ParagraphSpacingEm * _context.Options.BaseFontSize;
+            _cursorX -= block.SpaceAfterLines * ColumnPitch;
+            if (block.Kind == BlockKind.Paragraph)
+                _cursorX -= _context.Options.ParagraphSpacingEm * _context.Options.BaseFontSize;
         }
     }
 
@@ -187,6 +202,11 @@ internal sealed class VerticalComposer
         while (index < cells.Count)
         {
             var cell = cells[index];
+            if (placements.Count > 0 && _context.StartsAnchoredPage(cell))
+            {
+                forcedBreak = true;
+                break;
+            }
             if (cell.IsLineBreak)
             {
                 index++;

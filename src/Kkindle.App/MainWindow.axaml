@@ -183,9 +183,27 @@
             <Path Classes="libraryGlyph" Stroke="{DynamicResource InkBrush}"
                   Data="M 7,3 V 21 M 3,7 L 7,3 L 11,7 M 17,3 V 21 M 13,17 L 17,21 L 21,17" />
         </DataTemplate>
+        <DataTemplate x:Key="SyncProviderSelectionTemplate" x:CompileBindings="False">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Ellipse x:Name="AccountSyncSelectedLoginIndicator" Classes="syncLoginIndicator" Width="6" Height="6"
+                         Fill="{DynamicResource AccountSuccessBrush}" VerticalAlignment="Center" IsHitTestVisible="False" />
+                <TextBlock Text="{Binding}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+        </DataTemplate>
     </Window.Resources>
 
     <Window.Styles>
+        <Style Selector="Ellipse.syncLoginIndicator">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="ComboBox.accountSignedIn /template/ ContentControl#ContentPresenter Ellipse.syncLoginIndicator,
+                         ComboBoxItem.accountSignedIn /template/ Ellipse.syncLoginIndicator">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <Style Selector="Expander.officialCloud /template/ ToggleButton.settingsExpanderHeader /template/ TextBlock#SettingsExpanderDescription">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
         <Style Selector="Border.librarySort">
             <Setter Property="Background" Value="Transparent" />
         </Style>
@@ -270,6 +288,9 @@
         <Style Selector="Button.multiSelectCancel:pressed /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.dashboardPeriod /template/ ContentPresenter">
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.readingExportToggle">
             <Setter Property="ContentTemplate" Value="{StaticResource LibraryExportActionContent}" />
@@ -736,9 +757,10 @@
                     <Button x:Name="AccountNavigationButton" Height="36" Classes="sidebarPrimaryItem"
                             AutomationProperties.Name="{DynamicResource Ui.Account.Title}" Click="AccountNavigationButton_Click">
                         <Grid Classes="sidebarEntry" ColumnDefinitions="20,12,*,16">
-                            <Path Classes="sidebarOutline" Data="M12,3 A4,4 0 1 1 11.99,3 M4,22 L4,20 Q4,13 12,13 Q20,13 20,20 L20,22" />
+                            <Path x:Name="AccountNavigationIcon" Classes="sidebarOutline accountTierIcon free"
+                                  Data="M12,3 A4,4 0 1 1 12,11 A4,4 0 1 1 12,3 M5,21 V20 Q5,13 12,13 Q19,13 19,20 V21" />
                             <TextBlock x:Name="AccountNavigationText" Grid.Column="2" Classes="sidebarLabel"
-                                       Text="{DynamicResource Ui.Account.LoginOrRegister}" TextTrimming="CharacterEllipsis" />
+                                       Text="{DynamicResource Ui.Account.Login}" TextTrimming="CharacterEllipsis" />
                         </Grid>
                     </Button>
                     <Button x:Name="SettingsNavigationButton"
@@ -841,6 +863,10 @@
                     </Border>
                 </Grid>
             </Border>
+
+            <ContentControl x:Name="AccountCenterHost" Grid.Column="1" IsVisible="False"
+                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                            Background="{DynamicResource PaperBrush}" />
 
             <!-- Local library -->
             <Grid x:Name="LibraryWorkspace"
@@ -2176,7 +2202,7 @@
                   Grid.Column="1"
                   Margin="30,36,30,18"
                   IsVisible="False"
-                  RowDefinitions="Auto,Auto,Auto,Auto,*">
+                  RowDefinitions="Auto,Auto,Auto,*">
                   <Grid.Transitions>
                       <Transitions>
                           <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
@@ -2188,46 +2214,66 @@
                             <TextBlock x:Name="ReadingMaterialsPageTitle" Text="{DynamicResource Ui.Auto.9CD1F9CD7B9AC663}" Classes="pageTitle" />
                         </StackPanel>
                     </StackPanel>
-                <StackPanel Grid.Row="1" Margin="6,0,6,14" Orientation="Horizontal" Spacing="10">
-                    <TextBox x:Name="ReadingMaterialsSearchBox"
-                             Width="420"
-                             Height="38"
-                             VerticalAlignment="Bottom"
-                             HorizontalAlignment="Left"
-                             PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
-                             TextChanged="ReadingMaterialsSearchBox_TextChanged" />
-                    <ComboBox x:Name="ReadingMaterialsSourceBox"
-                              Width="170"
-                              Height="38"
-                              VerticalAlignment="Bottom"
-                              SelectedIndex="0"
-                              SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
-                        <ComboBoxItem Content="Any source" Tag="all" />
-                        <ComboBoxItem Content="Local library" Tag="local" />
-                        <ComboBoxItem Content="{DynamicResource Ui.Device.Current}" Tag="device" />
-                    </ComboBox>
-                </StackPanel>
-                    <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Row="1" Grid.Column="1" Margin="0,0,6,14" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
-                        <Button x:Name="SyncKindleAnnotationsButton"
-                                Content="{DynamicResource Main.KindleAnnotationSync.Button}"
-                                ContentTemplate="{StaticResource LibraryAnnotationSyncActionContent}"
-                                Classes="quiet libraryToolbar"
-                                IsVisible="False"
-                                Click="SyncKindleAnnotationsButton_Click" />
-                        <Button x:Name="ExportReadingMaterialsToggleButton"
-                                Content="{DynamicResource Ui.Auto.B4FBE589C50EE54E}"
-                                Classes="quiet libraryToolbar readingExportToggle"
-                                Click="ExportReadingMaterialsToggleButton_Click" />
-                        <Button x:Name="SelectAllReadingMaterialsButton"
-                                Content="{DynamicResource Ui.Auto.3A5040B68ABF75F9}"
-                                ContentTemplate="{StaticResource LibrarySelectAllActionContent}"
-                                Classes="quiet libraryToolbar"
-                                IsVisible="False"
-                                Click="SelectAllReadingMaterialsButton_Click" />
-                        <Button x:Name="ReadingMaterialsLocateButton" Content="{DynamicResource Ui.Auto.6F789DCD99E5FE34}" ContentTemplate="{StaticResource LibraryLocateActionContent}" Classes="quiet libraryToolbar" IsEnabled="False" Click="ReadingMaterialsLocateButton_Click" />
-                        <Button x:Name="DeleteReadingMaterialsButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" ContentTemplate="{StaticResource LibraryDeleteActionContent}" Classes="quiet libraryToolbar" IsEnabled="False" Click="DeleteReadingMaterialsButton_Click" />
-                        <Button x:Name="RefreshReadingMaterialsButton" Content="{DynamicResource Ui.Auto.AEE88743413144A2}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingMaterialsButton_Click" />
-                    </StackPanel>
+                    <Grid x:Name="ReadingMaterialsToolbar" Grid.Row="1" Grid.ColumnSpan="2"
+                          Margin="6,0,6,14" ColumnDefinitions="*,170,Auto" ColumnSpacing="10">
+                        <TextBox x:Name="ReadingMaterialsSearchBox"
+                                 Height="38"
+                                 HorizontalAlignment="Stretch"
+                                 PlaceholderText="{DynamicResource Ui.Auto.C813DF885BD71685}"
+                                 TextChanged="ReadingMaterialsSearchBox_TextChanged" />
+                        <ComboBox x:Name="ReadingMaterialsSourceBox"
+                                  Grid.Column="1"
+                                  Height="38"
+                                  HorizontalAlignment="Stretch"
+                                  SelectedIndex="0"
+                                  SelectionChanged="ReadingMaterialsSourceBox_SelectionChanged">
+                            <ComboBoxItem Content="Any source" Tag="all" />
+                            <ComboBoxItem Content="Local library" Tag="local" />
+                            <ComboBoxItem Content="{DynamicResource Ui.Device.Current}" Tag="device" />
+                        </ComboBox>
+                        <StackPanel x:Name="ReadingMaterialsNotesActions" Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Button x:Name="SyncKindleAnnotationsButton"
+                                    Content="{DynamicResource Main.KindleAnnotationSync.Button}"
+                                    ContentTemplate="{StaticResource LibraryAnnotationSyncActionContent}"
+                                    Classes="quiet libraryToolbar"
+                                    IsVisible="False"
+                                    Click="SyncKindleAnnotationsButton_Click" />
+                            <Button x:Name="ExportReadingMaterialsToggleButton"
+                                    Content="{DynamicResource Ui.Auto.B4FBE589C50EE54E}"
+                                    Classes="quiet libraryToolbar readingExportToggle"
+                                    Click="ExportReadingMaterialsToggleButton_Click" />
+                            <Button x:Name="ReadingMaterialsLocateButton" Content="{DynamicResource Ui.Auto.6F789DCD99E5FE34}" ContentTemplate="{StaticResource LibraryLocateActionContent}" Classes="quiet libraryToolbar" IsEnabled="False" Click="ReadingMaterialsLocateButton_Click" />
+                            <Button x:Name="DeleteReadingMaterialsButton" Content="{DynamicResource Ui.Auto.435BF8A234FDE6F2}" ContentTemplate="{StaticResource LibraryDeleteActionContent}" Classes="quiet libraryToolbar" IsEnabled="False" Click="DeleteReadingMaterialsButton_Click" />
+                            <Button x:Name="RefreshReadingMaterialsButton" Content="{DynamicResource Ui.Auto.AEE88743413144A2}" ContentTemplate="{StaticResource LibraryRefreshActionContent}" Classes="quiet libraryToolbar" Click="RefreshReadingMaterialsButton_Click" />
+                            <Border x:Name="ReadingMaterialsExportPanel" IsVisible="False">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <Button x:Name="SelectAllReadingMaterialsButton"
+                                            Content="{DynamicResource Ui.Auto.3A5040B68ABF75F9}"
+                                            ContentTemplate="{StaticResource LibrarySelectAllActionContent}"
+                                            Classes="quiet libraryToolbar"
+                                            IsVisible="False"
+                                            Click="SelectAllReadingMaterialsButton_Click" />
+                                    <Button x:Name="ExportReadingMaterialsMarkdownButton"
+                                            Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}"
+                                            ContentTemplate="{StaticResource LibraryExportMarkdownActionContent}"
+                                            Classes="quiet libraryToolbar"
+                                            IsEnabled="False"
+                                            Click="ExportReadingMaterialsMarkdownButton_Click" />
+                                    <Button x:Name="ExportReadingMaterialsTextButton"
+                                            Content="{DynamicResource Ui.Auto.8E1B126E634DCA98}"
+                                            ContentTemplate="{StaticResource LibraryExportTextActionContent}"
+                                            Classes="quiet libraryToolbar"
+                                            IsEnabled="False"
+                                            Click="ExportReadingMaterialsTextButton_Click" />
+                                    <Button x:Name="CancelReadingMaterialsExportButton"
+                                            Content="{DynamicResource Ui.Notes.CancelExport}"
+                                            ContentTemplate="{StaticResource LibraryCancelActionContent}"
+                                            Classes="quiet libraryToolbar"
+                                            Click="CancelReadingMaterialsExportButton_Click" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
                 </Grid>
                 <StackPanel Grid.Row="1" Margin="6,0,6,8" Spacing="8">
                     <TextBlock x:Name="ReadingMaterialsStatusText" Classes="pageDescription" Text="{DynamicResource Ui.Auto.5F83A944D270ED82}" />
@@ -2239,19 +2285,12 @@
                         Padding="0,6"
                         BorderThickness="0"
                         Background="{DynamicResource PaperBrush}">
-                    <TextBlock x:Name="ReadingMaterialsSummaryText" Text="{DynamicResource Ui.Auto.023CAEED6A29333F}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Left" TextAlignment="Left" />
+                    <Grid>
+                        <TextBlock x:Name="ReadingMaterialsSummaryText" Text="{DynamicResource Ui.Auto.023CAEED6A29333F}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Left" TextAlignment="Left" />
+                        <TextBlock x:Name="ReadingMaterialsExportSummaryText" Text="{DynamicResource Ui.Auto.73D9F106567C0594}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Left" TextAlignment="Left" IsVisible="False" />
+                    </Grid>
                 </Border>
-                <Border x:Name="ReadingMaterialsExportSummaryBorder"
-                        Classes="flatPanel"
-                        Grid.Row="3"
-                        Margin="6,18,6,0"
-                        Padding="0,6"
-                        BorderThickness="0"
-                        Background="{DynamicResource PaperBrush}"
-                        IsVisible="False">
-                    <TextBlock x:Name="ReadingMaterialsExportSummaryText" Text="{DynamicResource Ui.Auto.6525A0357C7682BE}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Left" TextAlignment="Left" />
-                </Border>
-                <Grid Grid.Row="4" Margin="6,0,6,0">
+                <Grid Grid.Row="3" Margin="6,0,6,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding ReadingMaterialGroups}">
                             <ItemsControl.ItemTemplate>
@@ -2340,48 +2379,6 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
-                    <Border x:Name="ReadingMaterialsExportPanel"
-                            Padding="4"
-                            Background="{DynamicResource PaperBrush}"
-                            BorderBrush="{DynamicResource HairlineBrush}"
-                            BorderThickness="1"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Bottom"
-                            Margin="0,0,12,12"
-                            IsVisible="False"
-                            ZIndex="10">
-                        <Grid ColumnDefinitions="Auto,38,38"
-                              ColumnSpacing="4"
-                              VerticalAlignment="Center">
-                            <TextBlock Text="{DynamicResource Ui.Notes.ExportLabel}"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       Margin="4,0,4,0"
-                                       VerticalAlignment="Center" />
-                            <Button x:Name="ExportReadingMaterialsMarkdownButton"
-                                    Grid.Column="1"
-                                    Width="38"
-                                    Height="38"
-                                    MinWidth="38"
-                                    Content="{DynamicResource Ui.Auto.AC8B027CC1E3A493}"
-                                    ContentTemplate="{StaticResource LibraryExportMarkdownActionContent}"
-                                    Classes="quiet libraryToolbar"
-                                    HorizontalContentAlignment="Center"
-                                    VerticalContentAlignment="Center"
-                                    Click="ExportReadingMaterialsMarkdownButton_Click" />
-                            <Button x:Name="ExportReadingMaterialsTextButton"
-                                    Grid.Column="2"
-                                    Width="38"
-                                    Height="38"
-                                    MinWidth="38"
-                                    Content="{DynamicResource Ui.Auto.8E1B126E634DCA98}"
-                                    ContentTemplate="{StaticResource LibraryExportTextActionContent}"
-                                    Classes="quiet libraryToolbar"
-                                    HorizontalContentAlignment="Center"
-                                    VerticalContentAlignment="Center"
-                                    Click="ExportReadingMaterialsTextButton_Click" />
-                        </Grid>
-                    </Border>
                     <TextBlock x:Name="ReadingMaterialsEmptyText" Text="{DynamicResource Ui.Auto.E2D121364FBE830A}" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Grid>
             </Grid>
@@ -2459,17 +2456,10 @@
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                         <TextBlock x:Name="DashboardDailyTitleText" Text="{DynamicResource Ui.Reading.WeekTitle}"
                                                    FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="3">
-                                            <Button x:Name="DashboardWeekButton" Classes="settingsCategory active" Tag="Week"
-                                                    Content="{DynamicResource Ui.Reading.Week}" Padding="7,3" Margin="0" MinHeight="28"
-                                                    Click="DashboardPeriodButton_Click" />
-                                            <Button x:Name="DashboardMonthButton" Classes="settingsCategory" Tag="Month"
-                                                    Content="{DynamicResource Ui.Reading.Month}" Padding="7,3" Margin="0" MinHeight="28"
-                                                    Click="DashboardPeriodButton_Click" />
-                                            <Button x:Name="DashboardYearButton" Classes="settingsCategory" Tag="Year"
-                                                    Content="{DynamicResource Ui.Reading.Year}" Padding="7,3" Margin="0" MinHeight="28"
-                                                    Click="DashboardPeriodButton_Click" />
-                                        </StackPanel>
+                                        <Button x:Name="DashboardPeriodButton" Grid.Column="1" Classes="settingsCategory dashboardPeriod"
+                                                Content="{DynamicResource Ui.Reading.Week}" Padding="8,3" Margin="0" MinHeight="28" MinWidth="36"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                Click="DashboardPeriodButton_Click" />
                                     </Grid>
                                     <ItemsControl x:Name="DashboardDaysChart" Grid.Row="1" MinHeight="220" Padding="16,0" ItemsSource="{Binding DashboardDays}" AutomationProperties.Name="{DynamicResource Ui.Auto.83A25C492C9A33C4}">
                                         <ItemsControl.Styles>
@@ -2980,22 +2970,35 @@
                             <StackPanel Spacing="16" x:Name="SettingsDataSection" IsVisible="False">
                                 <Expander x:Name="SettingsS3Expander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.5F30FB70507CBC2C}" Tag="{DynamicResource Ui.Auto.947ACFD929442781}" AutomationProperties.Name="{DynamicResource Ui.Auto.5F30FB70507CBC2C}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                     <Border x:Name="SettingsSyncSection" Padding="0">
-                                        <StackPanel Spacing="14">
-                                            <TextBlock Text="{DynamicResource Ui.Auto.C93D480F9C6D096F}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                        <StackPanel x:Name="SyncSettingsForm" Spacing="14">
+                                            <TextBlock x:Name="S3CustomSettingsHelpText" Text="{DynamicResource Ui.Auto.C93D480F9C6D096F}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
                                             <ToggleSwitch x:Name="S3SyncEnabledCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.26A77111AC6A6A14}" AutomationProperties.Name="{DynamicResource Ui.Auto.26A77111AC6A6A14}" />
                                             <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
                                                 <TextBlock Text="{DynamicResource Sync.ProviderLabel}" FontSize="14" VerticalAlignment="Center" />
-                                                <ComboBox x:Name="SyncProviderBox" Grid.Column="1" SelectedIndex="0" MinWidth="160" HorizontalAlignment="Left" AutomationProperties.Name="{DynamicResource Sync.ProviderLabel}">
+                                                <ComboBox x:Name="SyncProviderBox" Grid.Column="1" SelectedIndex="0" MinWidth="160" HorizontalAlignment="Left"
+                                                          SelectionBoxItemTemplate="{StaticResource SyncProviderSelectionTemplate}" AutomationProperties.Name="{DynamicResource Sync.ProviderLabel}">
                                                     <ComboBoxItem Content="S3" />
                                                     <ComboBoxItem Content="WebDAV" />
-                                                    <ComboBoxItem Content="{DynamicResource Sync.AccountProvider}" />
+                                                    <ComboBoxItem x:Name="AccountSyncProviderItem" Content="{DynamicResource Sync.AccountProvider}"
+                                                                  AutomationProperties.Name="{DynamicResource Sync.AccountProvider}">
+                                                        <ComboBoxItem.Template>
+                                                            <ControlTemplate>
+                                                                <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                                        BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                        <Ellipse x:Name="AccountSyncMenuLoginIndicator" Classes="syncLoginIndicator" Width="6" Height="6"
+                                                                                 Fill="{DynamicResource AccountSuccessBrush}" VerticalAlignment="Center" IsHitTestVisible="False" />
+                                                                        <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                                                                                   FontSize="{TemplateBinding FontSize}" VerticalAlignment="Center" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </ControlTemplate>
+                                                        </ComboBoxItem.Template>
+                                                    </ComboBoxItem>
                                                 </ComboBox>
                                             </Grid>
-                                            <StackPanel x:Name="AccountSyncConnectionPanel" Spacing="9" IsVisible="False">
-                                                <TextBlock x:Name="AccountSyncSummaryText" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
-                                                <TextBlock Text="{DynamicResource Sync.AccountHint}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
-                                                <Button Content="{DynamicResource Ui.Account.LoginOrRegister}" Classes="quiet" Click="AccountNavigationButton_Click" HorizontalAlignment="Left" />
-                                            </StackPanel>
+                                            <TextBlock x:Name="AccountSyncNoticeText" IsVisible="False" Margin="160,0,0,0"
+                                                       FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedInkBrush}" />
                                             <Border x:Name="S3ConnectionPanel" Classes="flatSubsection" Padding="0,12,0,0" Margin="0,4,0,0">
                                                 <StackPanel Spacing="9">
                                                     <TextBlock Text="{DynamicResource Ui.Auto.72251455F2297070}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -3036,13 +3039,26 @@
                                                     </Grid>
                                                 </StackPanel>
                                             </Border>
-                                            <ToggleSwitch x:Name="S3AutomaticSyncCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Ui.Auto.1744BAADE68F9732}" AutomationProperties.Name="{DynamicResource Ui.Auto.1744BAADE68F9732}" />
-                                            <ToggleSwitch x:Name="S3DownloadBookFilesCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Sync.DownloadBookFilesOnSyncHelp}" Classes="settingsToggle" Content="{DynamicResource Sync.DownloadBookFilesOnSync}" AutomationProperties.Name="{DynamicResource Sync.DownloadBookFilesOnSync}" />
-                                            <TextBlock Text="{DynamicResource Sync.DownloadBookFilesOnSyncHelp}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
-                                            <Grid ColumnDefinitions="*,150" ColumnSpacing="12">
+                                            <StackPanel Spacing="0">
+                                                <ToggleSwitch x:Name="S3AutomaticSyncCheck" VerticalAlignment="Center" Classes="settingsToggle" Content="{DynamicResource Sync.AutomaticLabel}" ToolTip.Tip="{DynamicResource Ui.Auto.1744BAADE68F9732}" AutomationProperties.Name="{DynamicResource Sync.AutomaticLabel}" />
+                                                <ToggleSwitch x:Name="S3DownloadBookFilesCheck" VerticalAlignment="Center" ToolTip.Tip="{DynamicResource Sync.DownloadBookFilesOnSyncHelp}" Classes="settingsToggle" Content="{DynamicResource Sync.DownloadFilesLabel}" AutomationProperties.Name="{DynamicResource Sync.DownloadFilesLabel}" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="S3DownloadBookFilesHelpText" Text="{DynamicResource Sync.DownloadBookFilesOnSyncHelp}" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" />
+                                            <Grid x:Name="S3SyncIntervalRow" ColumnDefinitions="*,150" ColumnSpacing="12">
                                                 <TextBlock Text="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <NumericUpDown x:Name="S3SyncIntervalBox" Grid.Column="1" Minimum="5" Maximum="1440" Increment="5" Value="30" AutomationProperties.Name="{DynamicResource Ui.Auto.D8E73422B3CDF7DE}" FontSize="14" />
                                             </Grid>
+                                            <StackPanel x:Name="AccountSyncEncryptionKeyPanel" Spacing="6" IsVisible="False">
+                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                    <TextBlock Text="{DynamicResource Sync.KeyLabel}" FontSize="14" VerticalAlignment="Center" />
+                                                    <TextBox x:Name="AccountSyncEncryptionKeyBox" Grid.Column="1" PasswordChar="●" FontSize="14"
+                                                             Text="{Binding Text, ElementName=S3EncryptionKeyBox, Mode=TwoWay}"
+                                                             PlaceholderText="{DynamicResource Sync.KeyPlaceholder}" ToolTip.Tip="{DynamicResource Sync.EncryptionKeyHelp}"
+                                                             AutomationProperties.Name="{DynamicResource Sync.KeyLabel}" />
+                                                </Grid>
+                                                <TextBlock x:Name="AccountSyncEncryptionKeyHelpText" Text="{DynamicResource Sync.KeyShortHelp}" Margin="160,0,0,0" FontSize="12"
+                                                           Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" ToolTip.Tip="{DynamicResource Sync.EncryptionKeyHelp}" />
+                                            </StackPanel>
                                             <Expander x:Name="SettingsS3AdvancedExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Tag="{DynamicResource Ui.Auto.A78088A8B78D2E46}" AutomationProperties.Name="{DynamicResource Ui.Auto.91A61FDDE856CD9E}" Expanded="SettingsExpander_Expanded" Collapsed="SettingsExpander_Collapsed">
                                                 <Border>
                                                     <StackPanel Spacing="9">

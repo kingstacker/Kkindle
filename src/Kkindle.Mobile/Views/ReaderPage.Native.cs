@@ -20,7 +20,9 @@ public sealed record NativeReaderDialog(string Kind, string Title, string Text, 
 public partial class ReaderPage
 {
     private bool _usesNativeFrontend;
-    private bool _nativeChromeVisible = true;
+    private bool? _nativeAppAppearanceDark;
+    private int _nativeAppAppearanceRevision = -1;
+    private bool _nativeChromeVisible = false;
     private string? _nativeError;
     private IReadOnlyList<SearchHit> _nativeSearchHits = [];
 
@@ -69,6 +71,16 @@ public partial class ReaderPage
     public Task NativeSeekAsync(double percent) => SeekAsync(Math.Clamp(percent, 0, 100));
     public Task NativeMoveChapterAsync(int direction) => MoveChapterAsync(Math.Sign(direction));
     public Task NativeApplySettingsAsync() => ApplyReaderSettingsAsync();
+
+    public void NativeSetAppAppearance(bool dark, int revision)
+    {
+        if (revision <= _nativeAppAppearanceRevision) return;
+        _nativeAppAppearanceRevision = revision;
+        if (_nativeAppAppearanceDark == dark) return;
+        _nativeAppAppearanceDark = dark;
+        if (_started && !_disposed) RefreshReaderAppearance();
+    }
+
     public Task NativeToggleSpeechAsync() => ToggleListeningAsync();
     public void NativePauseSpeech() => _tts?.PauseOrResume();
     public Task NativeStopSpeechAsync() => _tts?.StopAsync() ?? Task.CompletedTask;

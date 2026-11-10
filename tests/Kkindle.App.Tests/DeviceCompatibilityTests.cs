@@ -543,8 +543,9 @@ public sealed partial class SettingsTests
 
         Assert.True(scope.Get<Border>("ReadingMaterialsExportPanel").IsVisible);
         Assert.True(scope.Get<Border>("ReadingMaterialsSummaryBorder").IsVisible);
-        Assert.False(scope.Get<Border>("ReadingMaterialsExportSummaryBorder").IsVisible);
-        Assert.False(scope.Get<Button>("SelectAllReadingMaterialsButton").IsVisible);
+        Assert.True(scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").IsVisible);
+        Assert.True(scope.Get<Button>("SelectAllReadingMaterialsButton").IsEffectivelyVisible);
+        Assert.False(exportToggle.IsVisible);
         Assert.Equal(summary, scope.Get<TextBlock>("ReadingMaterialsSummaryText").Text);
         Assert.Equal(status, scope.Get<TextBlock>("ReadingMaterialsStatusText").Text);
         Assert.DoesNotContain("active", exportToggle.Classes);
@@ -553,18 +554,22 @@ public sealed partial class SettingsTests
         var group = Assert.Single(scope.Window.ReadingMaterialGroups);
         Assert.True(group.IsExportMode);
         Assert.True(group.IsSelected);
-        Assert.Contains("当前将导出 2 条", scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").Text);
+        Assert.Contains("已选 2 条", scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").Text);
 
         group.IsSelected = false;
         Assert.All(scope.Window.ReadingMaterials, item => Assert.False(item.IsSelected));
         scope.Call("UpdateReadingMaterialsActionState");
-        Assert.Contains("当前将导出 0 条", scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").Text);
+        Assert.Contains("已选 0 条", scope.Get<TextBlock>("ReadingMaterialsExportSummaryText").Text);
+        Assert.False(scope.Get<Button>("ExportReadingMaterialsMarkdownButton").IsEnabled);
+        Assert.False(scope.Get<Button>("ExportReadingMaterialsTextButton").IsEnabled);
         group.IsSelected = true;
         Assert.All(scope.Window.ReadingMaterials, item => Assert.True(item.IsSelected));
 
-        scope.Get<Button>("ExportReadingMaterialsToggleButton")
+        scope.Get<Button>("CancelReadingMaterialsExportButton")
             .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.All(scope.Window.ReadingMaterials, item => Assert.False(item.IsSelected));
+        Assert.False(scope.Get<Border>("ReadingMaterialsExportPanel").IsVisible);
+        Assert.True(exportToggle.IsVisible);
     });
 
     [Theory]
@@ -687,6 +692,11 @@ public sealed partial class SettingsTests
         public Func<int, Task<IReadOnlyList<KindleDevice>>>? DetectionReader { get; init; }
         public Func<BookFile, Task>? SendHandler { get; init; }
         public Func<KindleBook, Task<string>>? ExportHandler { get; init; }
+        public KindleAnnotationSnapshot? AnnotationSnapshot { get; set; }
+        public Func<CancellationToken, Task<KindleAnnotationSnapshot?>>? AnnotationSnapshotReader { get; init; }
+        public Func<KindleAnnotationSnapshot, IReadOnlyList<KindleAnnotationMutation>, CancellationToken, Task<KindleAnnotationWriteResult>>? AnnotationWriter { get; init; }
+        public int AnnotationSnapshotRequests { get; private set; }
+        public int AnnotationWriteRequests { get; private set; }
         public int DetectionRequests { get; private set; }
         public int RemovedBooks { get; private set; }
         public int ContentRequests { get; private set; }
@@ -722,6 +732,17 @@ public sealed partial class SettingsTests
         public Task RemoveResourceAsync(KindleDevice device, KindleDeviceResource resource, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task DeleteClippingAsync(KindleDevice device, string clippingId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task DeleteClippingsAsync(KindleDevice device, IReadOnlyCollection<string> clippingIds, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<KindleAnnotationSnapshot?> ReadAnnotationSnapshotAsync(KindleDevice device, CancellationToken cancellationToken = default)
+        {
+            AnnotationSnapshotRequests++;
+            return AnnotationSnapshotReader?.Invoke(cancellationToken) ?? Task.FromResult(AnnotationSnapshot);
+        }
+        public Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(KindleDevice device, KindleAnnotationSnapshot snapshot,
+            IReadOnlyList<KindleAnnotationMutation> mutations, CancellationToken cancellationToken = default)
+        {
+            AnnotationWriteRequests++;
+            return AnnotationWriter?.Invoke(snapshot, mutations, cancellationToken) ?? throw new NotSupportedException();
+        }
         public Task EjectAsync(KindleDevice device, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

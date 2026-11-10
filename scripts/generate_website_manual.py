@@ -256,7 +256,7 @@ def render_page(slug: str, title: str, source_file: str, index: int) -> str:
         <nav>{nav}</nav>
       </aside>
       <main class="manual-content" id="content">
-        <p class="eyebrow">KKINDLE · 使用手册</p>
+        <p class="eyebrow">Kkindle · 使用手册</p>
         <article>{content}</article>
         <nav class="page-steps" aria-label="手册分页">{previous}{following}</nav>
         <footer class="manual-footer">

@@ -134,6 +134,8 @@ public partial class ReaderPage : UserControl
         // than the desktop's 24-point floor allows.
         return normalized with
         {
+            // Compact spacing makes paragraph lines follow the normal line pitch.
+            ParagraphSpacingMatchesLineHeight = normalized.ParagraphSpacing <= 0,
             ParagraphIndent = preferences.ReaderParagraphIndent,
             BodyPadding = Math.Clamp(preferences.ReaderBodyPadding, 16, 64)
         };
@@ -143,6 +145,7 @@ public partial class ReaderPage : UserControl
     {
         if (_started) return;
         _started = true;
+        _shell.ActualThemeVariantChanged += OnAppThemeVariantChanged;
         ApplyTheme();
         _shell.Services.SystemBars?.SetEdgeGesturesCaptured(true);
         await OpenAsync();
@@ -239,7 +242,7 @@ public partial class ReaderPage : UserControl
         _chapterIndex = Math.Clamp(restore?.ChapterIndex ?? 0, 0, _epubDocument.Chapters.Count - 1);
         _epubPosition = restore?.ScrollPosition ?? 0;
 
-        var host = new NativeReaderHost { Focusable = false };
+        var host = new NativeReaderHost { Focusable = false, PreservePageStartOnSettingsChange = true };
         _readerHost = host;
         host.SetAppearance(new ReaderAppearanceSettings { Theme = CurrentTheme });
         host.WebMessageReceived += OnReaderWebMessage;
@@ -1193,7 +1196,8 @@ public partial class ReaderPage : UserControl
             ThemeScope.RequestedThemeVariant);
     }
 
-    private ReaderTheme CurrentTheme => _shell.Preferences.Current.ReaderTheme;
+    private ReaderTheme CurrentTheme => _shell.Preferences.Current.ResolveReaderTheme(
+        _nativeAppAppearanceDark ?? (_shell.ActualThemeVariant == ThemeVariant.Dark));
 
     private double PdfZoom => _shell.Preferences.Current.PdfZoom;
 
@@ -1218,14 +1222,24 @@ public partial class ReaderPage : UserControl
         _shell.SetPaperSystemBars(paper, dark);
     }
 
-    private async void OnReaderSettingsChanged() => await ApplyReaderSettingsAsync();
+    private void OnAppThemeVariantChanged(object? sender, EventArgs e)
+    {
+        if (!_usesNativeFrontend && !_disposed) RefreshReaderAppearance();
+    }
 
-    private async Task ApplyReaderSettingsAsync()
+    private void RefreshReaderAppearance()
     {
         ApplyTheme();
         (_readerHost as IReaderAppearanceHost)?.SetAppearance(new ReaderAppearanceSettings { Theme = CurrentTheme });
         // Preserve the sheet's scroll position while the page updates live.
         _shell.SetSheetTheme(ThemeScope.RequestedThemeVariant);
+    }
+
+    private async void OnReaderSettingsChanged() => await ApplyReaderSettingsAsync();
+
+    private async Task ApplyReaderSettingsAsync()
+    {
+        RefreshReaderAppearance();
         if (_readerHost is NativePdfReaderHost pdf && pdf.Zoom != PdfZoom) await ApplyPdfZoomAsync(pdf);
 
         var layout = BuildLayout(_shell.Preferences.Current);
@@ -1235,14 +1249,13 @@ public partial class ReaderPage : UserControl
         if (_readerHost is not IReaderConfiguredHost configured) return;
         try
         {
-            // Reflow keeps the reader on the same sentence, not the same offset.
+            // The host owns the live position, including while an earlier reflow is pending.
             await configured.Configure(
                 _layout,
                 _epubPosition,
                 fragment: null,
-                restoreFromProgress: true,
-                showVerticalDebugBoxes: false,
-                contentPosition: configured.CaptureContentPosition());
+                restoreFromProgress: false,
+                showVerticalDebugBoxes: false);
             UpdateEpubLabels();
         }
         catch (Exception exception)
@@ -1342,6 +1355,7 @@ public partial class ReaderPage : UserControl
         if (!_disposed && _started)
         {
             _disposed = true;
+            _shell.ActualThemeVariantChanged -= OnAppThemeVariantChanged;
             _longPress.Stop();
             _tts?.Dispose();
             _shell.Services.SystemBars?.SetEdgeGesturesCaptured(false);

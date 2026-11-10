@@ -87,10 +87,13 @@ public partial class MainWindow
     private void UpdateKindleAnnotationSyncButtonVisibility()
     {
         SyncKindleAnnotationsButton.IsVisible = ReadingMaterialsPage.IsVisible
+            && !_readingMaterialsExportMode
             && CurrentDevice is { CanReadNotes: true } device
             && device.Profile.Family == ReaderDeviceFamily.Kindle
             && _kindle is not null;
-        SyncKindleAnnotationsButton.IsEnabled = !_kindleAnnotationSyncPromptBusy;
+        SyncKindleAnnotationsButton.IsEnabled = !_kindleAnnotationSyncPromptBusy
+            && _deviceBooksLoaded && !_deviceBooksShowingCache && !_deviceBookScanFailed
+            && DeviceBooks.Count > 0 && !HasActiveDeviceOperations;
     }
 
     private async void SyncKindleAnnotationsButton_Click(object? sender, RoutedEventArgs e)
@@ -106,18 +109,25 @@ public partial class MainWindow
     {
         if (_kindle is null
             || _kindleAnnotationSyncPromptBusy
+            || _readingMaterialsExportMode
             || !ReadingMaterialsPage.IsVisible
             || device.Profile.Family != ReaderDeviceFamily.Kindle
-            || !_deviceBooksLoaded
-            || _deviceBooksShowingCache
-            || _deviceBookScanFailed
-            || DeviceBooks.Count == 0
-            || HasActiveDeviceOperations
+            || !IsCurrentDevice(device)
             || _confirmationCompletion is not null
             || _bookRemovalCompletion is not null
             || _deviceDuplicateCompletion is not null
             || _messageCompletion is not null)
             return;
+        if (!_deviceBooksLoaded
+            || _deviceBooksShowingCache
+            || _deviceBookScanFailed
+            || DeviceBooks.Count == 0
+            || HasActiveDeviceOperations)
+        {
+            if (manual)
+                ReadingMaterialsStatusText.Text = T("请先完成 Kindle 书籍扫描，并等待其他设备任务结束后再同步批注。");
+            return;
+        }
         // Automatic checks run once per connection; the toolbar button can
         // always re-check. Every check reads the whole shared library.
         if (!manual && string.Equals(
@@ -143,7 +153,8 @@ public partial class MainWindow
                     (progress, token) => Task.Run(() => _kindleAnnotationSync.AnalyzeAsync(
                         device, booksToCheck, _kindle, token, progress), token),
                     analysisCancellation.Token));
-            if (preview is null || !IsCurrentDevice(device)) return;
+            if (preview is null || !IsCurrentDevice(device)
+                || !ReadingMaterialsPage.IsVisible || _readingMaterialsExportMode) return;
             if (!preview.HasChanges)
             {
                 _lastKindleAnnotationSyncPromptSignature = null;
@@ -151,7 +162,13 @@ public partial class MainWindow
                 {
                     var message = preview.UnsupportedCount > 0
                         ? T("没有发现可安全同步的差异；{0} 项未处理（位置无法确认、两端时间冲突，或电脑上已清空的笔记不会删除 Kindle 上的内容）。", preview.UnsupportedCount)
-                        : T("电脑书库与 Kindle 的批注已经一致。");
+                        : preview.SkippedBookCount > 0
+                            ? T("没有发现可安全同步的差异。")
+                            : preview.ComparedBookCount == 0
+                                ? T("未找到可确认身份的共同书籍。请先在电脑书库和 Kindle 上保存同一版本的书籍。")
+                                : T("已检查 {0} 本共同书籍，未发现批注差异。", preview.ComparedBookCount);
+                    if (preview.SkippedBookCount > 0)
+                        message += Environment.NewLine + DescribeSkippedKindleAnnotationBooks(preview.SkippedBookCount);
                     ReadingMaterialsStatusText.Text = message;
                     await ShowMessageAsync(T("Kindle 批注"), message);
                 }
@@ -182,6 +199,9 @@ public partial class MainWindow
                 ? Environment.NewLine + Environment.NewLine
                     + T("其中 {0} 项暂不处理（位置无法确认、两端时间冲突，或电脑上已清空的笔记），将保持原样。", preview.UnsupportedCount)
                 : string.Empty;
+            if (preview.SkippedBookCount > 0)
+                unsupported += Environment.NewLine + Environment.NewLine
+                    + DescribeSkippedKindleAnnotationBooks(preview.SkippedBookCount);
             var confirmed = await ConfirmAsync(
                 T("发现 Kindle 批注差异"),
                 T(
@@ -197,7 +217,8 @@ public partial class MainWindow
                 _lifetimeCancellation.Token,
                 allowDiagnosticAutoConfirm: false,
                 cancelText: T("稍后"));
-            if (!confirmed || !IsCurrentDevice(device)) return;
+            if (!confirmed || !IsCurrentDevice(device)
+                || !ReadingMaterialsPage.IsVisible || _readingMaterialsExportMode) return;
 
             var booksToSync = DeviceBooks.Select(card => card.Book).ToArray();
 
@@ -220,23 +241,27 @@ public partial class MainWindow
                     failure = exception;
                 }
             });
+            if (_lifetimeCancellation.IsCancellationRequested) return;
             if (failure is not null)
             {
-                ReadingMaterialsStatusText.Text = T(
-                    "Kindle 批注同步失败：{0}",
-                    UiText.Localize(failure.Message));
+                // Local imports precede device writes. Even a failed write
+                // must invalidate both lists and show any committed imports.
+                await RefreshAfterKindleAnnotationSyncAsync(device);
+                var message = failure is KindleAnnotationSyncException partial
+                    ? T("批注同步未完成，电脑端已更新 {0} 项。请重新检查差异后重试。", partial.ChangesToComputer)
+                        + Environment.NewLine + UiText.Localize(failure.Message)
+                    : T("Kindle 批注同步失败：{0}", UiText.Localize(failure.Message));
+                ReadingMaterialsStatusText.Text = message.ReplaceLineEndings(" · ");
                 await ShowMessageAsync(
                     T("批注同步失败"),
-                    UiText.Localize(failure.Message));
+                    message);
                 _lastKindleAnnotationSyncPromptSignature = null;
                 return;
             }
             if (result is null) return;
 
-            _deviceClippingCache.Remove(device.Identity);
-            MarkReadingMaterialsDirty();
             _lastKindleAnnotationSyncPromptSignature = null;
-            await RefreshReadingMaterialsAsync();
+            await RefreshAfterKindleAnnotationSyncAsync(device);
             var completion = T(
                 "批注同步完成：导入电脑 {0} 项，写入 Kindle {1} 项。",
                 result.ChangesToComputer,
@@ -244,6 +269,8 @@ public partial class MainWindow
             if (result.UnsupportedCount > 0)
                 completion += Environment.NewLine
                     + T("{0} 项未同步（位置无法确认、两端时间冲突，或电脑上已清空的笔记）。", result.UnsupportedCount);
+            if (result.SkippedBookCount > 0)
+                completion += Environment.NewLine + DescribeSkippedKindleAnnotationBooks(result.SkippedBookCount);
             if (!string.IsNullOrWhiteSpace(result.LocalBackupPath))
                 completion += Environment.NewLine
                     + T("本机备份：{0}", result.LocalBackupPath);
@@ -265,9 +292,12 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            ReadingMaterialsStatusText.Text = T(
+            var message = T(
                 "检查 Kindle 批注差异失败：{0}",
                 UiText.Localize(exception.Message));
+            ReadingMaterialsStatusText.Text = message;
+            if (manual && ReadingMaterialsPage.IsVisible && IsCurrentDevice(device))
+                await ShowMessageAsync(T("Kindle 批注"), message);
         }
         finally
         {
@@ -278,4 +308,15 @@ public partial class MainWindow
             UpdateKindleAnnotationSyncButtonVisibility();
         }
     }
+
+    private async Task RefreshAfterKindleAnnotationSyncAsync(KindleDevice device)
+    {
+        _deviceClippingCache.Remove(device.Identity);
+        MarkReadingMaterialsDirty();
+        if (ReadingMaterialsPage.IsVisible)
+            await RefreshReadingMaterialsAsync();
+    }
+
+    private static string DescribeSkippedKindleAnnotationBooks(int count) =>
+        T("{0} 本书未处理（格式或书籍身份无法确认），两端内容保持原样。", count);
 }

@@ -27,8 +27,12 @@ public sealed class AccountHttpHandler : HttpMessageHandler
             CredentialRequests++;
             var credentials = await request.Content!.ReadFromJsonAsync(AccountJsonContext.Default.AccountCredentials, token);
             if (credentials!.Region != region) return new(HttpStatusCode.Forbidden);
-            if (credentials.Username != session.User.Username || credentials.Password != TestPassword)
+            if (action == "register" && (!AccountValidation.IsEmail(credentials.Email) || credentials.Password != credentials.ConfirmPassword))
+                return new(HttpStatusCode.BadRequest);
+            if (!(credentials.Username.Equals(session.User.Username, StringComparison.OrdinalIgnoreCase)
+                || session.User.Email is { } email && credentials.Username.Equals(email, StringComparison.OrdinalIgnoreCase)) || credentials.Password != TestPassword)
                 return new(HttpStatusCode.Unauthorized);
+            if (action == "register") session.User = session.User with { Email = credentials.Email };
             Revoked = false;
             session.Revoked = false;
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(new AccountSessionResponse
@@ -43,7 +47,7 @@ public sealed class AccountHttpHandler : HttpMessageHandler
 
     private sealed class FixtureSession
     {
-        public AccountUser User { get; } = new(Guid.NewGuid(), "test_reader");
+        public AccountUser User { get; set; } = new(Guid.NewGuid(), "test_reader");
         public string Token { get; } = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         public bool Revoked { get; set; }
     }

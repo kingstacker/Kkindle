@@ -126,6 +126,9 @@ public sealed record ReaderLayoutSettings(
     public bool ParagraphIndent { get; init; } = false;
     /// <summary>Extra gap after body paragraphs, in multiples of the body font size.</summary>
     public double ParagraphSpacing { get; init; } = ReaderLayoutDefaults.DefaultParagraphSpacing;
+    /// <summary>Keep consecutive paragraph lines at the normal line pitch.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ParagraphSpacingMatchesLineHeight { get; init; }
 }
 
 /// <summary>

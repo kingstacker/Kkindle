@@ -384,7 +384,7 @@ public partial class MainWindow
         var settings = ReadMcpSettingsFromControls();
         var lines = new List<string>
         {
-            T("请为我接入 kkindle 的 MCP 服务。"),
+            T("请为我接入 Kkindle 的 MCP 服务。"),
             string.Empty,
             T("通用 YAML 配置："),
             "```yaml",
@@ -404,7 +404,7 @@ public partial class MainWindow
         if (settings.Transport == McpHttpTransport)
         {
             lines.Add(string.Empty);
-            lines.Add(T("HTTP 模式通过 token 鉴权；token 由你在 kkindle 设置中提供，接入说明不会包含 token 明文。"));
+            lines.Add(T("HTTP 模式通过 token 鉴权；token 由你在 Kkindle 设置中提供，接入说明不会包含 token 明文。"));
         }
 
         lines.Add(string.Empty);

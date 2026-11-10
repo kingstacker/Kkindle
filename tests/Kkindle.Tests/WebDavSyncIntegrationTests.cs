@@ -48,7 +48,7 @@ public sealed class WebDavSyncIntegrationTests
         if (encrypted)
         {
             Assert.True(server.Files[a.SnapshotPath].AsSpan().StartsWith("KKINDLE-SYNC1"u8));
-            Assert.True(Assert.Single(server.Files, pair => pair.Key.Contains("/objects/", StringComparison.Ordinal)).Value.AsSpan().StartsWith("KKINDLE-SYNC2"u8));
+            Assert.True(Assert.Single(server.Files, pair => pair.Key.Contains("/objects/", StringComparison.Ordinal)).Value.AsSpan().StartsWith("KKINDLE-SYNC3"u8));
         }
         else
         {
@@ -237,8 +237,8 @@ public sealed class WebDavSyncIntegrationTests
             await library.InitializeAsync();
             await reader.InitializeAsync();
             var protector = new TestHelpers.PlaintextSecretProtector();
-            var service = realHttp ? new S3SyncService(paths, protector)
-                : new S3SyncService(paths, protector, current => new WebDavSyncObjectStore(current, server.Handler()));
+            var service = realHttp ? new S3SyncService(paths, protector, current => new WebDavSyncObjectStore(current), TestHelpers.ActivatedFeatures)
+                : new S3SyncService(paths, protector, current => new WebDavSyncObjectStore(current, server.Handler()), TestHelpers.ActivatedFeatures);
             var device = new Device { Root = root, Paths = paths, Library = library, Reader = reader, Service = service, Settings = settings ?? server.Settings() };
             await service.SaveSettingsAsync(device.Id, device.Settings);
             await service.InitializeDeletionTrackingAsync(deviceId: device.Id);

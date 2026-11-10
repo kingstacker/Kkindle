@@ -57,6 +57,53 @@ internal sealed class AccountSyncStorage(string directory)
     }
 
     public void Delete(Guid account, string key) => File.Delete(ObjectPath(account, key));
+
+    /// <summary>Validates a key before an upload is signed for it.</summary>
+    public void ValidateUploadKey(Guid account, string key) => _ = ObjectPath(account, key);
+
+    public async Task WritePendingAsync(Guid account, Guid upload, Stream input, long length, CancellationToken token)
+    {
+        var pending = PendingPath(account, upload);
+        if (File.Exists(pending)) throw new AccountRequestException(409, "该上传链接已经使用。");
+        var temporary = pending + "." + Guid.NewGuid().ToString("N") + ".part";
+        try
+        {
+            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+            {
+                var buffer = new byte[81920];
+                long received = 0;
+                int count;
+                while ((count = await input.ReadAsync(buffer, token)) > 0)
+                {
+                    received += count;
+                    if (received > length) throw new AccountRequestException(400, "上传的数据长度与授权不一致。");
+                    await output.WriteAsync(buffer.AsMemory(0, count), token);
+                }
+                if (received != length) throw new AccountRequestException(400, "上传的数据长度与授权不一致。");
+            }
+            File.Move(temporary, pending);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    public void CommitPending(Guid account, Guid upload, string key, long length)
+    {
+        var pending = PendingPath(account, upload);
+        if (!File.Exists(pending)) throw new AccountRequestException(409, "上传尚未完成，请重新同步。");
+        if (new FileInfo(pending).Length != length) throw new AccountRequestException(400, "上传的数据长度与授权不一致。");
+        var path = ObjectPath(account, key);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.Move(pending, path, overwrite: true);
+    }
+
+    public void DiscardPending(Guid account, Guid upload) => File.Delete(PendingPath(account, upload));
+
+    private string PendingPath(Guid account, Guid upload)
+    {
+        var uploads = Path.Combine(directory, account.ToString("N"), "uploads");
+        Directory.CreateDirectory(uploads);
+        return Path.Combine(uploads, upload.ToString("N") + ".pending");
+    }
     private string Root(Guid account) => Path.Combine(directory, account.ToString("N"), "objects");
 
     private string ObjectPath(Guid account, string key)

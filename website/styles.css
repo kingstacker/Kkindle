@@ -1,13 +1,14 @@
 /* ==========================================================================
    Kkindle — minimal monochrome landing page
    1 tokens · 2 base · 3 layout · 4 header · 5 hero · 6 features
-   7 about · 8 downloads · 9 faq · 10 footer · 11 responsive
+   6b membership · 7 about · 8 downloads · 9 faq · 10 footer · 11 responsive
    ========================================================================== */
 
 /* 1 · Tokens ============================================================== */
 
 :root {
-  /* Grayscale only — no accent hue anywhere. */
+  /* Grayscale only. The one exception is the green check mark in the
+     membership plans, taken from the reference layout. */
   --bg: #fbfbfa;
   --bg-sunken: #f3f3f1;
   --surface: #ffffff;
@@ -16,6 +17,9 @@
   --muted: #797976;
   --line: #e3e3df;
   --line-2: #cfcfc9;
+  --line-soft: #efefec;
+  --check: #00692a;
+  --icon-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.5 8.6l3.6 3.6L13.5 4.2' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   /* Latin from a serif, CJK from the system UI face — both are local fonts,
      so the page ships with no webfont request. */
@@ -177,6 +181,11 @@ a {
   letter-spacing: 0.16em;
   line-height: 1.4;
   text-transform: uppercase;
+}
+
+/* The product name is always written exactly as "Kkindle". */
+.label.label-brand {
+  text-transform: none;
 }
 
 .label-num {
@@ -503,6 +512,243 @@ a.hero-platform:focus-visible .hero-platform-arrow {
 
 .feature-copy .meta-list {
   margin-top: 20px;
+}
+
+/* 6b · Membership ========================================================= */
+
+.membership {
+  border-top: 1px solid var(--line);
+}
+
+/* Region switch: underlined tabs on the site-wide hairline. */
+.region-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+  margin-top: clamp(36px, 4vw, 52px);
+  border-bottom: 1px solid var(--line);
+}
+
+.region-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 12px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+  transition: color var(--ease);
+}
+
+.region-tab:hover,
+.region-tab:focus-visible,
+.region-tab[aria-selected="true"] {
+  color: var(--ink);
+}
+
+.region-tab[aria-selected="true"] {
+  font-weight: 600;
+}
+
+.region-tab[aria-selected="true"]::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--ink);
+  content: "";
+}
+
+/* Same dashed idiom as the "coming soon" platforms in the hero. */
+.region-tab-badge {
+  padding: 0 8px;
+  border: 1px dashed var(--line-2);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.region-panel {
+  margin-top: 28px;
+}
+
+.region-panel:focus-visible {
+  outline-offset: 8px;
+}
+
+.plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+/* Plus carries the heavier frame; a ring keeps its size equal to the others. */
+.plan-featured {
+  border-color: var(--line-2);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+
+.plan-name {
+  font-family: var(--sans);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+.plan-tagline,
+.plan-period,
+.plan-foot {
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.plan-tagline {
+  margin-top: 6px;
+}
+
+.plan-price {
+  margin-top: 20px;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.plan-price-unit {
+  margin-left: 2px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.plan-period {
+  margin-top: 16px;
+}
+
+.plan-features {
+  display: grid;
+  gap: 16px;
+  margin-block: 24px 32px;
+  padding-top: 26px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.plan-features li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 14px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.plan-features li::before,
+.compare-table .is-yes::before {
+  width: 14px;
+  height: 14px;
+  background: var(--check);
+  content: "";
+  -webkit-mask: var(--icon-check) center / contain no-repeat;
+  mask: var(--icon-check) center / contain no-repeat;
+}
+
+.plan-features li::before {
+  margin-top: calc((1.5em - 14px) / 2);
+}
+
+/* margin-top: auto pins the footnote to the bottom of equal-height cards. */
+.plan-foot {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.compare-table {
+  width: 100%;
+  margin-top: clamp(40px, 5vw, 56px);
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-wrap: anywhere;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.compare-table th:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.compare-table thead th {
+  font-weight: 700;
+}
+
+.compare-table thead th:first-child {
+  width: 46%;
+}
+
+.compare-table tbody th {
+  font-weight: 400;
+}
+
+.compare-table .is-yes::before {
+  display: inline-block;
+  vertical-align: -2px;
+}
+
+/* The "/ ''" alt text keeps screen readers on the hidden label, not the dash. */
+.compare-table .is-no::before {
+  content: "\2014";
+  content: "\2014" / "";
+}
+
+.compare-note {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.region-soon {
+  padding: clamp(28px, 4vw, 44px);
+  border: 1px dashed var(--line-2);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.region-soon-title {
+  font-family: var(--sans);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.4;
+}
+
+.region-soon-body {
+  max-width: 560px;
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 14px;
 }
 
 /* 7 · About ============================================================== */
@@ -1067,6 +1313,10 @@ a.hero-platform:focus-visible .hero-platform-arrow {
     max-width: none;
   }
 
+  .plans {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .platforms {
     grid-template-columns: minmax(0, 1fr);
     gap: 40px;
@@ -1086,7 +1336,7 @@ a.hero-platform:focus-visible .hero-platform-arrow {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   :root {
     --header-h: 56px;
   }
@@ -1116,13 +1366,32 @@ a.hero-platform:focus-visible .hero-platform-arrow {
     display: block;
   }
 
+  .header-actions {
+    margin-left: auto;
+  }
+
   .header-github {
     display: none;
   }
+}
 
+@media (max-width: 760px) {
   .strip .wrap {
     justify-content: flex-start;
     gap: 8px 20px;
+  }
+
+  .compare-table {
+    font-size: 13px;
+  }
+
+  .compare-table th,
+  .compare-table td {
+    padding: 10px 4px;
+  }
+
+  .compare-table thead th:first-child {
+    width: 34%;
   }
 
   .about-points {

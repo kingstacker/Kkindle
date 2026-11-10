@@ -60,6 +60,10 @@ public sealed partial class S3SyncService
                 MergeOpaqueFields(target.ReadingDataReset, source.ReadingDataReset, source.CreatedAt, target, source, "ReadingDataReset/");
         }
 
+        var namingSalts = sources.Append(target).SelectMany(snapshot => snapshot.BlobNamingSalts ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+        target.BlobNamingSalts = namingSalts.Count == 0 ? null : namingSalts.ToArray();
+
         // Only surviving rows receive opaque fields. Never resurrect deleted
         // entities merely to carry data this reader does not understand.
         foreach (var entity in SyncEntities)

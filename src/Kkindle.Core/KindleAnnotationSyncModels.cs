@@ -76,10 +76,12 @@ public sealed record KindleAnnotationSyncBookSummary(
 public sealed record KindleAnnotationSyncPreview(
     bool HasChanges,
     string Signature,
-    IReadOnlyList<KindleAnnotationSyncBookSummary> Books)
+    IReadOnlyList<KindleAnnotationSyncBookSummary> Books,
+    int ComparedBookCount = 0,
+    int SkippedBookCount = 0)
 {
     public int DifferenceCount => Books.Sum(book => book.ChangesToComputer + book.ChangesToDevice);
-    public int BookCount => Books.Count;
+    public int BookCount => Books.Count(book => book.ChangesToComputer + book.ChangesToDevice > 0);
     public int UnsupportedCount => Books.Sum(book => book.UnsupportedCount);
 }
 
@@ -89,7 +91,15 @@ public sealed record KindleAnnotationSyncResult(
     int ChangesToDevice,
     int UnsupportedCount,
     string? LocalBackupPath,
-    string? DeviceBackupPath);
+    string? DeviceBackupPath,
+    int SkippedBookCount = 0);
+
+/// <summary>A failed union sync can still have committed computer-side changes.</summary>
+public sealed class KindleAnnotationSyncException(int changesToComputer, Exception innerException)
+    : IOException(innerException.Message, innerException)
+{
+    public int ChangesToComputer { get; } = changesToComputer;
+}
 
 internal sealed record KindleAnnotationSyncPreparedEntry(
     KindleAnnotationRecord Record,

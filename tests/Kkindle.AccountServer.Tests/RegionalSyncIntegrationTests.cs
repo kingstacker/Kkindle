@@ -67,7 +67,7 @@ public sealed partial class AccountIntegrationTests
         using var secondAccount = new AccountService(secondBase, protector, dataRegion: region);
         await firstAccount.SelectRegionAsync(region);
         await secondAccount.SelectRegionAsync(region);
-        await firstAccount.SignInAsync(server.Url, "test_reader", TestPassword, register: true);
+        await firstAccount.SignInAsync(server.Url, "test_reader", TestPassword, register: true, email: "reader@example.invalid", confirmPassword: TestPassword);
         await secondAccount.SignInAsync(server.Url, "test_reader", TestPassword);
         var firstPaths = AccountRegionPaths.ForRegion(firstBase, region);
         var secondPaths = AccountRegionPaths.ForRegion(secondBase, region);
@@ -84,8 +84,9 @@ public sealed partial class AccountIntegrationTests
             Id = Guid.NewGuid(), BookId = book.Id, BookFileId = file.Id, ChapterPath = "chapter.xhtml",
             SelectedText = "fictional regional quote", Note = "fictional regional note", StartOffset = 0, EndOffset = 5
         });
-        var firstSync = new S3SyncService(firstPaths, protector, firstAccount, region);
-        var secondSync = new S3SyncService(secondPaths, protector, secondAccount, region);
+        // The SQLite fixture covers the wire protocol; paid account permissions are tested against PostgreSQL.
+        var firstSync = new S3SyncService(firstPaths, protector, firstAccount, region, new Kkindle.TestFixtures.ActivatedDeviceFeatures());
+        var secondSync = new S3SyncService(secondPaths, protector, secondAccount, region, new Kkindle.TestFixtures.ActivatedDeviceFeatures());
         var settings = await firstAccount.CreateSyncSettingsAsync(new S3SyncSettings
         { Enabled = true, DownloadBookFilesOnSync = true, EncryptionKey = "fictional-regional-sync-test-key" });
         var firstDevice = Guid.NewGuid().ToString("N"); var secondDevice = Guid.NewGuid().ToString("N");
@@ -122,7 +123,12 @@ public sealed partial class AccountIntegrationTests
         Assert.All(objects, item => Assert.StartsWith("regions/" + AccountRegions.Slug(region) + "/", item.Key));
         var secretFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(settings.EncryptionKey))).ToLowerInvariant();
         Assert.DoesNotContain(objects, item => item.Key.Contains(settings.EncryptionKey, StringComparison.Ordinal)
-            || item.Key.Contains(secretFingerprint, StringComparison.OrdinalIgnoreCase));
+            || item.Key.Contains(secretFingerprint, StringComparison.OrdinalIgnoreCase)
+            || item.Key.Contains(file.Sha256, StringComparison.OrdinalIgnoreCase));
+        var blob = Assert.Single(objects, item => item.Key.Contains("/objects/", StringComparison.Ordinal));
+        Assert.Matches(@"/objects/encrypted/[a-f0-9]{64}/[a-f0-9]{64}$", blob.Key);
+        using var opaqueBytes = await ObjectRequestAsync(server.Http, HttpMethod.Get, blob.Key, token);
+        Assert.True((await opaqueBytes.Content.ReadAsByteArrayAsync()).AsSpan().StartsWith("KKINDLE-SYNC3"u8));
         Assert.DoesNotContain(objects, item => item.Key.Contains(".kkindle-connection-", StringComparison.Ordinal));
     }
 
@@ -138,7 +144,7 @@ public sealed partial class AccountIntegrationTests
             Paths = basePaths, SecretProtector = protector, FormatConverter = new UnavailableBookFormatConverter(), MetadataService = new BookMetadataService()
         });
         using var firstRun = Open();
-        var chinaStatus = await firstRun.Accounts.Service.SignInAsync(china.Url, "test_reader", TestPassword, register: true);
+        var chinaStatus = await firstRun.Accounts.Service.SignInAsync(china.Url, "test_reader", TestPassword, register: true, email: "reader@example.invalid", confirmPassword: TestPassword);
         await firstRun.Library.Books.InitializeAsync();
         await firstRun.Reader.Data.InitializeAsync();
         await ImportTestBookAsync((SqliteBookLibraryService)firstRun.Library.Books, china.Directory, "China only");
@@ -146,7 +152,7 @@ public sealed partial class AccountIntegrationTests
             { EncryptionKey = "fictional-region-switch-sync-key" });
         var switched = await firstRun.Accounts.Service.SelectRegionAsync(AccountRegion.International);
         Assert.False(switched.IsLoggedIn); Assert.True(switched.RequiresDataRestart);
-        var foreignStatus = await firstRun.Accounts.Service.SignInAsync(international.Url, "test_reader", TestPassword, register: true);
+        var foreignStatus = await firstRun.Accounts.Service.SignInAsync(international.Url, "test_reader", TestPassword, register: true, email: "reader@example.invalid", confirmPassword: TestPassword);
         await Assert.ThrowsAsync<InvalidOperationException>(() => firstRun.Accounts.Service.CreateSyncSettingsAsync(new S3SyncSettings()));
         await Assert.ThrowsAsync<InvalidOperationException>(() => firstRun.Sync.Service.TestConnectionAsync(chineseSettings));
         using var secondRun = Open();
@@ -158,7 +164,8 @@ public sealed partial class AccountIntegrationTests
         Assert.Empty(await secondRun.Library.Books.SearchAsync());
         var foreignSettings = await secondRun.Accounts.Service.CreateSyncSettingsAsync(new S3SyncSettings
             { EncryptionKey = "fictional-region-switch-sync-key" });
-        await secondRun.Sync.Service.TestConnectionAsync(foreignSettings);
+        await new S3SyncService(secondRun.Paths, protector, secondRun.Accounts.Service, AccountRegion.International,
+            new Kkindle.TestFixtures.ActivatedDeviceFeatures()).TestConnectionAsync(foreignSettings);
         var restored = await secondRun.Accounts.Service.SelectRegionAsync(AccountRegion.China);
         Assert.Equal(chinaStatus.User, restored.User); Assert.Equal(china.Url, restored.ServerUrl);
         Assert.True(restored.RequiresDataRestart);
@@ -176,16 +183,39 @@ public sealed partial class AccountIntegrationTests
     {
         await using var server = await LocalServer.CreateAsync();
         var account = await RegisterAsync(server.Http, "test_reader");
-        using var response = await ObjectRequestAsync(server.Http, HttpMethod.Put, key, account.Token, "fictional-test-data");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/sync/uploads")
+        { Content = JsonContent.Create(new SyncUploadRequest { Key = key, Length = 19 }, AccountJsonContext.Default.SyncUploadRequest) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", account.Token);
+        using var response = await server.Http.SendAsync(request);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    /// <summary>Lists, or uploads/downloads through the signed-link protocol the client uses, returning the last response.</summary>
     private static async Task<HttpResponseMessage> ObjectRequestAsync(HttpClient http, HttpMethod method, string key, string token, string? body = null)
     {
-        using var request = new HttpRequestMessage(method, "api/sync/objects" + (key.Length == 0 ? "" : "/" + string.Join('/', key.Split('/').Select(Uri.EscapeDataString))));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body is not null) request.Content = new StringContent(body);
-        return await http.SendAsync(request);
+        async Task<HttpResponseMessage> Api(HttpMethod verb, string path, HttpContent? content = null)
+        {
+            using var request = new HttpRequestMessage(verb, path) { Content = content };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return await http.SendAsync(request);
+        }
+        if (key.Length == 0) return await Api(method, "api/sync/objects");
+        if (method == HttpMethod.Put)
+        {
+            var bytes = Encoding.UTF8.GetBytes(body ?? "");
+            var begin = await Api(HttpMethod.Post, "api/sync/uploads",
+                JsonContent.Create(new SyncUploadRequest { Key = key, Length = bytes.Length }, AccountJsonContext.Default.SyncUploadRequest));
+            if (begin.StatusCode != HttpStatusCode.OK) return begin;
+            var upload = (await begin.Content.ReadFromJsonAsync(AccountJsonContext.Default.SyncUploadGrant))!; begin.Dispose();
+            using (var put = await http.PutAsync(upload.Url, new ByteArrayContent(bytes))) Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
+            return await Api(HttpMethod.Post, $"api/sync/uploads/{upload.UploadId}/complete");
+        }
+        var start = await Api(HttpMethod.Post, "api/sync/downloads",
+            JsonContent.Create(new SyncDownloadRequest { Key = key }, AccountJsonContext.Default.SyncDownloadRequest));
+        if (start.StatusCode != HttpStatusCode.OK) return start;
+        var download = (await start.Content.ReadFromJsonAsync(AccountJsonContext.Default.SyncDownloadGrant))!; start.Dispose();
+        Assert.Null(download.Range);
+        return await http.GetAsync(download.Url);
     }
 
     private static async Task<Book> ImportTestBookAsync(SqliteBookLibraryService library, string root, string title)

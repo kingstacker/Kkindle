@@ -101,6 +101,121 @@ public sealed class ReaderStabilityTests(SettingsUiSession session) : IDisposabl
     });
 
     [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public Task MobileSettingsKeepThePageStart(bool vertical, int change) => Run(async () =>
+    {
+        var settings = new ReaderLayoutSettings(FlowMode: 1, VerticalWriting: vertical)
+            { ParagraphIndent = false, ParagraphSpacing = 0.6 };
+        using var host = await LoadChapter(settings, inlineAnchors: true);
+        host.PreservePageStartOnSettingsChange = true;
+        MoveToMiddle(host);
+        var anchor = Layout(host).Pages[host.CurrentPage].TextStartOffset;
+        var changed = change switch
+        {
+            0 => settings with { FontScale = 1.45 },
+            1 => settings with { ParagraphIndent = true },
+            _ => settings with { ParagraphSpacingMatchesLineHeight = true },
+        };
+
+        await host.Configure(changed, 0, null, false, false);
+        Assert.Equal(anchor, Layout(host).Pages[host.CurrentPage].TextStartOffset);
+        if (change == 2) Assert.True(Layout(host).Options.ParagraphSpacingMatchesLineHeight);
+        Assert.True(host.TurnPage(-1));
+        Assert.True(Layout(host).Pages[host.CurrentPage].TextEndOffset <= anchor);
+        Assert.True(host.TurnPage(1));
+        Assert.Equal(anchor, Layout(host).Pages[host.CurrentPage].TextStartOffset);
+        Assert.True(host.TurnPage(1));
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task MobileSettingsFromARestoredMidPagePositionKeepThePageStart(bool vertical) => Run(async () =>
+    {
+        var settings = new ReaderLayoutSettings(FlowMode: 1, VerticalWriting: vertical) { ParagraphIndent = false };
+        using var host = await LoadChapter(settings);
+        host.PreservePageStartOnSettingsChange = true;
+        var page = host.PageCount / 2;
+        var pageStart = Layout(host).Pages[page].TextStartOffset;
+        var midPage = Layout(host).Pages[page].Runs
+            .Where(run => run.TextStart >= pageStart && run.TextLength > 0)
+            .Select(run => run.TextStart).First(offset => offset > pageStart);
+
+        // Reopen at a saved position inside the page, then change typography
+        // without turning a page. The page must still begin at its first text.
+        await host.Configure(settings, 0, null, true, false,
+            new ReaderContentPosition { TextOffset = midPage, PageIndex = page });
+        Assert.Equal(page, host.CurrentPage);
+        await host.Configure(settings with { FontScale = 1.4 }, 0, null, false, false);
+        Assert.Equal(pageStart, Layout(host).Pages[host.CurrentPage].TextStartOffset);
+    });
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public Task MobileScrollAndSpreadKeepOrdinaryPagination(int flow, bool spread) => Run(async () =>
+    {
+        var settings = new ReaderLayoutSettings(FlowMode: flow, TwoPageMode: spread);
+        using var host = await LoadChapter(settings);
+        host.PreservePageStartOnSettingsChange = true;
+        MoveToMiddle(host);
+        await host.Configure(settings with { FontScale = 1.4 }, 0, null, false, false);
+        var actual = Layout(host);
+        var normal = Field<TypesetEngine>(host, "_engine").Compose(Content(host), actual.Options);
+        Assert.Equal(normal.Pages.Select(page => (page.TextStartOffset, page.TextEndOffset)),
+            actual.Pages.Select(page => (page.TextStartOffset, page.TextEndOffset)));
+    });
+
+    [Fact]
+    public Task MobileImagePageUsesTheExistingImageAnchor() => Run(async () =>
+    {
+        using var host = await LoadNativeChapter(WriteImageChapter(_directory), new ReaderLayoutSettings(FlowMode: 1));
+        host.PreservePageStartOnSettingsChange = true;
+        Assert.True(host.RestoreContentPosition(new ReaderContentPosition { ImageIndex = 2, PageIndex = 2 }));
+        await host.Configure(new ReaderLayoutSettings(FlowMode: 1, FontScale: 1.4), 0, null, false, false);
+        Assert.Equal(2, host.CaptureContentPosition()!.ImageIndex);
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ConsecutiveMobileSettingsDuringIndentReloadKeepThePageStart(bool vertical) => Run(async () =>
+    {
+        var settings = new ReaderLayoutSettings(FlowMode: 1, VerticalWriting: vertical) { ParagraphIndent = false };
+        using var host = await LoadChapter(settings);
+        host.PreservePageStartOnSettingsChange = true;
+        MoveToMiddle(host);
+        var anchor = Layout(host).Pages[host.CurrentPage].TextStartOffset;
+        var first = host.Configure(settings with { ParagraphIndent = true }, 0, null, false, false);
+        Assert.Null(host.CaptureContentPosition());
+        var second = host.Configure(settings with { ParagraphIndent = true, FontScale = 1.4 }, 0, null, false, false);
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal(anchor, Layout(host).Pages[host.CurrentPage].TextStartOffset);
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task TurningDuringMobileSettingsKeepsTheNewPosition(bool indent) => Run(async () =>
+    {
+        var settings = new ReaderLayoutSettings(FlowMode: 1) { ParagraphIndent = false };
+        using var host = await LoadChapter(settings);
+        host.PreservePageStartOnSettingsChange = true;
+        MoveToMiddle(host);
+        var task = host.Configure(indent ? settings with { ParagraphIndent = true } : settings with { FontScale = 1.45 },
+            0, null, false, false);
+        Assert.True(host.TurnPage(1));
+        var destination = Layout(host).Pages[host.CurrentPage].TextStartOffset;
+        await task.WaitAsync(TimeSpan.FromSeconds(10));
+        AssertTextIsVisible(host, destination);
+    });
+
+    [Theory]
     [InlineData(0, 1, false)]
     [InlineData(1, 0, false)]
     [InlineData(0, 1, true)]

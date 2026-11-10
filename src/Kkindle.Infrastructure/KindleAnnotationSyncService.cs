@@ -43,12 +43,13 @@ public sealed partial class KindleAnnotationSyncService
         CancellationToken cancellationToken = default,
         IProgress<KindleAnnotationSyncProgress>? progress = null)
     {
-        var contexts = await PrepareContextsAsync(
+        var prepared = await PrepareContextsAsync(
             device,
             deviceBooks,
             kindle,
             buildApplyPlan: false,
             cancellationToken, progress);
+        var contexts = prepared.Contexts;
         var summaries = contexts
             .Where(context => context.ChangesToComputer.Count > 0
                 || context.ChangesToDevice.Count > 0
@@ -80,7 +81,9 @@ public sealed partial class KindleAnnotationSyncService
         return new KindleAnnotationSyncPreview(
             summaries.Any(summary => summary.ChangesToComputer + summary.ChangesToDevice > 0),
             signature,
-            summaries);
+            summaries,
+            prepared.ComparedBookCount,
+            prepared.SkippedBookCount);
     }
 
     public async Task<KindleAnnotationSyncResult> SynchronizeAsync(
@@ -90,12 +93,13 @@ public sealed partial class KindleAnnotationSyncService
         CancellationToken cancellationToken = default,
         IProgress<KindleAnnotationSyncProgress>? progress = null)
     {
-        var contexts = await PrepareContextsAsync(
+        var prepared = await PrepareContextsAsync(
             device,
             deviceBooks,
             kindle,
             buildApplyPlan: true,
             cancellationToken, progress);
+        var contexts = prepared.Contexts;
         var changedContexts = contexts
             .Where(context => context.ChangesToComputer.Count > 0
                 || context.ChangesToDevice.Count > 0 || context.LocalRepairs.Count > 0 || context.AnchorRepairs.Count > 0)
@@ -107,80 +111,79 @@ public sealed partial class KindleAnnotationSyncService
                 0, 0, 0,
                 contexts.Sum(context => context.UnsupportedCount),
                 null,
-                null);
+                null,
+                prepared.SkippedBookCount);
         }
 
         var imported = 0;
         var totalImports = changedContexts.Sum(context => context.ComputerChangeCount);
         var processedImports = 0;
-        foreach (var context in changedContexts)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            foreach (var repair in context.LocalRepairs.Values.Where(repair =>
-                         !context.ChangesToComputer.Any(change => change.ExistingLocal?.Id == repair.Id)))
+            foreach (var context in changedContexts)
             {
-                progress?.Report(new(KindleAnnotationSyncStage.ImportingToComputer,
-                    processedImports++, totalImports, context.LocalBook.Title));
-                await _readerData.SaveAnnotationAsync(repair, cancellationToken);
-                imported++;
-            }
-            foreach (var change in context.ChangesToComputer)
-            {
-                progress?.Report(new(KindleAnnotationSyncStage.ImportingToComputer,
-                    processedImports++, totalImports, context.LocalBook.Title));
-                if (change.ExistingLocal is { } existing)
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var repair in context.LocalRepairs.Values.Where(repair =>
+                             !context.ChangesToComputer.Any(change => change.ExistingLocal?.Id == repair.Id)))
                 {
-                    if (NotesEqual(existing.Note, change.Device.NoteText))
-                        continue;
-                    var updated = CloneAnnotation(context.LocalRepairs.GetValueOrDefault(existing.Id) ?? existing);
-                    updated.Note = change.Device.NoteText;
-                    updated.UpdatedAt = change.Device.UpdatedAt;
-                    await _readerData.SaveAnnotationAsync(updated, cancellationToken);
+                    progress?.Report(new(KindleAnnotationSyncStage.ImportingToComputer,
+                        processedImports++, totalImports, context.LocalBook.Title));
+                    await _readerData.SaveAnnotationAsync(repair, cancellationToken);
                     imported++;
-                    continue;
                 }
-
-                var annotation = await CreateLocalAnnotationAsync(
-                    context,
-                    change.Device,
-                    cancellationToken);
-                if (annotation is null)
+                foreach (var change in context.ChangesToComputer)
                 {
-                    context.UnsupportedCount++;
-                    continue;
+                    progress?.Report(new(KindleAnnotationSyncStage.ImportingToComputer,
+                        processedImports++, totalImports, context.LocalBook.Title));
+                    if (change.ExistingLocal is { } existing)
+                    {
+                        if (NotesEqual(existing.Note, change.Device.NoteText))
+                            continue;
+                        var updated = CloneAnnotation(context.LocalRepairs.GetValueOrDefault(existing.Id) ?? existing);
+                        updated.Note = change.Device.NoteText;
+                        updated.UpdatedAt = change.Device.UpdatedAt;
+                        await _readerData.SaveAnnotationAsync(updated, cancellationToken);
+                        imported++;
+                        continue;
+                    }
+                    await _readerData.SaveAnnotationAsync(change.PreparedImport!, cancellationToken);
+                    imported++;
                 }
-                await _readerData.SaveAnnotationAsync(annotation, cancellationToken);
-                imported++;
             }
+
+            if (totalImports > 0)
+                progress?.Report(new(KindleAnnotationSyncStage.ImportingToComputer, totalImports, totalImports));
+
+            progress?.Report(new(KindleAnnotationSyncStage.PreparingWrite));
+            var (mutations, deviceChanges) = BuildDeviceMutations(contexts);
+            KindleAnnotationWriteResult? writeResult = null;
+            if (mutations.Count > 0)
+            {
+                var snapshot = contexts[0].Snapshot;
+                writeResult = await kindle.ApplyAnnotationMutationsAsync(
+                    device,
+                    snapshot,
+                    mutations,
+                    cancellationToken, progress);
+            }
+
+            progress?.Report(new(KindleAnnotationSyncStage.Completed, 1, 1));
+            return new KindleAnnotationSyncResult(
+                changedContexts.Length,
+                imported,
+                deviceChanges,
+                contexts.Sum(context => context.UnsupportedCount),
+                writeResult?.LocalBackupPath,
+                writeResult?.DeviceBackupPath,
+                prepared.SkippedBookCount);
         }
-
-        if (totalImports > 0)
-            progress?.Report(new(KindleAnnotationSyncStage.ImportingToComputer, totalImports, totalImports));
-
-        progress?.Report(new(KindleAnnotationSyncStage.PreparingWrite));
-        var (mutations, deviceChanges) = BuildDeviceMutations(contexts);
-        KindleAnnotationWriteResult? writeResult = null;
-        if (mutations.Count > 0)
+        catch (Exception exception) when (imported > 0 && exception is not OperationCanceledException)
         {
-            var snapshot = contexts[0].Snapshot;
-            writeResult = await kindle.ApplyAnnotationMutationsAsync(
-                device,
-                snapshot,
-                mutations,
-                cancellationToken, progress);
+            throw new KindleAnnotationSyncException(imported, exception);
         }
-
-        progress?.Report(new(KindleAnnotationSyncStage.Completed, 1, 1));
-        return new KindleAnnotationSyncResult(
-            changedContexts.Length,
-            imported,
-            deviceChanges,
-            contexts.Sum(context => context.UnsupportedCount),
-            writeResult?.LocalBackupPath,
-            writeResult?.DeviceBackupPath);
     }
 
-    private async Task<IReadOnlyList<BookContext>> PrepareContextsAsync(
+    private async Task<PreparedContexts> PrepareContextsAsync(
         KindleDevice device,
         IReadOnlyList<KindleBook> deviceBooks,
         IKindleDeviceService kindle,
@@ -191,7 +194,9 @@ public sealed partial class KindleAnnotationSyncService
         progress?.Report(new(KindleAnnotationSyncStage.ReadingDevice));
         await Task.Yield();
         var snapshot = await kindle.ReadAnnotationSnapshotAsync(device, cancellationToken);
-        if (snapshot is null || snapshot.Records.Count == 0 && deviceBooks.Count == 0) return [];
+        if (snapshot is null)
+            throw new NotSupportedException(UiText.Get("未找到可同步的 Kindle 批注数据库。当前设备的笔记仍可查看和导出。"));
+        if (deviceBooks.Count == 0) return new([], 0, 0);
         progress?.Report(new(KindleAnnotationSyncStage.MatchingBooks));
         var localMatches = await _library.GetLibraryMatchRecordsAsync(cancellationToken);
         var comparison = BookLibraryComparer.Compare(localMatches, deviceBooks);
@@ -200,25 +205,34 @@ public sealed partial class KindleAnnotationSyncService
             book => NormalizeDevicePath(book.RelativePath),
             StringComparer.OrdinalIgnoreCase);
         var result = new List<BookContext>();
+        var compared = 0;
+        var skipped = (comparison.Matches ?? []).Select(pair => NormalizeDevicePath(pair.DeviceRelativePath))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Count() - pairs.Count;
         var processed = 0;
         foreach (var pair in pairs)
         {
             progress?.Report(new(KindleAnnotationSyncStage.ProcessingBooks, processed++, pairs.Count));
             cancellationToken.ThrowIfCancellationRequested();
             if (!deviceByPath.TryGetValue(NormalizeDevicePath(pair.DeviceRelativePath), out var deviceBook))
+            {
+                skipped++;
                 continue;
+            }
             var localBook = await _library.GetBookAsync(pair.LocalBookId, cancellationToken);
-            if (localBook is null) continue;
+            if (localBook is null) { skipped++; continue; }
             var localAnnotations = await ReadLocalAnnotationsAsync(localBook, cancellationToken);
             var stamp = DeviceBookStamp(device, deviceBook);
             if (localAnnotations.Count == 0)
             {
                 // Without local annotations a book only matters when the device
                 // database has records for it; skip the copy when that is known.
-                if (snapshot.Records.Count == 0) continue;
+                if (snapshot.Records.Count == 0) { compared++; continue; }
                 if (TryGetCachedIdentity(stamp, out var identity)
                     && !snapshot.Records.Any(record => IsSameDeviceBook(record.Book, identity)))
+                {
+                    compared++;
                     continue;
+                }
             }
             progress?.Report(new(KindleAnnotationSyncStage.ProcessingBooks,
                 processed - 1, pairs.Count, localBook.Title));
@@ -226,13 +240,23 @@ public sealed partial class KindleAnnotationSyncService
                 device, deviceBook, kindle, stamp,
                 allowCachedText: !buildApplyPlan,
                 cancellationToken, progress);
-            var records = rawText is null ? [] : snapshot.Records
+            if (rawText is null) { skipped++; continue; }
+            var records = snapshot.Records
                 .Where(record => IsSameDeviceBook(record.Book, rawText)).ToArray();
-            if (records.Length == 0 && localAnnotations.Count == 0) continue;
             // Multiple database identities for a file need explicit resolution;
             // a display title must never select a write target.
             if (records.Select(record => record.Book.BookId).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            {
+                skipped++;
                 continue;
+            }
+            if (records.Length == 0 && string.IsNullOrWhiteSpace(rawText.CreateBookId()))
+            {
+                skipped++;
+                continue;
+            }
+            compared++;
+            if (records.Length == 0 && localAnnotations.Count == 0) continue;
 
             var context = new BookContext(
                 snapshot,
@@ -243,12 +267,28 @@ public sealed partial class KindleAnnotationSyncService
                 records);
             PrepareDeviceGroups(context);
             PrepareChanges(context, buildApplyPlan);
+            // Analysis must only promise imports whose positions can actually
+            // be resolved in the local edition. The write pass prepares again.
+            for (var index = context.ChangesToComputer.Count - 1; index >= 0; index--)
+            {
+                var change = context.ChangesToComputer[index];
+                if (change.ExistingLocal is not null) continue;
+                var import = await CreateLocalAnnotationAsync(context, change.Device, cancellationToken);
+                if (import is null)
+                {
+                    context.ChangesToComputer.RemoveAt(index);
+                    context.UnsupportedCount++;
+                }
+                else context.ChangesToComputer[index] = change with { PreparedImport = import };
+            }
             await PrepareAnchorRepairsAsync(context, cancellationToken);
             result.Add(context);
         }
         progress?.Report(new(KindleAnnotationSyncStage.ProcessingBooks, pairs.Count, pairs.Count));
-        return result;
+        return new(result, compared, skipped);
     }
+
+    private sealed record PreparedContexts(IReadOnlyList<BookContext> Contexts, int ComparedBookCount, int SkippedBookCount);
 
     private static IReadOnlyList<BookLibraryMatchPair> BuildUnambiguousPairs(
         IReadOnlyList<BookLibraryMatchPair> pairs)
@@ -332,22 +372,68 @@ public sealed partial class KindleAnnotationSyncService
         var records = context.DeviceRecords;
         var highlights = records.Where(record => record.Dataset == 1).ToArray();
         var notes = records.Where(record => record.Dataset == 3).ToArray();
+        var notesByHighlight = new Dictionary<string, List<KindleAnnotationRecord>>(StringComparer.Ordinal);
+        var ambiguousHighlights = new HashSet<string>(StringComparer.Ordinal);
+
+        long ExclusiveEnd(KindleAnnotationRecord highlight) => context.RawText is not { } raw ? highlight.End
+            : highlight.AnnotationId.StartsWith("kkindle.highlight.", StringComparison.Ordinal)
+                ? raw.OwnedDeviceEndToExclusive(highlight.End) : raw.DeviceEndToExclusive(highlight.End);
+        string Quote(KindleAnnotationRecord highlight) => context.RawText?.ExtractRange(highlight.Start, ExclusiveEnd(highlight)) ?? string.Empty;
+
+        foreach (var note in notes)
+        {
+            var ownedLocal = context.LocalAnnotations.FirstOrDefault(local =>
+                note.AnnotationId == "kkindle.note." + local.Id.ToString("N"));
+            // An owned note belongs to its corresponding owned highlight,
+            // even if old positions need repair. Containment alone is unsafe
+            // when one Kindle selection overlaps another selection.
+            var targets = highlights.Where(highlight => note.AnnotationId.StartsWith("kkindle.note.", StringComparison.Ordinal)
+                && highlight.AnnotationId == "kkindle.highlight." + note.AnnotationId["kkindle.note.".Length..]).ToArray();
+            if (targets.Length == 0 && ownedLocal is not null && context.RawText is { } raw
+                && raw.TryFindRange(ownedLocal.SelectedText, ownedLocal.Prefix, ownedLocal.Suffix, out var start, out var end))
+                targets = highlights.Where(highlight => Math.Abs(highlight.Start - start) <= 3
+                    && Math.Abs(ExclusiveEnd(highlight) - end) <= 3).ToArray();
+            if (targets.Length == 0)
+                targets = highlights.Where(highlight => note.Start >= highlight.Start && note.End <= highlight.End).ToArray();
+
+            if (targets.Length == 1)
+            {
+                if (!notesByHighlight.TryGetValue(targets[0].AnnotationId, out var assigned))
+                    notesByHighlight[targets[0].AnnotationId] = assigned = [];
+                assigned.Add(note);
+            }
+            else
+            {
+                foreach (var target in targets) ambiguousHighlights.Add(target.AnnotationId);
+                if (ownedLocal is not null)
+                {
+                    context.BlockedLocalAnnotations.Add(ownedLocal.Id);
+                    foreach (var highlight in highlights.Where(highlight =>
+                                 TextKey(Quote(highlight)) == TextKey(ownedLocal.SelectedText)))
+                        ambiguousHighlights.Add(highlight.AnnotationId);
+                }
+            }
+        }
+
         var consumedNotes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var highlight in highlights)
         {
-            var note = notes
-                .Where(candidate =>
-                    !consumedNotes.Contains(candidate.AnnotationId)
-                    && candidate.Start >= highlight.Start
-                    && candidate.End <= highlight.End)
-                .OrderByDescending(candidate => candidate.ModifiedTime)
-                .FirstOrDefault();
+            var quote = Quote(highlight);
+            if (ambiguousHighlights.Contains(highlight.AnnotationId))
+            {
+                context.UnsupportedCount++;
+                context.DeviceUnsupportedCount++;
+                foreach (var local in context.LocalAnnotations.Where(local =>
+                             highlight.AnnotationId == "kkindle.highlight." + local.Id.ToString("N")
+                             || TextKey(local.SelectedText) == TextKey(quote)))
+                    context.BlockedLocalAnnotations.Add(local.Id);
+                continue;
+            }
+            var note = notesByHighlight.GetValueOrDefault(highlight.AnnotationId)?
+                .OrderByDescending(candidate => candidate.ModifiedTime).FirstOrDefault();
             if (note is not null) consumedNotes.Add(note.AnnotationId);
             var owned = highlight.AnnotationId.StartsWith("kkindle.highlight.", StringComparison.Ordinal);
-            var exclusiveEnd = context.RawText is not { } raw ? highlight.End
-                : owned ? raw.OwnedDeviceEndToExclusive(highlight.End)
-                : raw.DeviceEndToExclusive(highlight.End);
-            var quote = context.RawText?.ExtractRange(highlight.Start, exclusiveEnd) ?? string.Empty;
+            var exclusiveEnd = ExclusiveEnd(highlight);
             if (string.IsNullOrWhiteSpace(quote) && !owned)
             {
                 context.UnsupportedCount++;
@@ -366,7 +452,7 @@ public sealed partial class KindleAnnotationSyncService
 
     private static void PrepareChanges(BookContext context, bool buildApplyPlan)
     {
-        var matchedLocal = new HashSet<Guid>();
+        var matchedLocal = new HashSet<Guid>(context.BlockedLocalAnnotations);
         foreach (var device in context.DeviceAnnotations)
         {
             var candidates = context.LocalAnnotations.Where(annotation =>
@@ -477,6 +563,7 @@ public sealed partial class KindleAnnotationSyncService
         public KindleRawBookText? RawText { get; } = rawText;
         public IReadOnlyList<KindleAnnotationRecord> DeviceRecords { get; } = deviceRecords;
         public List<DeviceAnnotationPair> DeviceAnnotations { get; } = [];
+        public HashSet<Guid> BlockedLocalAnnotations { get; } = [];
         public List<ComputerChange> ChangesToComputer { get; } = [];
         public List<DeviceChange> ChangesToDevice { get; } = [];
         public Dictionary<Guid, IReadOnlyList<BookContentChunk>> ReaderChapters { get; } = [];
@@ -511,7 +598,8 @@ public sealed partial class KindleAnnotationSyncService
 
     private sealed record ComputerChange(
         DeviceAnnotationPair Device,
-        ReaderAnnotation? ExistingLocal);
+        ReaderAnnotation? ExistingLocal,
+        ReaderAnnotation? PreparedImport = null);
 
     private sealed record DeviceChange(
         ReaderAnnotation Local,

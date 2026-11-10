@@ -39,6 +39,7 @@ public sealed partial class SettingsTests
         {
             UiLanguage = language, OnboardingCompleted = true, ShowUnearnedReadingMedals = false
         });
+        scope.Call("ShowStage3Page", scope.Get<Grid>("ReadingDashboardPage"), null);
         var dashboard = new ReadingDashboard(1, 0, 7200, 5, 0, 5, [], []);
         scope.Call("PopulateReadingMedals", dashboard);
         var panel = scope.Get<WrapPanel>("DashboardMedalsPanel");
@@ -50,6 +51,10 @@ public sealed partial class SettingsTests
         all.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await Render();
         Assert.Equal(40, panel.Children.Count);
+        var scroll = scope.Get<ScrollViewer>("ReadingDashboardScrollViewer");
+        scroll.Offset = new Vector(0, scroll.Extent.Height);
+        await Render();
+        Capture(scope.Window, $"reading-medals-all-{language}");
         Assert.Contains("active", all.Classes);
         Assert.False(scope.Field<bool>("_appSettingsAutoSaveShowStatus"));
         await scope.Call<Task<bool>>("FlushAppSettingsAsync");

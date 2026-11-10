@@ -459,37 +459,58 @@ public sealed class MassStorageKindleDeviceService : IKindleDeviceService
         if (!device.Profile.SupportsClippings) return null;
         var databases = KindleAnnotationDeviceFiles.FindMountedDatabases(device.RootPath, cancellationToken);
         if (databases.Count == 0) return null;
+        if (databases.Count > 1)
+            throw new NotSupportedException(UiText.Get("Kindle 上存在多个账户批注数据库，无法确认当前账户，已停止同步。笔记仍可查看和导出。"));
         var database = databases[0];
-        var records = await KindleAnnotationDatabaseReader.ReadRecordsAsync(
-            database,
-            maxItems: 100_000,
-            cancellationToken);
-        var titleResolver = KindleAnnotationBookTitleResolver.Create(
-            KindleAnnotationDeviceFiles.FindSdrFolderNames(
-                GetDocumentsRoot(device),
-                cancellationToken));
-        var snapshotRecords = records.Select(record => new KindleAnnotationRecord(
-            record.Id,
-            new KindleAnnotationBookIdentity(
-                record.Book.BookId,
-                record.Book.Asin,
-                record.Book.Guid),
-            record.Dataset,
-            record.Type,
-            record.Start,
-            record.End,
-            record.CreatedAt?.ToUnixTimeMilliseconds() ?? 0,
-            record.UpdatedAt?.ToUnixTimeMilliseconds() ?? 0,
-            record.Note,
-            record.SerializedPayload,
-            titleResolver.Resolve(record.Book) ?? string.Empty)).ToArray();
-        await using var stream = File.OpenRead(database);
-        var sha256 = Convert.ToHexString(
-            await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
-        return new KindleAnnotationSnapshot(
-            Path.GetRelativePath(device.RootPath, database).Replace('\\', '/'),
-            sha256,
-            snapshotRecords);
+        KindleAnnotationMountedWriter.ValidateSnapshotSource(database);
+        var stagingDirectory = Path.Combine(Path.GetTempPath(), "Kkindle", "annotation-snapshot", Guid.NewGuid().ToString("N"));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(stagingDirectory);
+        else Directory.CreateDirectory(stagingDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            // Read records and their hash from the same immutable copy. Reading
+            // rows from the live file and hashing it later can mix two versions.
+            var snapshotPath = Path.Combine(stagingDirectory, "ksdk_annotation_v1.db");
+            File.Copy(database, snapshotPath);
+            KindleAnnotationMountedWriter.ValidateSnapshotSource(snapshotPath);
+            var records = await KindleAnnotationDatabaseReader.ReadRecordsAsync(
+                snapshotPath,
+                maxItems: 100_000,
+                cancellationToken,
+                requireCompleteSnapshot: true);
+            var titleResolver = KindleAnnotationBookTitleResolver.Create(
+                KindleAnnotationDeviceFiles.FindSdrFolderNames(
+                    GetDocumentsRoot(device),
+                    cancellationToken));
+            var snapshotRecords = records.Select(record => new KindleAnnotationRecord(
+                record.Id,
+                new KindleAnnotationBookIdentity(
+                    record.Book.BookId,
+                    record.Book.Asin,
+                    record.Book.Guid),
+                record.Dataset,
+                record.Type,
+                record.Start,
+                record.End,
+                record.CreatedAt?.ToUnixTimeMilliseconds() ?? 0,
+                record.UpdatedAt?.ToUnixTimeMilliseconds() ?? 0,
+                record.Note,
+                record.SerializedPayload,
+                titleResolver.Resolve(record.Book) ?? string.Empty)).ToArray();
+            await using var stream = File.OpenRead(snapshotPath);
+            var sha256 = Convert.ToHexString(
+                await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+            return new KindleAnnotationSnapshot(
+                Path.GetRelativePath(device.RootPath, database).Replace('\\', '/'),
+                sha256,
+                snapshotRecords);
+        }
+        finally
+        {
+            try { Directory.Delete(stagingDirectory, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     public Task<KindleAnnotationWriteResult> ApplyAnnotationMutationsAsync(

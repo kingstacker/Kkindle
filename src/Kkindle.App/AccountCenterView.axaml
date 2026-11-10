@@ -1,0 +1,489 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Kkindle" xmlns:converters="using:Avalonia.Data.Converters" x:Class="Kkindle.AccountCenterView"
+             Background="{DynamicResource PaperBrush}" FontFamily="{StaticResource DefaultAppFontFamily}">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.accountMuted">
+      <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="LineHeight" Value="16" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="Border.accountCard">
+      <Setter Property="Padding" Value="16" />
+    </Style>
+    <Style Selector="Button.accountTextAction">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="MinHeight" Value="35" />
+      <Setter Property="Padding" Value="10,7" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.accountTextAction:pointerover, Button.accountTextAction:focus-visible">
+      <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.accountTextAction:pointerover /template/ ContentPresenter#PART_ContentPresenter,
+                     Button.accountTextAction:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.accountTextAction:pressed">
+      <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.accountTextAction:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.accountTextAction:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="9,6" />
+    </Style>
+    <Style Selector="Button.accountTextAction:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.accountTextAction:disabled">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+    <Style Selector="Button.accountTextAction:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Path.accountIcon, Path.accountTierIcon, Path.accountDeviceIcon, Path.accountBenefitCheck">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="Stretch" Value="Uniform" />
+      <Setter Property="Stroke" Value="{DynamicResource MutedInkBrush}" />
+      <Setter Property="StrokeThickness" Value="1.4" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+      <Setter Property="Fill" Value="{x:Null}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.accountAvatar">
+      <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource HairlineBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.accountTierBadge.free">
+      <Setter Property="Background" Value="{DynamicResource AccountFreeTintBrush}" />
+    </Style>
+    <Style Selector="Border.accountTierBadge.lifetime">
+      <Setter Property="Background" Value="{DynamicResource AccountLifetimeTintBrush}" />
+    </Style>
+    <Style Selector="Border.accountTierBadge.plus">
+      <Setter Property="Background" Value="{DynamicResource AccountPlusTintBrush}" />
+    </Style>
+    <Style Selector="TextBlock.accountTierName.free">
+      <Setter Property="Foreground" Value="{DynamicResource AccountFreeAccentBrush}" />
+    </Style>
+    <Style Selector="TextBlock.accountTierName.lifetime">
+      <Setter Property="Foreground" Value="{DynamicResource AccountLifetimeAccentBrush}" />
+    </Style>
+    <Style Selector="TextBlock.accountTierName.plus">
+      <Setter Property="Foreground" Value="{DynamicResource AccountPlusAccentBrush}" />
+    </Style>
+    <Style Selector="Path.accountBenefitCheck">
+      <Setter Property="Stroke" Value="{DynamicResource MutedInkBrush}" />
+      <Setter Property="Width" Value="14" />
+      <Setter Property="Height" Value="14" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+    <Style Selector="Border.accountDeviceRow">
+      <Setter Property="Padding" Value="0,10" />
+    </Style>
+    <Style Selector="Border.accountDeviceAvatar">
+      <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+    </Style>
+    <Style Selector="Border.accountDeviceAvatar.current">
+      <Setter Property="Background" Value="{DynamicResource AccountSuccessTintBrush}" />
+    </Style>
+    <Style Selector="Path.accountDeviceIcon.current">
+      <Setter Property="Stroke" Value="{DynamicResource SuccessBrush}" />
+    </Style>
+    <Style Selector="TextBlock.accountPlanName">
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.accountPlanPrice">
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style Selector="Border.accountPlanCard.current">
+      <Setter Property="BorderBrush" Value="{DynamicResource InkBrush}" />
+    </Style>
+  </UserControl.Styles>
+  <Grid Name="AccountPageLayout" Classes="settingsPage" Margin="30,36,30,18" MaxWidth="1120" RowDefinitions="Auto,*" RowSpacing="20">
+    <Grid ColumnDefinitions="*,148,38" RowDefinitions="Auto,Auto,2" ColumnSpacing="16">
+      <StackPanel Spacing="3" MinHeight="48" Margin="6,0,0,0" VerticalAlignment="Center">
+        <TextBlock Name="AccountPageTitle" Text="{DynamicResource Ui.Account.Center}" Classes="pageTitle" />
+        <TextBlock Text="{DynamicResource Ui.Account.CenterSubtitle}" Classes="pageDescription" />
+      </StackPanel>
+      <StackPanel Name="RegionPanel" Grid.Column="1" Spacing="3">
+        <TextBlock Text="{DynamicResource Ui.Account.Region}" Classes="accountMuted" FontSize="11" />
+        <ComboBox Name="RegionBox" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="OnRegionChanged"
+                  ToolTip.Tip="{DynamicResource Ui.Account.RegionHint}">
+          <ComboBoxItem Content="{DynamicResource Ui.Account.China}" />
+          <ComboBoxItem Content="{DynamicResource Ui.Account.International}" />
+        </ComboBox>
+      </StackPanel>
+      <Button Name="MembershipRefreshButton" Grid.Column="2" Classes="quiet libraryToolbar"
+              VerticalAlignment="Bottom" Click="OnMembershipRefreshClick" ToolTip.Tip="{DynamicResource Ui.Account.Refresh}"
+              AutomationProperties.Name="{DynamicResource Ui.Account.Refresh}">
+        <Path Classes="accountIcon" Data="{StaticResource AccountRefreshGeometry}" />
+      </Button>
+      <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="4" Margin="6,0,6,0">
+        <TextBlock Name="StatusText" Classes="pageDescription" Margin="0,8,0,0"
+                   IsVisible="{Binding Text, RelativeSource={RelativeSource Self}, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
+        <TextBlock Name="MembershipStatus" Classes="pageDescription" Margin="0,8,0,0" IsVisible="False" />
+      </StackPanel>
+      <ProgressBar Name="LoadingIndicator" Grid.Row="2" Grid.ColumnSpan="3" Height="2" IsIndeterminate="True" IsVisible="False"
+                   Foreground="{DynamicResource InkBrush}" Background="Transparent" />
+    </Grid>
+    <ScrollViewer Name="AccountScrollViewer" Classes="settingsScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,12,20">
+      <StackPanel Spacing="16">
+        <TextBlock Name="RestartText" Text="{DynamicResource Ui.Account.Restart}" FontSize="12" TextWrapping="Wrap"
+                   Foreground="{DynamicResource AccountWarningBrush}" IsVisible="False" />
+        <Border Name="AccountCard" Classes="flatMetric accountCard" Padding="16,12" IsVisible="False">
+          <StackPanel Name="AccountPanel" IsVisible="False">
+            <Grid ColumnDefinitions="44,*,Auto,Auto" ColumnSpacing="16">
+              <Border Name="AvatarBorder" Classes="accountAvatar free" Width="44" Height="44" VerticalAlignment="Center">
+                <Path Name="MembershipAvatarIcon" Classes="accountTierIcon free" Width="22" Height="22" />
+              </Border>
+              <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                <TextBlock Name="UsernameText" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Ellipse Width="6" Height="6" Fill="{DynamicResource SuccessBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="{DynamicResource Ui.Account.SignedIn}" FontSize="12" Foreground="{DynamicResource SuccessBrush}" />
+                  <TextBlock Text="·" Classes="accountMuted" />
+                  <TextBlock Name="AccountRegionText" Classes="accountMuted" />
+                </StackPanel>
+                <TextBlock Name="MembershipSummary" FontSize="12" Foreground="{DynamicResource MutedInkBrush}" TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding Text, ElementName=MembershipHintText}" />
+              </StackPanel>
+              <StackPanel Grid.Column="2" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Border Name="TierBadgeBorder" Classes="accountTierBadge free" Padding="8,3" HorizontalAlignment="Right">
+                  <TextBlock Name="TierBadgeText" Classes="accountTierName free" FontSize="12" FontWeight="SemiBold" />
+                </Border>
+                <TextBlock Name="MembershipExpiryText" Classes="accountMuted" FontSize="11" TextAlignment="Right" />
+              </StackPanel>
+              <Button Name="SignOutButton" Grid.Column="3" Content="{DynamicResource Ui.Account.SignOut}" Classes="accountTextAction"
+                      VerticalAlignment="Center" Click="OnSignOutClick" IsVisible="False" />
+            </Grid>
+            <TextBlock Name="MembershipHintText" IsVisible="False" />
+          </StackPanel>
+        </Border>
+        <StackPanel Name="SignInPanel" Spacing="16" Width="460" HorizontalAlignment="Left">
+          <Border Padding="6,0">
+            <StackPanel Spacing="16">
+              <StackPanel Spacing="6">
+                <TextBlock Name="SignInHeading" Text="{DynamicResource Ui.Account.Welcome}" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Name="SignInSubtitle" Text="{DynamicResource Ui.Account.WelcomeSubtitle}" Classes="accountMuted" />
+                <TextBlock Name="RegisterHeading" Text="{DynamicResource Ui.Account.CreateAccount}" FontSize="20" FontWeight="SemiBold" IsVisible="False" />
+                <TextBlock Name="RegisterSubtitle" Text="{DynamicResource Ui.Account.CreateAccountSubtitle}" Classes="accountMuted" IsVisible="False" />
+              </StackPanel>
+              <ComboBox Name="ModeBox" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="OnModeChanged">
+                <ComboBoxItem Content="{DynamicResource Ui.Account.Login}" />
+                <ComboBoxItem Content="{DynamicResource Ui.Account.Register}" />
+              </ComboBox>
+              <StackPanel Name="RegistrationEmailPanel" IsVisible="False" Spacing="7">
+                <TextBlock Text="{DynamicResource Ui.Account.Email}" FontSize="13" />
+                <TextBox Name="RegistrationEmailBox" MaxLength="254" TextInputOptions.ContentType="Email" TextInputOptions.IsSensitive="True" />
+                <TextBlock Text="{DynamicResource Ui.Account.EmailImmutable}" Classes="accountMuted" FontSize="11" />
+              </StackPanel>
+              <StackPanel Spacing="7">
+                <TextBlock Name="LoginIdentifierLabel" Text="{DynamicResource Ui.Account.UsernameOrEmail}" FontSize="13" />
+                <TextBox Name="UsernameBox" MaxLength="254" TextInputOptions.IsSensitive="True" />
+                <TextBlock Name="UsernameHintText" Text="{DynamicResource Ui.Account.LoginIdentifierHint}" Classes="accountMuted" FontSize="11" />
+              </StackPanel>
+              <StackPanel Spacing="7">
+                <TextBlock Text="{DynamicResource Ui.Account.LoginPassword}" FontSize="13" />
+                <TextBox Name="PasswordBox" PasswordChar="•" MaxLength="128"
+                         TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+                <TextBlock Text="{DynamicResource Ui.Account.PasswordHint}" Classes="accountMuted" FontSize="11" />
+              </StackPanel>
+              <StackPanel Name="ConfirmPasswordPanel" IsVisible="False" Spacing="7">
+                <TextBlock Text="{DynamicResource Ui.Account.ConfirmLoginPassword}" FontSize="13" />
+                <TextBox Name="ConfirmPasswordBox" PasswordChar="•" MaxLength="128"
+                         TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+              </StackPanel>
+              <Button Name="SubmitButton" Content="{DynamicResource Ui.Account.Login}" Classes="settingsActionCancel"
+                      HorizontalAlignment="Left" Click="OnSubmitClick" IsEnabled="False" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+        <StackPanel Name="MembershipPanel" IsVisible="False" Spacing="16">
+          <Border Name="ExpiryNoticeBorder" IsVisible="False" Padding="16"
+                  BorderThickness="3,0,0,0" BorderBrush="{DynamicResource WarningBrush}" Background="{DynamicResource AccountWarningTintBrush}">
+            <Grid ColumnDefinitions="20,*" ColumnSpacing="12">
+              <Path Classes="accountIcon" Data="{StaticResource AccountClockGeometry}" VerticalAlignment="Top"
+                    Stroke="{DynamicResource WarningBrush}" Margin="0,3,0,0" />
+              <TextBlock Name="ExpiryNoticeText" Grid.Column="1" FontSize="12" TextWrapping="Wrap" />
+            </Grid>
+          </Border>
+          <Grid Name="CloudUsagePanel" ColumnDefinitions="*,*" ColumnSpacing="16" Grid.IsSharedSizeScope="True" IsVisible="False">
+            <Border Name="StorageCard" Classes="flatMetric accountCard">
+              <Grid RowSpacing="12">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" SharedSizeGroup="AccountUsageHeading" />
+                  <RowDefinition Height="Auto" SharedSizeGroup="AccountUsageBody" />
+                  <RowDefinition Height="Auto" SharedSizeGroup="AccountUsageFooter" />
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Path Classes="accountIcon" Width="16" Height="16" Data="{StaticResource AccountCloudGeometry}" Stroke="{DynamicResource InkBrush}" />
+                  <TextBlock Text="{DynamicResource Ui.Account.CloudStorage}" FontWeight="SemiBold" FontSize="14" />
+                </StackPanel>
+                <Grid Grid.Row="1" ColumnDefinitions="*,80" ColumnSpacing="12">
+                  <StackPanel Spacing="4" VerticalAlignment="Top">
+                    <TextBlock Text="{DynamicResource Ui.Account.UsedStorage}" Classes="accountMuted" />
+                    <TextBlock Name="StorageUsedText" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Name="StorageQuotaText" Classes="accountMuted" />
+                  </StackPanel>
+                  <Grid Grid.Column="1" Width="80" Height="80" VerticalAlignment="Center">
+                    <local:AccountUsageRing Name="StorageUsageRing" TrackBrush="{DynamicResource SoftHoverBrush}"
+                                            ValueBrush="{DynamicResource InkBrush}" IsHitTestVisible="False" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                      <TextBlock Name="StoragePercentText" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                      <TextBlock Text="{DynamicResource Ui.Account.Used}" Classes="accountMuted" FontSize="10" HorizontalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Grid>
+                <StackPanel Grid.Row="2" Spacing="8" VerticalAlignment="Top">
+                  <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="{DynamicResource Ui.Account.AvailableStorage}" Classes="accountMuted" VerticalAlignment="Center" />
+                    <TextBlock Name="StorageRemainingText" Grid.Column="1" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" />
+                  </Grid>
+                </StackPanel>
+              </Grid>
+            </Border>
+            <Border Name="TrafficCard" Grid.Column="1" Classes="flatMetric accountCard">
+              <Grid RowSpacing="12">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" SharedSizeGroup="AccountUsageHeading" />
+                  <RowDefinition Height="Auto" SharedSizeGroup="AccountUsageBody" />
+                  <RowDefinition Height="Auto" SharedSizeGroup="AccountUsageFooter" />
+                </Grid.RowDefinitions>
+                <Grid ColumnDefinitions="16,*,Auto" ColumnSpacing="8">
+                  <Path Classes="accountIcon" Width="16" Height="16" Data="{StaticResource AccountDownloadGeometry}" Stroke="{DynamicResource InkBrush}" />
+                  <TextBlock Grid.Column="1" Text="{DynamicResource Ui.Account.SyncTraffic}" FontWeight="SemiBold" FontSize="14" />
+                  <TextBlock Name="TrafficPeriodText" Grid.Column="2" Text="{DynamicResource Ui.Account.MembershipYear}" Classes="accountMuted" />
+                </Grid>
+                <Grid Grid.Row="1" ColumnDefinitions="*,80" ColumnSpacing="12">
+                  <StackPanel Spacing="4" VerticalAlignment="Top">
+                    <TextBlock Text="{DynamicResource Ui.Account.AnnualDownloadUsed}" Classes="accountMuted" />
+                    <TextBlock Name="AnnualDownloadUsedText" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Name="AnnualDownloadQuotaText" Classes="accountMuted" />
+                    <TextBlock Name="TrafficAllowancePeriodText" Classes="accountMuted" FontSize="11" />
+                  </StackPanel>
+                  <Grid Grid.Column="1" Width="80" Height="80" VerticalAlignment="Center">
+                    <local:AccountUsageRing Name="TrafficUsageRing" TrackBrush="{DynamicResource SoftHoverBrush}"
+                                            ValueBrush="{DynamicResource InkBrush}" IsHitTestVisible="False" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                      <TextBlock Name="TrafficPercentText" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                      <TextBlock Text="{DynamicResource Ui.Account.AnnualDownloadUsage}" Classes="accountMuted" FontSize="10" HorizontalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Grid>
+                <StackPanel Grid.Row="2" Spacing="8" VerticalAlignment="Top">
+                  <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="{DynamicResource Ui.Account.AnnualDownloadRemaining}" Classes="accountMuted" VerticalAlignment="Center" />
+                    <TextBlock Name="DownloadRemainingText" Grid.Column="1" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="{DynamicResource Ui.Account.MonthDownload}" Classes="accountMuted" FontSize="11" />
+                    <TextBlock Name="DownloadUsedText" Grid.Column="1" Classes="accountMuted" FontSize="11" />
+                  </Grid>
+                  <TextBlock Name="DownloadCreditText" Classes="accountMuted" FontSize="11" IsVisible="False" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </Grid>
+          <Border Name="CloudLockedPanel" Classes="flatMetric accountCard" IsVisible="False">
+            <Grid ColumnDefinitions="36,*,Auto" ColumnSpacing="12">
+              <Border Background="{DynamicResource SoftHoverBrush}" Width="36" Height="36" VerticalAlignment="Center">
+                <Path Classes="accountIcon" Data="{StaticResource AccountLockGeometry}" />
+              </Border>
+              <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                <TextBlock Name="CloudLockedTitleText" FontSize="15" FontWeight="SemiBold" />
+                <TextBlock Name="CloudLockedHintText" Classes="accountMuted" />
+              </StackPanel>
+              <Button Name="ViewPlusButton" Grid.Column="2" Content="{DynamicResource Ui.Account.ViewPlus}" Classes="quiet"
+                      VerticalAlignment="Center" Click="OnViewPlansClick" />
+            </Grid>
+          </Border>
+          <Border Name="DevicesCard" Classes="flatMetric accountCard">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Spacing="5">
+                  <TextBlock Text="{DynamicResource Ui.Account.SignedInDevices}" Classes="settingsSectionTitle" />
+                  <TextBlock Name="DeviceCapacityText" Classes="accountMuted" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="7" HorizontalAlignment="Right" VerticalAlignment="Center">
+                  <TextBlock Name="DeviceCountText" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                  <StackPanel Name="DeviceSlotsPanel" Orientation="Horizontal" Spacing="4" />
+                </StackPanel>
+              </Grid>
+              <StackPanel Name="DeviceListPanel" />
+              <TextBlock Name="DeviceEmptyText" Text="{DynamicResource Ui.Account.NoDevices}" Classes="accountMuted" IsVisible="False" />
+            </StackPanel>
+          </Border>
+          <StackPanel Name="MembershipPlansPanel" Spacing="14">
+            <StackPanel Spacing="5">
+              <TextBlock Text="{DynamicResource Ui.Account.Plans}" Classes="settingsSectionTitle" />
+              <TextBlock Text="{DynamicResource Ui.Account.PlansSubtitle}" Classes="accountMuted" />
+              <TextBlock Name="NoRefundPolicyText" Text="{DynamicResource Ui.Account.NoRefundPolicy}" Classes="accountMuted" FontSize="12" />
+            </StackPanel>
+            <Grid Name="PlanCardsGrid" ColumnDefinitions="*,*,*" ColumnSpacing="12">
+              <Border Name="FreePlanCard" Classes="flatMetric accountCard accountPlanCard" BorderThickness="1">
+                <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="12">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="Free" Classes="accountPlanName" />
+                    <TextBlock Text="{DynamicResource Ui.Account.FreeTagline}" Classes="accountMuted" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="1" Spacing="6">
+                    <TextBlock Text="¥0" Classes="accountPlanPrice" />
+                    <TextBlock Text="{DynamicResource Ui.Account.FreePeriod}" Classes="accountMuted" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="2" Spacing="12">
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                    <StackPanel Name="FreeBenefitsPanel" Spacing="10" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="3" Spacing="12">
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                    <TextBlock Text="{DynamicResource Ui.Account.FreeFooter}" Classes="accountMuted" FontSize="11" MinHeight="48" />
+                  </StackPanel>
+                  <Button Name="FreePlanButton" Grid.Row="4" Content="{DynamicResource Ui.Account.FreePeriod}" Classes="quiet"
+                          HorizontalAlignment="Stretch" IsEnabled="False" />
+                </Grid>
+              </Border>
+              <Border Name="LifetimePlanCard" Grid.Column="1" Classes="flatMetric accountCard accountPlanCard" BorderThickness="1">
+                <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="12">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{DynamicResource Ui.Account.LifetimeName}" Classes="accountPlanName" />
+                    <TextBlock Text="{DynamicResource Ui.Account.LifetimeTagline}" Classes="accountMuted" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="1" Spacing="6">
+                    <TextBlock Name="LifetimePriceText" Text="—" Classes="accountPlanPrice" />
+                    <TextBlock Text="{DynamicResource Ui.Account.LifetimePeriod}" Classes="accountMuted" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="2" Spacing="12">
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                    <StackPanel Name="LifetimeBenefitsPanel" Spacing="10" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="3" Spacing="12">
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                    <TextBlock Text="{DynamicResource Ui.Account.LifetimeFooter}" Classes="accountMuted" FontSize="11" MinHeight="48" />
+                  </StackPanel>
+                  <Button Name="LifetimePurchaseButton" Grid.Row="4" Content="{DynamicResource Ui.Account.UnlockFeatures}"
+                          Classes="settingsActionSave" HorizontalAlignment="Stretch" IsEnabled="False" Click="OnPlanPurchaseClick" />
+                </Grid>
+              </Border>
+              <Border Name="PlusPlanCard" Grid.Column="2" Classes="flatMetric accountCard accountPlanCard recommended" BorderThickness="1">
+                <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="12">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="Plus" Classes="accountPlanName" />
+                      <Border Grid.Column="1" Background="{DynamicResource AccountPlusTintBrush}" Padding="6,3" VerticalAlignment="Center">
+                        <TextBlock Text="{DynamicResource Ui.Account.Recommended}" FontSize="10" Foreground="{DynamicResource AccountPlusAccentBrush}" />
+                      </Border>
+                    </Grid>
+                    <TextBlock Text="{DynamicResource Ui.Account.PlusTagline}" Classes="accountMuted" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="1" Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <TextBlock Name="PlusPriceText" Text="—" Classes="accountPlanPrice" />
+                      <TextBlock Text="{DynamicResource Ui.Account.PerYear}" Classes="accountMuted" VerticalAlignment="Bottom" Margin="0,0,0,5" />
+                    </StackPanel>
+                    <TextBlock Text="{DynamicResource Ui.Account.PlusPeriod}" Classes="accountMuted" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="2" Spacing="12">
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                    <StackPanel Name="PlusBenefitsPanel" Spacing="10" />
+                  </StackPanel>
+                  <StackPanel Grid.Row="3" Spacing="12">
+                    <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+                    <TextBlock Text="{DynamicResource Ui.Account.PlusFooter}" Classes="accountMuted" FontSize="11" MinHeight="48" />
+                  </StackPanel>
+                  <Button Name="PlusPurchaseButton" Grid.Row="4" Content="{DynamicResource Ui.Account.OpenPlus}"
+                          Classes="settingsActionSave" HorizontalAlignment="Stretch" IsEnabled="False" Click="OnPlanPurchaseClick" />
+                </Grid>
+              </Border>
+            </Grid>
+            <TextBlock Name="PlanPurchaseHintText" Text="{DynamicResource Ui.Account.OrderActivationHint}" Classes="accountMuted" FontSize="11" />
+          </StackPanel>
+          <Border Classes="flatMetric accountCard">
+            <StackPanel Spacing="10">
+              <TextBlock Text="{DynamicResource Ui.Account.ActivationTitle}" Classes="settingsSectionTitle" />
+              <TextBlock Text="{DynamicResource Ui.Account.ActivationHint}" Classes="accountMuted" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBox Name="ActivationCodeBox" MaxLength="80" PlaceholderText="{DynamicResource Ui.Account.ActivationPlaceholder}"
+                         TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True"
+                         TextChanged="OnActivationCodeChanged" />
+                <Button Name="ActivationRedeemButton" Grid.Column="1" Content="{DynamicResource Ui.Account.ActivationRedeem}"
+                        Classes="quiet" IsEnabled="False" Click="OnActivationRedeemClick" />
+              </Grid>
+              <TextBlock Name="ActivationStatusText" Classes="accountMuted" IsVisible="False" />
+            </StackPanel>
+          </Border>
+          <Border Classes="flatSubsection" Padding="16,0">
+            <Expander Name="OrdersExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Account.Orders}" IsExpanded="False">
+              <StackPanel Spacing="10" Margin="0,12,0,0">
+                <TextBlock Name="OrderEmptyText" Text="{DynamicResource Ui.Account.NoOrders}" Classes="accountMuted" />
+                <StackPanel Name="OrderListPanel" Spacing="10" />
+              </StackPanel>
+            </Expander>
+          </Border>
+        </StackPanel>
+        <Border Name="AccountSettingsCard" Classes="flatMetric accountCard" IsVisible="False">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{DynamicResource Ui.Account.ProfileSecurity}" Classes="settingsSectionTitle" />
+            <Expander Name="ProfileExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Account.EditProfile}" IsExpanded="False">
+              <StackPanel Spacing="10" Margin="0,12,0,0">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                  <StackPanel Spacing="6"><TextBlock Text="{DynamicResource Ui.Account.Username}" FontSize="13" /><TextBox Name="ProfileUsernameBox" MaxLength="32" TextInputOptions.IsSensitive="True" /></StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="{DynamicResource Ui.Account.Email}" FontSize="13" /><TextBox Name="ProfileEmailBox" IsReadOnly="True" PlaceholderText="{DynamicResource Ui.Account.NoEmail}" TextInputOptions.IsSensitive="True" Background="{DynamicResource SoftHoverBrush}" Foreground="{DynamicResource MutedInkBrush}" /></StackPanel>
+                </Grid>
+                <TextBlock Text="{DynamicResource Ui.Account.UsernameHint}" Classes="accountMuted" FontSize="11" />
+                <TextBlock Text="{DynamicResource Ui.Account.EmailImmutable}" Classes="accountMuted" FontSize="11" />
+                <TextBlock Text="{DynamicResource Ui.Account.CurrentPassword}" FontSize="13" />
+                <TextBox Name="ProfilePasswordBox" PasswordChar="•" MaxLength="128" TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+                <Button Name="ProfileSaveButton" Content="{DynamicResource Ui.Account.SaveProfile}" Classes="settingsActionSave" HorizontalAlignment="Left" Click="OnProfileSaveClick" />
+              </StackPanel>
+            </Expander>
+            <Expander Name="PasswordExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Account.ChangePassword}" IsExpanded="False">
+              <StackPanel Spacing="10" Margin="0,12,0,0">
+                <TextBlock Text="{DynamicResource Ui.Account.CurrentPassword}" FontSize="13" />
+                <TextBox Name="CurrentPasswordBox" PasswordChar="•" MaxLength="128" TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                  <StackPanel Spacing="6"><TextBlock Text="{DynamicResource Ui.Account.NewPassword}" FontSize="13" /><TextBox Name="NewPasswordBox" PasswordChar="•" MaxLength="128" TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" /></StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="{DynamicResource Ui.Account.ConfirmNewPassword}" FontSize="13" /><TextBox Name="ConfirmNewPasswordBox" PasswordChar="•" MaxLength="128" TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" /></StackPanel>
+                </Grid>
+                <TextBlock Text="{DynamicResource Ui.Account.PasswordChangeHint}" Classes="accountMuted" />
+                <Button Name="PasswordSaveButton" Content="{DynamicResource Ui.Account.ChangePassword}" Classes="settingsActionSave" HorizontalAlignment="Left" Click="OnPasswordSaveClick" />
+              </StackPanel>
+            </Expander>
+            <Border Height="1" Background="{DynamicResource HairlineBrush}" />
+            <Button Name="CloseAccountButton" Content="{DynamicResource Ui.Account.CloseAccount}" Classes="quiet" HorizontalAlignment="Left" Click="OnCloseAccountClick" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

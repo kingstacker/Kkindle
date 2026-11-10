@@ -127,6 +127,11 @@ public partial class MobileShell : UserControl
             if (_modules.IsDisposed) return;
             await ConfirmAsync("设备已失效", args.Message, "知道了");
         });
+        _modules.Accounts.Monitor.MembershipExpired += (_, args) => Dispatcher.UIThread.Post(async () =>
+        {
+            if (_modules.IsDisposed) return;
+            await ConfirmAsync("会员已过期", args.Message, "知道了");
+        });
         _modules.Accounts.Monitor.Start();
     }
 
@@ -358,10 +363,10 @@ public partial class MobileShell : UserControl
             if (stored.Settings is not { Enabled: true, AutomaticSyncEnabled: true, IsConfigured: true }) return;
             var result = await Sync.RunAsync(stored, null, (_, _) => Task.FromResult(false), CancellationToken.None, operation);
             if (result is null) ShowToast("同步发现待确认的删除，请到 S3 同步页处理");
-            else if (result.Changed)
+            else
             {
-                NativeLibraryChanged?.Invoke();
-                if (CurrentPage is LibraryPage library) await library.ReloadAsync();
+                if (result.Changed || Preferences.Current.ShowBookSyncStatus) NativeLibraryChanged?.Invoke();
+                if (result.Changed && CurrentPage is LibraryPage library) await library.ReloadAsync();
             }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)

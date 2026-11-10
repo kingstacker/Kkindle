@@ -96,14 +96,19 @@ public sealed partial class KindleAnnotationSyncServiceTests
         KindleAnnotationSnapshot snapshot,
         string sourceBook) : IKindleDeviceService
     {
-        public KindleAnnotationSnapshot Snapshot { get; } = snapshot;
+        public KindleAnnotationSnapshot Snapshot { get; private set; } = snapshot;
         public List<KindleAnnotationMutation> Mutations { get; } = [];
         public int ExportCount { get; private set; }
+        public int WriteCount { get; private set; }
+        public bool SnapshotUnavailable { get; init; }
+        public bool ApplyMutationsToSnapshot { get; init; }
+        public Exception? ExportFailure { get; init; }
+        public Exception? WriteFailure { get; set; }
 
         public Task<KindleAnnotationSnapshot?> ReadAnnotationSnapshotAsync(
             KindleDevice device,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<KindleAnnotationSnapshot?>(Snapshot);
+            Task.FromResult<KindleAnnotationSnapshot?>(SnapshotUnavailable ? null : Snapshot);
 
         public Task<string> ExportBookAsync(
             KindleDevice device,
@@ -113,6 +118,7 @@ public sealed partial class KindleAnnotationSyncServiceTests
             CancellationToken cancellationToken = default)
         {
             ExportCount++;
+            if (ExportFailure is not null) throw ExportFailure;
             Directory.CreateDirectory(destinationDirectory);
             var destination = Path.Combine(destinationDirectory, "native.azw3");
             File.Copy(sourceBook, destination, overwrite: true);
@@ -125,7 +131,22 @@ public sealed partial class KindleAnnotationSyncServiceTests
             IReadOnlyList<KindleAnnotationMutation> mutations,
             CancellationToken cancellationToken = default)
         {
+            WriteCount++;
+            if (WriteFailure is not null) throw WriteFailure;
             Mutations.AddRange(mutations);
+            if (ApplyMutationsToSnapshot)
+                Snapshot = Snapshot with
+                {
+                    Records = Snapshot.Records.Where(record => !mutations.Any(mutation =>
+                            mutation.AnnotationId == record.AnnotationId && mutation.BookId == record.Book.BookId))
+                        .Concat(mutations.Select(mutation => new KindleAnnotationRecord(mutation.AnnotationId,
+                            new KindleAnnotationBookIdentity(mutation.BookId,
+                                Snapshot.Records.FirstOrDefault()?.Book.Asin, Snapshot.Records.FirstOrDefault()?.Book.Guid),
+                            mutation.Dataset, mutation.Dataset == 1 ? KindleClippingType.Highlight : KindleClippingType.Note,
+                            mutation.Start, mutation.End, mutation.CreatedTime, mutation.ModifiedTime,
+                            mutation.NoteText, mutation.SerializedPayload)))
+                        .ToArray()
+                };
             return Task.FromResult(new KindleAnnotationWriteResult(
                 mutations.Count,
                 currentSnapshot.Sha256,

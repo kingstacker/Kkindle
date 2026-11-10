@@ -39,7 +39,8 @@ public sealed class TypesetEngine : IDisposable
     public ChapterLayout Compose(
         ChapterContent content,
         TypesetLayoutOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? pageStartTextOffset = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var context = new ComposerContext
@@ -48,6 +49,8 @@ public sealed class TypesetEngine : IDisposable
             Fonts = _fonts,
             Shaper = _shaper,
             CancellationToken = cancellationToken,
+            PageStartTextOffset = pageStartTextOffset is >= 0 && pageStartTextOffset < content.BodyText.Length
+                ? pageStartTextOffset : null,
         };
         var cells = new CellFactory(context);
         var pages = new PageBuilder(options);

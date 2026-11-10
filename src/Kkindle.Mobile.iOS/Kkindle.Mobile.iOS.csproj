@@ -8,7 +8,7 @@
     <RootNamespace>Kkindle.iOSHead</RootNamespace>
     <AssemblyName>Kkindle.Mobile.iOS</AssemblyName>
     <ApplicationId>com.kingstacker.kkindle</ApplicationId>
-    <ApplicationTitle>kkindle</ApplicationTitle>
+    <ApplicationTitle>Kkindle</ApplicationTitle>
     <AppIcon>Kkindle</AppIcon>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>1.1.3</ApplicationDisplayVersion>

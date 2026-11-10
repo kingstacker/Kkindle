@@ -60,16 +60,81 @@ struct AccountMembership: Decodable {
     let proExpiresAt: String?; let deviceLimit: Int; let loggedInDeviceCount: Int; let activatedDeviceCount: Int
     let uploadBytes: Int64; let uploadQuota: Int64; let downloadBytes: Int64; let downloadRemainingBytes: Int64
     let downloadCreditBytes: Int64; let storageBytes: Int64; let storageQuota: Int64; let storageAddonNextExpiresAt: String?
-    var tierName: String { tier == "pro" ? "Pro 会员" : tier == "lifetime" ? "终生功能会员" : "Free 会员" }
+    let plusRenewalLimitAt: String?; let pendingPlusDays: Int?
+    let plusDownloadQuotaBytes: Int64?; let plusDownloadUsedBytes: Int64?; let plusDownloadExpiresAt: String?
+    var tierName: String { tier == "pro" ? "Plus 会员" : tier == "lifetime" ? "功能解锁" : "Free" }
+    /// The plan as sold, like the desktop: a lapsed Plus no longer counts as Plus.
+    var plan: String {
+        if tier == "pro", let expiry = Self.date(proExpiresAt), expiry > Date() { return "plus" }
+        return tier == "lifetime" ? "lifetime" : "free"
+    }
+    var planName: String { plan == "plus" ? "Plus 会员" : plan == "lifetime" ? "功能解锁" : "Free" }
+    var isPlusExpired: Bool { Self.date(proExpiresAt).map { $0 <= Date() } ?? false }
+    var planExpiryText: String {
+        if plan == "plus", let expiry = Self.date(proExpiresAt) { return "有效至 " + Self.day(expiry) }
+        return plan == "lifetime" ? "永久有效" : isPlusExpired ? "Plus 已到期" : "永久免费"
+    }
+    var plusDownloadPeriodText: String? { Self.date(plusDownloadExpiresAt).map { "本期有效至 " + Self.day($0) } }
+    /// The desktop's expiry notice. The cloud data retention runs one UTC calendar month from expiry.
+    var plusExpiryMessage: String? {
+        guard let expiry = Self.date(proExpiresAt), expiry <= Date() else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        guard let retention = calendar.date(byAdding: .month, value: 1, to: expiry) else { return nil }
+        return Date() < retention
+            ? "Plus 已于 \(Self.day(expiry)) 到期。Kkindle 云同步与下载已停用，云端书籍及其他同步数据保留至 \(Self.day(retention))；在保留期内续费可恢复访问，保留期结束后自动销毁。"
+            : "Plus 已于 \(Self.day(expiry)) 到期。Kkindle 云同步与下载已停用，云端书籍及其他同步数据的一个月保留期已结束，数据将自动销毁。"
+    }
+    func canExtendPlus(days: Int) -> Bool {
+        guard days > 0 && days <= 1825 && (pendingPlusDays ?? 0) >= 0 else { return false }
+        let now = Date()
+        let start = max(Self.date(proExpiresAt) ?? now, now)
+        let limit = Self.date(plusRenewalLimitAt) ?? Calendar(identifier: .gregorian).date(byAdding: .year, value: 5, to: now)!
+        return start.addingTimeInterval(Double(days + (pendingPlusDays ?? 0)) * 86_400) <= limit
+    }
+    private static func date(_ text: String?) -> Date? {
+        guard let text else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
+    }
+    private static func day(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy/MM/dd"
+        return formatter.string(from: date)
+    }
 }
 struct DeviceFeatureStatus: Decodable {
     let membership: AccountMembership; let devices: [AccountDevice]; let currentDeviceId: String
     let isCurrentDeviceActive: Bool; let canUseFeatures: Bool
+    let canUseAccountCloudSync: Bool?
+}
+struct ActivationCodeRedemption: Decodable {
+    let codeId: String; let kind: String; let years: Int; let redeemedAt: String; let status: DeviceFeatureStatus
+    let alreadyRedeemed: Bool?
 }
 struct MembershipProduct: Decodable, Identifiable {
     let id: String; let name: String; let kind: String; let priceMinor: Int; let currency: String
     let durationDays: Int; let bytes: Int64; let description: String
-    var price: String { String(format: "%.2f %@", Double(priceMinor) / 100, currency) }
+    /// The desktop's display format: "¥128", "¥88.5", or "12 XYZ" for other currencies.
+    var price: String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0; formatter.maximumFractionDigits = 2
+        formatter.usesGroupingSeparator = false
+        let amount = formatter.string(from: NSNumber(value: Double(priceMinor) / 100)) ?? String(Double(priceMinor) / 100)
+        switch currency {
+        case "CNY": return "¥" + amount
+        case "USD": return "$" + amount
+        case "EUR": return "€" + amount
+        default: return amount + " " + currency
+        }
+    }
 }
 struct PurchaseOrder: Decodable, Identifiable {
     let id: String; let accountId: String; let productId: String; let productName: String; let kind: String
@@ -164,6 +229,7 @@ struct ReadingDashboard: Decodable {
 struct Medal: Decodable, Identifiable {
     let name: String
     let rule: String
+    let icon: String
     let isUnlocked: Bool
     let fraction: Double
     var id: String { name }
@@ -191,6 +257,28 @@ struct TxtReview: Decodable, Identifiable { let id: Int64; let name: String }
 struct TxtRules: Codable, Equatable { var encoding = 0; var headingPreset = 0; var customHeadingPattern = ""; var recognizeVolumes = true }
 struct TxtChapter: Decodable, Identifiable { let number: Int; let title: String; let isVolume: Bool; var id: Int { number } }
 struct TxtPreview: Decodable { let chapterCount: Int; let detectedEncoding: String; let chapters: [TxtChapter]; let hasPreviousPage: Bool; let hasNextPage: Bool }
+
+/// Account storage and transfer sizes in the desktop's format, such as "1.5 GiB".
+func memberSize(_ bytes: Int64) -> String {
+    let value = max(0, bytes)
+    let (amount, unit): (Double, String) = value >= 1_073_741_824 ? (Double(value) / 1_073_741_824, "GiB")
+        : value >= 1_048_576 ? (Double(value) / 1_048_576, "MiB")
+        : value >= 1024 ? (Double(value) / 1024, "KiB") : (Double(value), "B")
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = 0; formatter.maximumFractionDigits = 2
+    formatter.usesGroupingSeparator = false
+    return (formatter.string(from: NSNumber(value: amount)) ?? String(amount)) + " " + unit
+}
+
+/// The desktop usage ring's percentage, including its "<0.1%" floor.
+func memberPercent(_ ratio: Double) -> String {
+    let percent = max(0, ratio) * 100
+    if percent > 0 && percent < 0.1 { return "<0.1%" }
+    let text = String(format: "%.1f", percent)
+    return (text.hasSuffix(".0") ? String(text.dropLast(2)) : text) + "%"
+}
 
 func readingDuration(_ seconds: Int64) -> String {
     seconds < 3600 ? String(format: "%.0f 分钟", Double(seconds) / 60) : String(format: "%.1f 小时", Double(seconds) / 3600)

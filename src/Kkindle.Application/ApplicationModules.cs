@@ -32,7 +32,7 @@ public sealed class ApplicationModules : IDisposable
         var regionalOptions = options with { Paths = Paths };
         Library = new LibraryModule(regionalOptions);
         Reader = new ReaderModule(regionalOptions, Library);
-        Ai = new AiModule(regionalOptions, StartupSettings, Reader, Accounts.Membership);
+        Ai = new AiModule(regionalOptions, StartupSettings, Reader);
         Sync = new SyncModule(regionalOptions, Accounts.Service, DataRegion, Accounts.Membership);
         Integrations = new IntegrationModule(regionalOptions);
         Plugins = new PluginManager(Paths);

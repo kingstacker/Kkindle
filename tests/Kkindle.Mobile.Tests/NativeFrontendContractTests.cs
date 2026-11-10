@@ -24,10 +24,14 @@ public sealed class NativeFrontendContractTests
         Assert.Equal("所选文字", reader.GetProperty("selectedText").GetString());
         Assert.Equal(JsonValueKind.Null, reader.GetProperty("error").ValueKind);
 
-        using var preferences = JsonDocument.Parse(Serialize(new MobilePreferences { ReaderTheme = ReaderTheme.Ink }));
+        using var preferences = JsonDocument.Parse(Serialize(new MobilePreferences
+            { ReaderTheme = ReaderTheme.Ink, GalleryMode = true, ColorfulMode = true, ShowBookSyncStatus = true }));
         Assert.Equal(5, preferences.RootElement.GetProperty("readerTheme").GetInt32());
         Assert.Equal(1.35, preferences.RootElement.GetProperty("readerFontScale").GetDouble());
         Assert.Equal(0, preferences.RootElement.GetProperty("readerParagraphSpacing").GetDouble());
+        Assert.True(preferences.RootElement.GetProperty("galleryMode").GetBoolean());
+        Assert.True(preferences.RootElement.GetProperty("colorfulMode").GetBoolean());
+        Assert.True(preferences.RootElement.GetProperty("showBookSyncStatus").GetBoolean());
     }
 
     [Fact]
@@ -74,10 +78,14 @@ public sealed class NativeFrontendContractTests
         Assert.Equal(1.45, choice.ReaderFontScale);
         Assert.Equal(24, choice.ReaderBodyPadding);
         Assert.Equal(0, choice.ReaderParagraphSpacing);
+        Assert.False(choice.GalleryMode);
+        Assert.False(choice.ColorfulMode);
+        Assert.False(choice.ShowBookSyncStatus);
 
-        using var spacingDocument = JsonDocument.Parse("""{"readerParagraphSpacing":0.5}""");
+        using var spacingDocument = JsonDocument.Parse("""{"readerParagraphSpacing":0.5,"galleryMode":true}""");
         var spaced = Read(spacingDocument.RootElement, choice, IOSNativeJsonContext.Default.MobilePreferences);
         Assert.Equal(0.5, spaced.ReaderParagraphSpacing);
+        Assert.True(spaced.GalleryMode);
         Assert.Equal(choice.ReaderLineHeight, spaced.ReaderLineHeight);
     }
 
@@ -118,15 +126,40 @@ public sealed class NativeFrontendContractTests
     }
 
     [Fact]
+    public void LibraryFilterOptionsAndIdsUseTheGeneratedNativeWireContract()
+    {
+        var id = Guid.NewGuid();
+        var options = new LibraryFilterOptions(["作者甲", "作者乙"], ["文学"], ["EPUB", "PDF"], ["小说"]);
+        using var document = JsonDocument.Parse(Serialize(Data(("options", options), ("ids", new[] { id }))));
+        var encoded = document.RootElement.GetProperty("options");
+        Assert.Equal("作者甲", encoded.GetProperty("authors")[0].GetString());
+        Assert.Equal("文学", encoded.GetProperty("tags")[0].GetString());
+        Assert.Equal("PDF", encoded.GetProperty("formats")[1].GetString());
+        Assert.Equal("小说", encoded.GetProperty("categories")[0].GetString());
+        Assert.Equal(id.ToString(), document.RootElement.GetProperty("ids")[0].GetString());
+    }
+
+    [Fact]
+    public void ReadingMedalWireContractIncludesDesktopArtworkAndProgress()
+    {
+        var medals = new[] { new ReadingMedal("测试勋章", "测试条件", 1, 4, "M3,5 L12,20") };
+        using var document = JsonDocument.Parse(Serialize(medals));
+        var medal = document.RootElement[0];
+        Assert.Equal("M3,5 L12,20", medal.GetProperty("icon").GetString());
+        Assert.Equal(0.25, medal.GetProperty("fraction").GetDouble());
+        Assert.False(medal.GetProperty("isUnlocked").GetBoolean());
+    }
+
+    [Fact]
     public void MembershipDevicesAndOrdersUseTheGeneratedNativeWireContract()
     {
         var user = Guid.NewGuid(); var device = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
-        var member = new AccountMembership(user, AccountRegion.International, "lifetime", true, null, 5, 1, 1,
+        var member = new AccountMembership(user, AccountRegion.International, "lifetime", true, null, 6, 1, 1,
             128, 1024, 64, 2048, 1024, 256, 4096, null);
         var status = new DeviceFeatureStatus(member, [new(device, "Fictional native device", "iOS", "active", now, now)], device);
         using var document = JsonDocument.Parse(Serialize(status));
         Assert.Equal(1, document.RootElement.GetProperty("membership").GetProperty("region").GetInt32());
-        Assert.Equal(5, document.RootElement.GetProperty("membership").GetProperty("deviceLimit").GetInt32());
+        Assert.Equal(6, document.RootElement.GetProperty("membership").GetProperty("deviceLimit").GetInt32());
         Assert.True(document.RootElement.GetProperty("isCurrentDeviceActive").GetBoolean());
         Assert.True(document.RootElement.GetProperty("canUseFeatures").GetBoolean());
         var restored = document.RootElement.Deserialize(IOSNativeJsonContext.Default.DeviceFeatureStatus)!;

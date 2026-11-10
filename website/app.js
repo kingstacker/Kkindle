@@ -9,6 +9,7 @@ const translations = {
     menuLabel: "打开菜单",
     navProduct: "产品",
     navFeatures: "功能",
+    navMembership: "会员",
     navDownload: "下载",
     navManual: "使用手册",
     navChangelog: "更新日志",
@@ -57,7 +58,64 @@ const translations = {
     aiTag1: "AI 阅读助手",
     aiTag2: "词典查询",
     aiTag3: "阅读数据",
-    aboutKicker: "ABOUT KKINDLE",
+    membershipKicker: "MEMBERSHIP",
+    membershipTitle: "选择适合你的阅读方式。",
+    membershipLead: "会员绑定 Kkindle 账号。中国区与国际区的账号和同步数据相互独立，不互通。",
+    membershipRegionLabel: "服务器区域",
+    regionChina: "中国区",
+    regionInternational: "国际区",
+    regionUnavailable: "暂未上线",
+    intlTitle: "国际区会员暂未上线",
+    intlBody: "上线后将在这里公布国际区的价格与会员权益。",
+    planFreeTagline: "让阅读自由开始",
+    planFreePeriod: "永久免费",
+    planFreeFeature1: "畅享完整本地阅读体验",
+    planFreeFeature2: "USB Kindle 书籍双向同步",
+    planFreeFeature3: "USB Kindle 批注双向同步",
+    planFreeFeature4: "插件扩展与自定义 AI 接口",
+    planFreeFoot: "不含跨端同步与官方云空间",
+    planUnlockName: "功能解锁",
+    planUnlockTagline: "你的书库，由你掌控",
+    planUnlockPeriod: "一次购买，永久使用",
+    planUnlockFeature1: "包含全部 Free 权益",
+    planUnlockFeature2: "解锁自定义 S3 云同步",
+    planUnlockFeature3: "进度与批注完整同步",
+    planUnlockFeature4: "存储容量由自己掌控",
+    planUnlockFeature5: "一次买断，无需续费",
+    planUnlockFoot: "需自行配置 S3 兼容存储服务，存储与流量费用由用户承担",
+    planPlusTagline: "让每一本书，随你而行",
+    planPerYear: "/年",
+    planPlusPeriod: "折合约 ¥10.67/月 · 按年支付",
+    planPlusFeature1: "10GB 私人书籍云空间",
+    planPlusFeature2: "书籍与阅读数据自动同步",
+    planPlusFeature3: "无需配置存储桶，登录即用",
+    planPlusFeature4: "多平台书库随时访问",
+    planPlusFeature5: "包含全部功能解锁权益",
+    planPlusFoot: "10GB 云空间 · 每会员年度 150GB 官方云下载额度 · 最多同步 6 台设备",
+    compareCaption: "中国区会员权益对比",
+    compareFeature: "功能",
+    compareIncluded: "包含",
+    compareExcluded: "不包含",
+    comparePrice: "价格",
+    compareFreePrice: "免费",
+    compareUnlockPrice: "¥88 永久",
+    comparePlusPrice: "¥128/年",
+    compareLocal: "本地书库管理与阅读",
+    compareUsbBooks: "USB Kindle 书籍双向同步",
+    compareUsbNotes: "USB Kindle 批注双向同步",
+    comparePlugins: "插件功能",
+    compareAi: "自定义 AI 接口",
+    compareProgress: "跨端阅读进度同步",
+    compareNotes: "跨端书签、批注云同步",
+    compareBooks: "跨端书籍文件云同步",
+    compareDevices: "云同步设备数量",
+    compareDeviceCount: "6 台",
+    compareS3: "自定义 S3",
+    compareStorage: "官方云空间",
+    compareTraffic: "官方云下载流量",
+    compareTrafficValue: "150GB/年",
+    compareNote: "功能解锁用户使用自备 S3，同步存储与流量费用自行承担。USB Kindle 双向批注同步的兼容范围因设备型号和书籍格式而异。",
+    aboutKicker: "About Kkindle",
     aboutTitle: "面向个人阅读的开源桌面工作台。",
     aboutBody: "Kkindle 是一款面向 Windows、Linux、macOS、Android 和 iOS 的开源电子书书库与 Kindle 管理工具。它将书库整理、阅读、批注和设备传输放在同一个本地优先的工作流中。",
     aboutPoint1: "Windows / Linux / macOS / Android / iOS",
@@ -148,6 +206,7 @@ const translations = {
     menuLabel: "Open menu",
     navProduct: "Product",
     navFeatures: "Features",
+    navMembership: "Membership",
     navDownload: "Download",
     navManual: "Chinese manual",
     navChangelog: "Changelog",
@@ -196,7 +255,64 @@ const translations = {
     aiTag1: "AI reading assistant",
     aiTag2: "Dictionary lookup",
     aiTag3: "Reading data",
-    aboutKicker: "ABOUT KKINDLE",
+    membershipKicker: "MEMBERSHIP",
+    membershipTitle: "Choose the way you read.",
+    membershipLead: "Memberships belong to your Kkindle account. Accounts and synced data are kept separate between the China and International regions.",
+    membershipRegionLabel: "Server region",
+    regionChina: "China",
+    regionInternational: "International",
+    regionUnavailable: "Not yet available",
+    intlTitle: "International memberships are not available yet",
+    intlBody: "Pricing and membership details for the International region will be published here at launch.",
+    planFreeTagline: "Start reading freely",
+    planFreePeriod: "Free forever",
+    planFreeFeature1: "The full local reading experience",
+    planFreeFeature2: "Two-way USB Kindle book sync",
+    planFreeFeature3: "Two-way USB Kindle annotation sync",
+    planFreeFeature4: "Plugins and custom AI APIs",
+    planFreeFoot: "No sync across devices or official cloud storage",
+    planUnlockName: "Feature Unlock",
+    planUnlockTagline: "Your library, in your hands",
+    planUnlockPeriod: "Buy once, use forever",
+    planUnlockFeature1: "All Free features included",
+    planUnlockFeature2: "Cloud sync with your own S3 storage",
+    planUnlockFeature3: "Full sync of reading progress and annotations",
+    planUnlockFeature4: "Storage capacity under your control",
+    planUnlockFeature5: "One-time purchase, no renewals",
+    planUnlockFoot: "Requires your own S3-compatible storage service; you cover its storage and traffic costs",
+    planPlusTagline: "Your books, wherever you go",
+    planPerYear: "/year",
+    planPlusPeriod: "About ¥10.67/month · billed yearly",
+    planPlusFeature1: "10GB of private cloud storage for books",
+    planPlusFeature2: "Automatic book and reading data sync",
+    planPlusFeature3: "No bucket to configure: just sign in",
+    planPlusFeature4: "Your library on every platform, anytime",
+    planPlusFeature5: "All Feature Unlock features included",
+    planPlusFoot: "10GB cloud storage · 150GB of official cloud downloads per membership year · sync up to 6 devices",
+    compareCaption: "China region membership comparison",
+    compareFeature: "Feature",
+    compareIncluded: "Included",
+    compareExcluded: "Not included",
+    comparePrice: "Price",
+    compareFreePrice: "Free",
+    compareUnlockPrice: "¥88 lifetime",
+    comparePlusPrice: "¥128/year",
+    compareLocal: "Local library management and reading",
+    compareUsbBooks: "Two-way USB Kindle book sync",
+    compareUsbNotes: "Two-way USB Kindle annotation sync",
+    comparePlugins: "Plugins",
+    compareAi: "Custom AI APIs",
+    compareProgress: "Reading progress sync across devices",
+    compareNotes: "Bookmark and annotation cloud sync across devices",
+    compareBooks: "Book file cloud sync across devices",
+    compareDevices: "Cloud sync devices",
+    compareDeviceCount: "6 devices",
+    compareS3: "Custom S3",
+    compareStorage: "Official cloud storage",
+    compareTraffic: "Official cloud downloads",
+    compareTrafficValue: "150 GB / year",
+    compareNote: "Feature Unlock uses your own S3 storage; you cover its storage and traffic costs. Two-way USB Kindle annotation sync support varies by device model and book format.",
+    aboutKicker: "About Kkindle",
     aboutTitle: "An open-source desktop workspace for personal reading.",
     aboutBody: "Kkindle is an open-source ebook library and Kindle management tool for Windows, Linux, macOS, Android, and iOS. It brings library organization, reading, annotations, and device transfer into one local-first workflow.",
     aboutPoint1: "Windows / Linux / macOS / Android / iOS",
@@ -589,11 +705,43 @@ function setupQQGroupCopy() {
   });
 }
 
+function setupMembershipRegions() {
+  const tabs = Array.from(document.querySelectorAll("[data-region-tab]"));
+  if (tabs.length === 0) return;
+
+  // Tab pattern: one tab in the Tab order; arrows, Home and End move between tabs.
+  const select = (tab, moveFocus) => {
+    tabs.forEach((item) => {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      const panel = document.getElementById(item.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !selected;
+    });
+    if (moveFocus) tab.focus();
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => select(tab, false));
+    tab.addEventListener("keydown", (event) => {
+      let next;
+      if (event.key === "ArrowRight") next = tabs[(index + 1) % tabs.length];
+      else if (event.key === "ArrowLeft") next = tabs[(index - 1 + tabs.length) % tabs.length];
+      else if (event.key === "Home") next = tabs[0];
+      else if (event.key === "End") next = tabs[tabs.length - 1];
+      if (!next) return;
+      event.preventDefault();
+      select(next, true);
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   applyLanguage(getStoredLanguage());
   markRecommendedPlatform();
   setupNavigation();
   setupQQGroupCopy();
+  setupMembershipRegions();
 
   document.querySelector("#language-toggle")?.addEventListener("click", () => {
     applyLanguage(currentLanguage === "en" ? "zh" : "en");

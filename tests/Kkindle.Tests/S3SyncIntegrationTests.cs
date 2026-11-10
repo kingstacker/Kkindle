@@ -138,23 +138,42 @@ public sealed partial class S3SyncIntegrationTests
     [Theory]
     [InlineData(SyncProvider.S3)]
     [InlineData(SyncProvider.WebDav)]
-    public async Task EncryptedUploadsNeverExposeThePassphraseFingerprint(SyncProvider provider)
+    [InlineData(SyncProvider.AccountServer)]
+    public async Task EncryptedUploadsNeverExposePlaintextHashesOrPassphraseFingerprint(SyncProvider provider)
     {
         const string passphrase = "fictional-encrypted-directory-key";
         var bucket = new MemoryBucket();
         await using var a = await Device.CreateAsync(bucket, passphrase);
-        a.Settings = a.Settings with { Provider = provider, WebDavEndpoint = "https://example.invalid/dav" };
+        a.Settings = a.Settings with
+        {
+            Provider = provider, WebDavEndpoint = "https://example.invalid/dav",
+            AccountServerUrl = "http://127.0.0.1:5088", AccountUserId = Guid.NewGuid()
+        };
         var book = await a.AddBookAsync();
+        var coverHash = await a.SetCoverAsync(book.BookId, "fictional-private-cover", DateTimeOffset.UtcNow);
         await a.SyncAsync();
+        var snapshot = EncryptedSnapshot(bucket, a.SnapshotKey, passphrase);
+        Assert.Equal(6, snapshot.Version);
+        Assert.Equal(6, snapshot.MinimumReaderVersion);
+        Assert.Contains(ExpectedEncryptedBlobKey(a.Settings, book.Hash, snapshot), bucket.Objects.Keys);
+        Assert.Contains(ExpectedEncryptedBlobKey(a.Settings, coverHash, snapshot), bucket.Objects.Keys);
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(passphrase))).ToLowerInvariant();
-        Assert.Contains($"{a.Settings.Prefix}/objects/encrypted/v2/{book.Hash}", bucket.Objects.Keys);
-        Assert.All(bucket.Objects.Keys.Concat(bucket.ListPrefixes), key => Assert.DoesNotContain(fingerprint, key));
+        void AssertPrivate(string key)
+        {
+            Assert.DoesNotContain(fingerprint, key);
+            Assert.DoesNotContain(book.Hash, key);
+            Assert.DoesNotContain(coverHash, key);
+        }
+        bucket.BeforeGet = (key, _) => { AssertPrivate(key); return Task.CompletedTask; };
         await using var b = await Device.CreateAsync(bucket, passphrase);
         b.Settings = a.Settings;
         await b.SyncAsync();
         var remoteBook = Assert.Single(await b.Library.SearchAsync());
         var path = await b.Service.EnsureBookFileDownloadedAsync(b.Id, b.Settings, Assert.Single(remoteBook.Files));
         Assert.Equal(book.Hash, await Hashing.Sha256Async(path));
+        await b.SyncAsync();
+        Assert.Equal(2, bucket.Objects.Keys.Count(key => key.Contains("/objects/", StringComparison.Ordinal)));
+        Assert.All(bucket.Objects.Keys.Concat(bucket.ListPrefixes), AssertPrivate);
     }
 
     [Fact]
@@ -166,7 +185,7 @@ public sealed partial class S3SyncIntegrationTests
         var book = await a.AddBookAsync();
         await a.SyncAsync();
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(passphrase))).ToLowerInvariant();
-        var modernKey = $"{a.Settings.Prefix}/objects/encrypted/v2/{book.Hash}";
+        var modernKey = ExpectedEncryptedBlobKey(a.Settings, book.Hash, EncryptedSnapshot(bucket, a.SnapshotKey, passphrase));
         var legacyKey = $"{a.Settings.Prefix}/objects/encrypted/{fingerprint}/{book.Hash}";
         Assert.True(bucket.Objects.TryRemove(modernKey, out var ciphertext));
         bucket.Objects[legacyKey] = ciphertext!;
@@ -884,7 +903,8 @@ public sealed partial class S3SyncIntegrationTests
         };
         public string SnapshotKey => $"{Settings.Prefix}/devices/{Id}/snapshot.bin";
 
-        public static async Task<Device> CreateAsync(MemoryBucket bucket, string encryptionKey = "")
+        public static async Task<Device> CreateAsync(MemoryBucket bucket, string encryptionKey = "",
+            Func<S3SyncSettings, ISyncObjectStore>? store = null)
         {
             var root = TestHelpers.CreateTempDirectory();
             var paths = new AppPaths(root);
@@ -896,7 +916,9 @@ public sealed partial class S3SyncIntegrationTests
             {
                 Root = root, Paths = paths, Reader = reader,
                 Library = library,
-                Service = new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket), TestHelpers.ActivatedFeatures)
+                Service = store is null
+                    ? new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), _ => new MemoryClient(bucket), TestHelpers.ActivatedFeatures)
+                    : new S3SyncService(paths, new TestHelpers.PlaintextSecretProtector(), store, TestHelpers.ActivatedFeatures)
             };
             device.Settings = device.Settings with { EncryptionKey = encryptionKey };
             await device.Service.SaveSettingsAsync(device.Id, device.Settings);
@@ -986,6 +1008,9 @@ public sealed partial class S3SyncIntegrationTests
         public ConcurrentDictionary<string, byte[]> Objects { get; } = new(StringComparer.Ordinal);
         public ConcurrentQueue<string> ListPrefixes { get; } = new();
         public int WriteCount;
+        // When set, every PUT records a fresh modification time, as real object stores do.
+        public bool TrackModified;
+        public ConcurrentDictionary<string, int> GetCounts { get; } = new(StringComparer.Ordinal);
         public ConcurrentDictionary<string, DateTime> ModifiedTimes { get; } = new(StringComparer.Ordinal);
         public Func<string, CancellationToken, Task>? BeforeGet;
         public Func<string, byte[], Task>? BeforePut;
@@ -1025,6 +1050,7 @@ public sealed partial class S3SyncIntegrationTests
         {
             if (bucket.BeforeGet is { } before) await before(request.Key, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            bucket.GetCounts.AddOrUpdate(request.Key, 1, (_, count) => count + 1);
             if (!bucket.Objects.TryGetValue(request.Key, out var bytes))
                 throw new AmazonS3Exception("Missing test object") { StatusCode = HttpStatusCode.NotFound, ErrorCode = "NoSuchKey" };
             return new GetObjectResponse { ContentLength = bytes.Length, ResponseStream = new MemoryStream(bytes, false), HttpStatusCode = HttpStatusCode.OK };
@@ -1051,6 +1077,7 @@ public sealed partial class S3SyncIntegrationTests
             if (bucket.BeforePut is { } before) await before(request.Key, bytes);
             cancellationToken.ThrowIfCancellationRequested();
             bucket.Objects[request.Key] = bytes;
+            if (bucket.TrackModified) bucket.ModifiedTimes[request.Key] = DateTime.UtcNow;
             Interlocked.Increment(ref bucket.WriteCount);
             return new PutObjectResponse { HttpStatusCode = HttpStatusCode.OK, ETag = "test-etag" };
         }

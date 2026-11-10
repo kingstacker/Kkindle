@@ -96,6 +96,7 @@ public partial class MainWindow
     private IReadOnlyList<ReadingDashboardDay> _readingDashboardDailyReading = [];
     private int _readingDashboardGeneration;
     private bool _readingMaterialsExportMode;
+    private bool _readingMaterialsExportInProgress;
     private Popup? _readingMaterialPreviewPopup;
     private Border? _readingMaterialPreviewTarget;
     private bool _suppressMainAiProviderChange;
@@ -525,6 +526,7 @@ public partial class MainWindow
         if (_deviceEjectInProgress) return;
         var task = operation();
         lock (_deviceOperationSync) _activeDeviceOperations.Add(task);
+        UpdateKindleAnnotationSyncButtonVisibility();
         try
         {
             await task;
@@ -532,6 +534,7 @@ public partial class MainWindow
         finally
         {
             lock (_deviceOperationSync) _activeDeviceOperations.Remove(task);
+            UpdateKindleAnnotationSyncButtonVisibility();
         }
     }
 
@@ -608,6 +611,7 @@ public partial class MainWindow
     private void ShowLibraryPage()
     {
         if (BlockNavigationWhileTransferring()) return;
+        if (_readingMaterialsExportMode) SetReadingMaterialsExportMode(false);
         ClearBookMultiSelection();
         if (DevicePage.IsVisible)
             ClearDeviceBookSelection();
@@ -622,11 +626,15 @@ public partial class MainWindow
         ReadingMaterialsPage.IsVisible = false;
         ReadingDashboardPage.IsVisible = false;
         SettingsPage.IsVisible = false;
+        AccountCenterHost.IsVisible = false;
+        _accountCenterView?.Deactivate();
     }
 
     private void ShowStage3Page(Control page, Button? activeButton = null)
     {
         if (BlockNavigationWhileTransferring()) return;
+        if (_readingMaterialsExportMode && !ReferenceEquals(page, ReadingMaterialsPage))
+            SetReadingMaterialsExportMode(false);
         ClearBookMultiSelection();
         if (DevicePage.IsVisible && !ReferenceEquals(page, DevicePage))
             ClearDeviceBookSelection();
@@ -639,6 +647,7 @@ public partial class MainWindow
             _ when ReferenceEquals(page, ReadingMaterialsPage) =>
                 ReaderNotesNavigationButton,
             _ when ReferenceEquals(page, ReadingDashboardPage) => ReadingDashboardButton,
+            _ when ReferenceEquals(page, AccountCenterHost) => AccountNavigationButton,
             _ => SettingsNavigationButton
         };
         SetSidebarActive(activeButton);
@@ -652,6 +661,8 @@ public partial class MainWindow
         ReadingMaterialsPage.IsVisible = ReferenceEquals(page, ReadingMaterialsPage);
         ReadingDashboardPage.IsVisible = ReferenceEquals(page, ReadingDashboardPage);
         SettingsPage.IsVisible = ReferenceEquals(page, SettingsPage);
+        AccountCenterHost.IsVisible = ReferenceEquals(page, AccountCenterHost);
+        if (!AccountCenterHost.IsVisible) _accountCenterView?.Deactivate();
     }
 
     private bool BlockNavigationWhileTransferring()
@@ -672,6 +683,7 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
+            AccountNavigationButton,
             SettingsNavigationButton
         ];
         foreach (var button in navigationButtons)
@@ -688,6 +700,7 @@ public partial class MainWindow
             DictionaryManagementButton,
             ReaderNotesNavigationButton,
             ReadingDashboardButton,
+            AccountNavigationButton,
             SettingsNavigationButton
         ];
         foreach (var button in buttons)
@@ -700,7 +713,8 @@ public partial class MainWindow
                 || ReferenceEquals(activeButton, DictionaryManagementButton) => DeviceManagementSectionButton,
             _ when ReferenceEquals(activeButton, ReaderNotesNavigationButton)
                 || ReferenceEquals(activeButton, ReadingDashboardButton) => ReadingSectionButton,
-            _ when ReferenceEquals(activeButton, SettingsNavigationButton) => null,
+            _ when ReferenceEquals(activeButton, SettingsNavigationButton)
+                || ReferenceEquals(activeButton, AccountNavigationButton) => null,
             _ => BookManagementSectionButton
         };
         switch (_activeNavigationSectionButton)
@@ -3210,31 +3224,62 @@ public partial class MainWindow
     private async void ReaderNotesNavigationButton_Click(object? sender, RoutedEventArgs e)
     {
         if (BlockNavigationWhileTransferring()) return;
-        _readingMaterialsExportMode = false;
+        SetReadingMaterialsExportMode(false);
         ShowStage3Page(ReadingMaterialsPage);
         ReadingMaterialsPageTitle.Text = T("笔记管理");
         ReadingMaterialsStatusText.Text = T("统一浏览本地书籍与设备的划线、笔记、批注和读后思考。");
         ReadingMaterialsNotesActions.IsVisible = true;
-        SelectAllReadingMaterialsButton.IsVisible = false;
-        ExportReadingMaterialsToggleButton.Content = T("导出记录");
-        ExportReadingMaterialsToggleButton.Classes.Remove("active");
         ReadingMaterialsSummaryBorder.IsVisible = true;
-        ReadingMaterialsExportPanel.IsVisible = false;
-        ReadingMaterialsExportSummaryBorder.IsVisible = false;
         await RefreshReadingMaterialsAsync();
     }
 
     private void ExportReadingMaterialsToggleButton_Click(object? sender, RoutedEventArgs e)
+        => SetReadingMaterialsExportMode(!_readingMaterialsExportMode);
+
+    private void CancelReadingMaterialsExportButton_Click(object? sender, RoutedEventArgs e)
     {
-        _readingMaterialsExportMode = !_readingMaterialsExportMode;
-        SetReadingMaterialsSelection(_readingMaterialsExportMode);
-        ReadingMaterialsExportPanel.IsVisible = _readingMaterialsExportMode;
-        ReadingMaterialsExportSummaryBorder.IsVisible = false;
+        if (_readingMaterialsExportInProgress) return;
+        SetReadingMaterialsExportMode(false);
+        ExportReadingMaterialsToggleButton.Focus();
+    }
+
+    private void SetReadingMaterialsExportMode(bool enabled)
+    {
+        _readingMaterialsExportMode = enabled;
+        SetReadingMaterialsSelection(false);
+        if (enabled)
+            foreach (var item in ReadingMaterials) item.IsSelected = true;
+        ReadingMaterialsExportPanel.IsVisible = enabled;
+        SelectAllReadingMaterialsButton.IsVisible = enabled;
+        ExportReadingMaterialsToggleButton.IsVisible = !enabled;
+        ReadingMaterialsLocateButton.IsVisible = !enabled;
+        DeleteReadingMaterialsButton.IsVisible = !enabled;
+        RefreshReadingMaterialsButton.IsVisible = !enabled;
+        ReadingMaterialsSummaryText.IsVisible = !enabled;
+        ReadingMaterialsExportSummaryText.IsVisible = enabled;
+        UpdateKindleAnnotationSyncButtonVisibility();
         ApplyReadingMaterialsFilter();
+    }
+
+    private bool TryExitReadingMaterialsExport(KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || !_readingMaterialsExportMode
+            || !ReadingMaterialsPage.IsVisible || ReaderRoot.IsVisible
+            || _readingMaterialsExportInProgress
+            || _bookRemovalCompletion is not null || _deviceDuplicateCompletion is not null)
+            return false;
+        // Esc closes the source menu first, then leaves export on the next press.
+        if (ReadingMaterialsSourceBox.IsDropDownOpen) return false;
+        SetReadingMaterialsExportMode(false);
+        ExportReadingMaterialsToggleButton.Focus();
+        e.Handled = true;
+        return true;
     }
 
     private async Task RefreshReadingMaterialsAsync()
     {
+        var selectedKeys = _allStage3ReadingMaterials.Where(item => item.IsSelected)
+            .Select(GetReadingMaterialSelectionKey).ToHashSet();
         RememberReadingMaterialGroupStates();
         foreach (var item in _allStage3ReadingMaterials) item.Dispose();
         _allStage3ReadingMaterials.Clear();
@@ -3403,7 +3448,8 @@ public partial class MainWindow
             }
 
             if (_readingMaterialsExportMode)
-                SetReadingMaterialsSelection(true);
+                foreach (var item in _allStage3ReadingMaterials)
+                    item.IsSelected = selectedKeys.Contains(GetReadingMaterialSelectionKey(item));
             ApplyReadingMaterialsFilter();
             _readingMaterialsDirty = false;
             var kindleCount = _allStage3ReadingMaterials.Count(item => item.Source == ReadingMaterialSource.Device);
@@ -3470,7 +3516,6 @@ public partial class MainWindow
         var localCount = filtered.Count(item => item.Source == ReadingMaterialSource.Local);
         var kindleCount = filtered.Count(item => item.Source == ReadingMaterialSource.Device);
         ReadingMaterialsSummaryText.Text = T("本地 {0} 条 · 设备 {1} 条 · 当前显示 {2} 条", localCount, kindleCount, filtered.Length);
-        ReadingMaterialsExportSummaryText.Text = T("导出预览 · 本地 {0} 条 · 设备 {1} 条 · 当前将导出 {2} 条", localCount, kindleCount, filtered.Length);
         UpdateReadingMaterialsActionState();
     }
 
@@ -3491,6 +3536,11 @@ public partial class MainWindow
             item.IsSelected = isSelected;
     }
 
+    private static (ReadingMaterialSource Source, string? DeviceId, string Id)
+        GetReadingMaterialSelectionKey(Stage3ReadingMaterialViewModel item) =>
+        (item.Source, item.SourceDeviceId, item.LocalAnnotation?.Id.ToString("N")
+            ?? item.LocalReflection?.BookId.ToString("N") ?? item.KindleClipping?.Id ?? string.Empty);
+
     private void ReadingMaterialSelectionChanged(object? sender, RoutedEventArgs e)
     {
         UpdateReadingMaterialsActionState();
@@ -3506,17 +3556,22 @@ public partial class MainWindow
         ReadingMaterialsLocateButton.IsEnabled = !_readingMaterialsExportMode
             && selected.Any(item => item.LocalAnnotation is not null);
         if (SelectAllReadingMaterialsButton is not null)
+        {
             SelectAllReadingMaterialsButton.Content = ReadingMaterials.Count > 0
                 && ReadingMaterials.All(item => item.IsSelected)
                 ? T("取消全选")
                 : T("全选");
-        if (_readingMaterialsExportMode && ReadingMaterialsExportSummaryText is not null)
-        {
-            var localCount = ReadingMaterials.Count(item => item.Source == ReadingMaterialSource.Local);
-            var kindleCount = ReadingMaterials.Count(item => item.Source == ReadingMaterialSource.Device);
-            ReadingMaterialsExportSummaryText.Text =
-                T("导出预览 · 本地 {0} 条 · 设备 {1} 条 · 当前将导出 {2} 条", localCount, kindleCount, selected.Length);
+            SelectAllReadingMaterialsButton.IsEnabled = ReadingMaterials.Count > 0
+                && !_readingMaterialsExportInProgress;
         }
+        var canExport = _readingMaterialsExportMode && selected.Length > 0
+            && !_readingMaterialsExportInProgress;
+        ExportReadingMaterialsMarkdownButton.IsEnabled = canExport;
+        ExportReadingMaterialsTextButton.IsEnabled = canExport;
+        CancelReadingMaterialsExportButton.IsEnabled = !_readingMaterialsExportInProgress;
+        if (ReadingMaterialsExportSummaryText is not null)
+            ReadingMaterialsExportSummaryText.Text =
+                T("已选 {0} 条 · 当前显示 {1} 条", selected.Length, ReadingMaterials.Count);
     }
 
     private void ReadingMaterialGroupToggleButton_Click(object? sender, RoutedEventArgs e)
@@ -3797,6 +3852,7 @@ public partial class MainWindow
 
     private async Task ExportReadingMaterialsAsync(bool markdown)
     {
+        if (!_readingMaterialsExportMode || _readingMaterialsExportInProgress) return;
         var selected = ReadingMaterials.Where(item => item.IsSelected).ToArray();
         if (selected.Length == 0)
         {
@@ -3811,31 +3867,48 @@ public partial class MainWindow
         }
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel is null) return;
-        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        _readingMaterialsExportInProgress = true;
+        UpdateReadingMaterialsActionState();
+        try
         {
-            Title = T("导出阅读资料"),
-            SuggestedFileName = T("Kkindle-阅读资料-{0}.{1}", DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture), markdown ? "md" : "txt"),
-            FileTypeChoices = [new FilePickerFileType(markdown ? "Markdown" : T("文本"))
+            var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
-                Patterns = [markdown ? "*.md" : "*.txt"]
-            }]
-        });
-        var path = file?.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path)) return;
-        await using (var stream = new FileStream(
-                         path,
-                         FileMode.Create,
-                         FileAccess.Write,
-                         FileShare.None,
-                         64 * 1024,
-                         FileOptions.Asynchronous | FileOptions.SequentialScan))
-        {
-            if (markdown)
-                await ReadingMaterialsExport.WriteMarkdownAsync(stream, records, _lifetimeCancellation.Token);
-            else
-                await ReadingMaterialsExport.WritePlainTextAsync(stream, records, _lifetimeCancellation.Token);
+                Title = T("导出阅读资料"),
+                SuggestedFileName = T("Kkindle-阅读资料-{0}.{1}", DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture), markdown ? "md" : "txt"),
+                FileTypeChoices = [new FilePickerFileType(markdown ? "Markdown" : T("文本"))
+                {
+                    Patterns = [markdown ? "*.md" : "*.txt"]
+                }]
+            });
+            var path = file?.TryGetLocalPath();
+            if (string.IsNullOrWhiteSpace(path)) return;
+            await using (var stream = new FileStream(
+                             path,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.None,
+                             64 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                if (markdown)
+                    await ReadingMaterialsExport.WriteMarkdownAsync(stream, records, _lifetimeCancellation.Token);
+                else
+                    await ReadingMaterialsExport.WritePlainTextAsync(stream, records, _lifetimeCancellation.Token);
+            }
+            ReadingMaterialsStatusText.Text = T("已导出 {0} 条记录到 {1}。", records.Length, path);
         }
-        ReadingMaterialsStatusText.Text = T("已导出 {0} 条记录到 {1}。", records.Length, path);
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ReadingMaterialsStatusText.Text = T("导出失败：{0}", UiText.Localize(exception.Message));
+        }
+        finally
+        {
+            _readingMaterialsExportInProgress = false;
+            UpdateReadingMaterialsActionState();
+        }
     }
 
     private string GetReadingMaterialsSourceLabel(string source) => source switch
@@ -4456,8 +4529,12 @@ public partial class MainWindow
 
     private void DashboardPeriodButton_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string name } || !Enum.TryParse<ReadingPeriod>(name, out var period)) return;
-        _readingDashboardPeriod = period;
+        _readingDashboardPeriod = _readingDashboardPeriod switch
+        {
+            ReadingPeriod.Week => ReadingPeriod.Month,
+            ReadingPeriod.Month => ReadingPeriod.Year,
+            _ => ReadingPeriod.Week
+        };
         PresentDashboardDays();
     }
 
@@ -4539,9 +4616,15 @@ public partial class MainWindow
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var range = ReadingPeriodRange.Create(_readingDashboardPeriod, today);
         var buckets = range.BuildBuckets(_readingDashboardDailyReading, today);
-        DashboardWeekButton.Classes.Set("active", _readingDashboardPeriod == ReadingPeriod.Week);
-        DashboardMonthButton.Classes.Set("active", _readingDashboardPeriod == ReadingPeriod.Month);
-        DashboardYearButton.Classes.Set("active", _readingDashboardPeriod == ReadingPeriod.Year);
+        var periodLabel = T(_readingDashboardPeriod switch
+        { ReadingPeriod.Week => "周", ReadingPeriod.Month => "月", _ => "年" });
+        var nextPeriodLabel = T(_readingDashboardPeriod switch
+        { ReadingPeriod.Week => "月", ReadingPeriod.Month => "年", _ => "周" });
+        DashboardPeriodButton.MinWidth = UiText.IsEnglish ? 60 : 36;
+        DashboardPeriodButton.Content = periodLabel;
+        ToolTip.SetTip(DashboardPeriodButton, T("点击切换到{0}视图", nextPeriodLabel));
+        Avalonia.Automation.AutomationProperties.SetName(DashboardPeriodButton,
+            T("当前{0}视图，点击切换到{1}视图", periodLabel, nextPeriodLabel));
         DashboardDailyTitleText.Text = T(_readingDashboardPeriod switch
         { ReadingPeriod.Week => "本周阅读时长", ReadingPeriod.Month => "本月阅读时长", _ => "今年阅读时长" });
         var maximumSeconds = Math.Max(1, buckets.Max(bucket => bucket.ActiveSeconds));
@@ -5477,7 +5560,7 @@ public partial class MainWindow
             SyncProviderBox, WebDavEndpointBox, WebDavUsernameBox, WebDavPasswordBox,
             S3SyncEnabledCheck, S3AutomaticSyncCheck, S3DownloadBookFilesCheck, S3SyncIntervalBox, S3EndpointBox,
             S3AccessKeyBox, S3SecretKeyBox, S3BucketBox, S3RegionBox, S3PrefixBox,
-            S3PathStyleCheck, S3SkipTlsVerifyCheck, S3EncryptionKeyBox, S3TimeoutBox,
+            S3PathStyleCheck, S3SkipTlsVerifyCheck, S3EncryptionKeyBox, AccountSyncEncryptionKeyBox, S3TimeoutBox,
             S3ConcurrencyBox, S3SaveSettingsButton, S3DiscardSettingsButton, S3TestConnectionButton, S3SyncNowButton,
             S3ExportConnectionProfileButton, S3ImportConnectionProfileButton
         ];

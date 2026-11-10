@@ -17,6 +17,11 @@ struct NativeReaderPage: View {
     @ObservedObject var store: NativeStore
     @ObservedObject var session: NativeReaderSession
     let book: LibraryBook
+    let appColorScheme: ColorScheme
+    let appearanceSessionId: String
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var readerColorEnvironment
+    @State private var appearanceRevision = 0
     @State private var panel: ReaderPanel?
     @State private var dialog: ReaderDialog?
     @State private var selectedText = ""
@@ -34,6 +39,16 @@ struct NativeReaderPage: View {
     @State private var showingSearchResults = false
     @State private var jumpingToSearch = false
     private var reader: ReaderSnapshot { session.state }
+    private var currentAppColorScheme: ColorScheme {
+        store.preferences.readerThemeFollowsAppearance ? readerColorEnvironment : appColorScheme
+    }
+    private var effectiveReaderTheme: Int {
+        store.preferences.readerThemeFollowsAppearance ? (currentAppColorScheme == .dark ? 5 : 0) : store.preferences.readerTheme
+    }
+    private var readerColorScheme: ColorScheme? {
+        store.preferences.readerThemeFollowsAppearance ? store.preferences.colorScheme : (store.preferences.readerTheme == 5 ? .dark : .light)
+    }
+    private var paper: Color { store.preferences.paper(for: effectiveReaderTheme) }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -46,7 +61,7 @@ struct NativeReaderPage: View {
             VStack(spacing: 8) {
                 if reader.chromeVisible || !reader.ready { topBar }
                 if showingSearchResults {
-                    NativeReaderSearchResults(hits: searchHits, busy: searchBusy, error: searchError,
+                    NativeReaderSearchResults(hits: searchHits, query: searchSubmitted, busy: searchBusy, error: searchError,
                                               jumping: jumpingToSearch, pick: jumpToSearch, close: dismissSearchResults)
                         .frame(height: searchHits.isEmpty ? 58 : min(300, CGFloat(searchHits.count) * 96 + 38))
                         .modifier(NativeFloatingSurface()).padding(.horizontal, 12)
@@ -57,7 +72,7 @@ struct NativeReaderPage: View {
         .ignoresSafeArea(.keyboard)
         .font(NativeTheme.font()).foregroundStyle(NativeTheme.ink).tint(NativeTheme.ink)
         .environment(\.symbolVariants, .none)
-        .preferredColorScheme(store.preferences.readerTheme == 5 ? .dark : .light)
+        .preferredColorScheme(readerColorScheme)
         .interactiveDismissDisabled(true)
         .sheet(item: $panel) { panel in
             Group {
@@ -72,9 +87,15 @@ struct NativeReaderPage: View {
                 }
             }
             .font(NativeTheme.font()).foregroundStyle(NativeTheme.ink).tint(NativeTheme.ink)
-            .preferredColorScheme(store.preferences.readerTheme == 5 ? .dark : .light)
+            .preferredColorScheme(readerColorScheme)
         }
-        .onAppear { seekProgress = reader.progress }
+        .onAppear { seekProgress = reader.progress; syncAppAppearance() }
+        .onChange(of: appColorScheme) { _ in syncAppAppearance() }
+        .onChange(of: readerColorEnvironment) { _ in
+            if store.preferences.readerThemeFollowsAppearance { syncAppAppearance() }
+        }
+        .onChange(of: store.preferences.readerThemeFollowsAppearance) { _ in syncAppAppearance() }
+        .onChange(of: scenePhase) { if $0 == .active { syncAppAppearance() } }
         .onChange(of: reader.progress) { if !dragging { seekProgress = $0 } }
         .onChange(of: reader.chromeVisible) { if !$0 && searching { closeSearch() } }
         .onChange(of: session.dialog) { value in
@@ -97,16 +118,26 @@ struct NativeReaderPage: View {
             if !Task.isCancelled, generation == searchGeneration { searchBusy = false }
         }
     }
+    private func syncAppAppearance() {
+        appearanceRevision += 1
+        let args: [String: Any] = ["sessionId": appearanceSessionId, "revision": appearanceRevision,
+                                   "dark": currentAppColorScheme == .dark]
+        Task { try? await store.command("reader.appearance", args) }
+    }
     private var readerContent: some View {
         ZStack {
-            store.preferences.paper.ignoresSafeArea()
+            paper.ignoresSafeArea()
             ReaderSurface(controller: store.readerController).padding(.bottom, 24)
+            if store.preferences.colorfulMode {
+                NativeAmbientWash().opacity(readerColorEnvironment == .dark ? 0.14 : 0.10)
+                    .ignoresSafeArea().allowsHitTesting(false)
+            }
             if !reader.ready {
                 VStack(spacing: 16) {
                     Text(book.title).font(NativeTheme.font(21, relativeTo: .title2)).multilineTextAlignment(.center)
                     if let error = reader.error { Text(error).foregroundStyle(NativeTheme.secondary).multilineTextAlignment(.center) }
                     else { ProgressView("正在打开书籍…") }
-                }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity).background(store.preferences.paper)
+                }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity).background(paper)
             }
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
@@ -115,10 +146,12 @@ struct NativeReaderPage: View {
                 if let text = reader.selectedText { selectionBar(text) }
                 if reader.speechState != 0 && reader.speechState != 4 { speechBar }
                 if reader.chromeVisible && reader.ready { bottomBar }
-                HStack {
-                    Text(reader.chapter).lineLimit(1); Spacer(); Text(reader.position).monospacedDigit().accessibilityIdentifier("reader.position")
-                }.font(NativeTheme.font(11.5, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted).padding(.horizontal, 24).frame(height: 24)
-                    .background(store.preferences.paper).allowsHitTesting(false)
+                else {
+                    HStack {
+                        Text(reader.chapter).lineLimit(1); Spacer(); Text(reader.position).monospacedDigit().accessibilityIdentifier("reader.position")
+                    }.font(NativeTheme.font(11.5, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted).padding(.horizontal, 24).frame(height: 24)
+                        .background(paper).allowsHitTesting(false)
+                }
             }
         }
     }
@@ -155,25 +188,24 @@ struct NativeReaderPage: View {
                 .disabled(closing).accessibilityLabel("返回书籍详情").accessibilityIdentifier("reader.close")
             ZStack(alignment: .trailing) {
                 if searching {
-                    HStack(spacing: 0) {
-                        NativeSearchField(text: $searchQuery, prompt: "搜索全书", focused: $searchFocused,
-                                          identifier: "reader.search.query", submit: submitSearch)
-                        Button(action: closeSearch) { Image(systemName: "xmark").font(.system(size: 15)).frame(width: 32, height: 44) }
-                            .accessibilityLabel("关闭搜索").accessibilityIdentifier("reader.search.close")
-                    }.transition(.move(edge: .trailing).combined(with: .opacity))
+                    NativeSearchField(text: $searchQuery, prompt: "搜索全书", focused: $searchFocused,
+                                      identifier: "reader.search.query", submit: submitSearch)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 } else {
                     Text(book.title).font(NativeTheme.font(14)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }.frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 2).clipped()
-            Button {
-                if searching { submitSearch() }
-                else {
+            if searching {
+                Button(action: closeSearch) { Image(systemName: "xmark").font(.system(size: 15)).frame(width: 44, height: 44) }
+                    .accessibilityLabel("关闭搜索").accessibilityIdentifier("reader.search.close")
+            } else {
+                Button {
                     withAnimation(.easeOut(duration: 0.2)) { searching = true }
                     searchFocused = true
-                }
-            } label: {
-                Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
-            }.disabled(!reader.ready).accessibilityLabel("搜索全书").accessibilityIdentifier("reader.search")
+                } label: {
+                    Image(systemName: "magnifyingglass").frame(width: 44, height: 44)
+                }.disabled(!reader.ready).accessibilityLabel("搜索全书").accessibilityIdentifier("reader.search")
+            }
             Button { run("bookmark") } label: { Image(systemName: reader.bookmark ? "bookmark.fill" : "bookmark").frame(width: 44, height: 44) }
                 .disabled(!reader.ready).accessibilityLabel("书签").accessibilityIdentifier("reader.bookmark")
         }.font(.system(size: 19, weight: .regular)).buttonStyle(.plain).padding(4)
@@ -198,7 +230,7 @@ struct NativeReaderPage: View {
                 tool(reader.isPdf ? "显示" : "排版", "Aa") { panel = .typography }
             }
         }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 6)
-            .modifier(NativeFloatingSurface()).padding(.horizontal, 12).padding(.bottom, 12)
+            .modifier(NativeFloatingSurface()).padding(.horizontal, 12)
     }
     private var speechBar: some View {
         HStack(spacing: 18) {
@@ -253,12 +285,21 @@ struct NativeTypography: View {
             store.setPreferences(value)
         })
     }
+    private var paperSelection: Binding<Int> {
+        Binding(get: { store.preferences.readerThemeFollowsAppearance ? -1 : store.preferences.readerTheme }, set: { selection in
+            var value = store.preferences
+            value.readerThemeFollowsAppearance = selection == -1
+            if selection != -1 { value.readerTheme = selection }
+            store.setPreferences(value)
+        })
+    }
     var body: some View {
         ScrollView {
             VStack(spacing: 4) {
                 row("纸张") {
-                    Picker("纸张", selection: preference(\.readerTheme)) { Text("白").tag(0); Text("米").tag(1); Text("黑").tag(5) }
-                        .pickerStyle(.segmented).accessibilityIdentifier("typography.paper")
+                    Picker("纸张", selection: paperSelection) {
+                        Text("跟随").tag(-1); Text("白").tag(0); Text("米").tag(1); Text("黑").tag(5)
+                    }.pickerStyle(.segmented).accessibilityIdentifier("typography.paper")
                 }
                 row("翻页动画") {
                     Picker("翻页动画", selection: preference(\.readerPageAnimation)) { Text("无").tag(0); Text("淡入").tag(1); Text("滑动").tag(2); Text("墨水").tag(3) }.pickerStyle(.segmented)
@@ -276,13 +317,13 @@ struct NativeTypography: View {
                                 .monospacedDigit().frame(maxWidth: .infinity).accessibilityIdentifier("typography.fontScale")
                             Button { changeFont(0.1) } label: { Text("A+").frame(width: 44, height: 44) }
                                 .disabled(store.preferences.readerFontScale >= 1.8).accessibilityLabel("增大字号")
-                        }.buttonStyle(.plain).background(NativeTheme.sunk, in: RoundedRectangle(cornerRadius: 12))
+                        }.buttonStyle(.plain).background(NativeTheme.sunk, in: Capsule())
                     }
                     row("行距") {
                         Picker("行距", selection: preference(\.readerLineHeight)) { Text("紧凑").tag(1.5); Text("标准").tag(1.75); Text("宽松").tag(2.1) }.pickerStyle(.segmented)
                     }
                     row("段间距") {
-                        Picker("段间距", selection: preference(\.readerParagraphSpacing)) { Text("紧凑").tag(0.0); Text("标准").tag(0.5); Text("宽松").tag(1.0) }
+                        Picker("段间距", selection: preference(\.readerParagraphSpacing)) { Text("紧凑").tag(0.0); Text("标准").tag(0.25); Text("宽松").tag(0.5) }
                             .pickerStyle(.segmented).accessibilityIdentifier("typography.paragraphSpacing")
                     }
                     row("页边距") {
@@ -375,20 +416,59 @@ struct NativeReaderTocView: View {
     @ObservedObject var store: NativeStore
     let close: () -> Void
     @State private var items: [ReaderToc] = []
+    @State private var collapsed: Set<Int> = []
+
+    private struct Row: Identifiable {
+        let item: ReaderToc
+        let hasChildren: Bool
+        var id: Int { item.id }
+    }
+
+    private var visibleRows: [Row] {
+        var rows: [Row] = []
+        var hiddenBelowLevel: Int?
+        for (index, item) in items.enumerated() {
+            if let level = hiddenBelowLevel {
+                if item.level > level { continue }
+                hiddenBelowLevel = nil
+            }
+            let hasChildren = index + 1 < items.count && items[index + 1].level > item.level
+            rows.append(Row(item: item, hasChildren: hasChildren))
+            if hasChildren && collapsed.contains(item.id) { hiddenBelowLevel = item.level }
+        }
+        return rows
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
-            List(items) { item in
-                Button {
-                    store.perform { try await store.command("reader.jump", ["id": item.id]); close() }
-                } label: {
-                    HStack {
-                        Text(item.title).padding(.leading, CGFloat(item.level * 12))
-                        Spacer()
-                        if item.selected { Image(systemName: "checkmark") }
-                    }.contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("reader.toc.\(item.id)")
-                .accessibilityAddTraits(item.selected ? .isSelected : [])
+            List(visibleRows) { row in
+                let item = row.item
+                HStack(spacing: 0) {
+                    if row.hasChildren {
+                        Button {
+                            if collapsed.contains(item.id) { collapsed.remove(item.id) }
+                            else { collapsed.insert(item.id) }
+                        } label: {
+                            Image(systemName: collapsed.contains(item.id) ? "chevron.right" : "chevron.down")
+                                .frame(width: 32, height: 44)
+                        }
+                        .accessibilityLabel("\(collapsed.contains(item.id) ? "展开" : "收起")\(item.title)的子章节")
+                        .accessibilityIdentifier("reader.toc.toggle.\(item.id)")
+                    } else {
+                        Color.clear.frame(width: 32, height: 1)
+                    }
+                    Button {
+                        store.perform { try await store.command("reader.jump", ["id": item.id]); close() }
+                    } label: {
+                        HStack {
+                            Text(item.title)
+                            Spacer()
+                            if item.selected { Image(systemName: "checkmark") }
+                        }.contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("reader.toc.\(item.id)")
+                    .accessibilityAddTraits(item.selected ? .isSelected : [])
+                }.padding(.leading, CGFloat(max(0, item.level) * 12)).buttonStyle(.borderless)
             }
             .onChange(of: items.count) { _ in
                 // Open at the current chapter. The rows exist after this update.
@@ -401,7 +481,9 @@ struct NativeReaderTocView: View {
 }
 
 struct NativeReaderSearchResults: View {
+    @Environment(\.colorScheme) private var colorScheme
     let hits: [ReaderSearchHit]
+    let query: String
     let busy: Bool
     let error: String?
     let jumping: Bool
@@ -420,8 +502,8 @@ struct NativeReaderSearchResults: View {
                     ForEach(hits) { hit in
                         Button { pick(hit) } label: {
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(hit.title).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.muted).lineLimit(1)
-                                Text(hit.excerpt).font(NativeTheme.font(14)).lineLimit(3).lineSpacing(5)
+                                Text(highlighted(hit.title)).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.muted).lineLimit(1)
+                                Text(highlighted(hit.excerpt)).font(NativeTheme.font(14)).lineLimit(3).lineSpacing(5)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }.padding(.vertical, 14).contentShape(Rectangle())
                         }.disabled(busy || jumping).accessibilityIdentifier("reader.search.hit.\(hit.id)")
@@ -431,6 +513,25 @@ struct NativeReaderSearchResults: View {
             }
         }.buttonStyle(.plain).accessibilityElement(children: .contain)
             .accessibilityIdentifier("reader.search.results").accessibilityAction(.escape, close)
+    }
+
+    private func highlighted(_ text: String) -> AttributedString {
+        guard !query.isEmpty else { return AttributedString(text) }
+        var result = AttributedString()
+        var start = text.startIndex
+        while start < text.endIndex,
+              let match = text.range(of: query, options: .caseInsensitive, range: start..<text.endIndex, locale: .current),
+              !match.isEmpty {
+            result.append(AttributedString(text[start..<match.lowerBound]))
+            var emphasis = AttributedString(text[match])
+            emphasis.backgroundColor = colorScheme == .dark ? .white : .black
+            emphasis.foregroundColor = colorScheme == .dark ? .black : .white
+            emphasis.inlinePresentationIntent = .stronglyEmphasized
+            result.append(emphasis)
+            start = match.upperBound
+        }
+        result.append(AttributedString(text[start...]))
+        return result
     }
 }
 
@@ -453,7 +554,7 @@ struct NativeSpeechSettings: View {
                 Text("语音由设备提供，可以在系统设置中下载更多语音。").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
             }
             Section("语速") { Text("\(speed, specifier: "%.1f")×"); Slider(value: $speed, in: 0.5...2, step: 0.1).accessibilityLabel("朗读语速") }
-            Section { Toggle("自动翻到下一章或下一页", isOn: $autoAdvance); Text("设置在下次开始朗读时生效。").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary) }
+            Section { Toggle("自动翻到下一章或下一页", isOn: $autoAdvance).tint(NativeTheme.systemSwitchTint); Text("设置在下次开始朗读时生效。").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary) }
             Button("保存") {
                 busy = true
                 store.perform { defer { busy = false }; try await store.command("settings.speech.save", ["voice": voice, "speed": speed, "autoAdvance": autoAdvance]); close() }

@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.VisualTree;
 using Kkindle.Core;
 using Xunit;
@@ -124,25 +126,42 @@ public sealed partial class SettingsTests
         Capture(scope.Window, "reading-material-filters-aligned");
     });
 
-    [Fact]
-    public Task DashboardButtonsSelectWeekMonthAndYear() => Run(async () =>
+    [Theory]
+    [InlineData("zh-CN")]
+    [InlineData("en-US")]
+    public Task DashboardButtonCyclesWeekMonthYearAndBack(string language) => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
+        ((Kkindle.App)Avalonia.Application.Current!).ApplyLanguage(language);
         scope.Call("ShowStage3Page", scope.Get<Grid>("ReadingDashboardPage"), null);
         await Render();
         Assert.Null(scope.Window.FindControl<ComboBox>("DashboardRangeBox"));
         await scope.Call<Task>("RefreshReadingDashboardAsync");
         Assert.Null(scope.Window.FindControl<Button>("DashboardDailyRangeButton"));
-        foreach (var period in new[] { ReadingPeriod.Month, ReadingPeriod.Year, ReadingPeriod.Week })
+        var button = scope.Get<Button>("DashboardPeriodButton");
+        Assert.Equal(language == "en-US" ? "Week" : "周", button.Content);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        scope.Set("_readingDashboardDailyReading", new ReadingDashboardDay[] { new(today, 90) });
+        foreach (var period in new[] { ReadingPeriod.Month, ReadingPeriod.Year, ReadingPeriod.Week,
+                     ReadingPeriod.Month, ReadingPeriod.Year, ReadingPeriod.Week })
         {
-            var button = scope.Get<Button>($"Dashboard{period}Button");
             button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-            var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var count = ReadingPeriodRange.Create(period, today).BuildBuckets([], today).Count;
             Assert.Equal(count, scope.Window.DashboardDays.Count);
-            Assert.Contains("active", button.Classes);
-            Assert.All(new[] { ReadingPeriod.Week, ReadingPeriod.Month, ReadingPeriod.Year }.Where(other => other != period),
-                other => Assert.DoesNotContain("active", scope.Get<Button>($"Dashboard{other}Button").Classes));
+            var expectedLabel = language == "en-US"
+                ? period switch { ReadingPeriod.Week => "Week", ReadingPeriod.Month => "Month", _ => "Year" }
+                : period switch { ReadingPeriod.Week => "周", ReadingPeriod.Month => "月", _ => "年" };
+            Assert.Equal(expectedLabel, button.Content);
+            Assert.Equal(UiText.Get(period switch { ReadingPeriod.Week => "本周阅读时长", ReadingPeriod.Month => "本月阅读时长", _ => "今年阅读时长" }),
+                scope.Get<TextBlock>("DashboardDailyTitleText").Text);
+            Assert.Single(scope.Window.DashboardDays, day => day.BarHeight > 4);
+            Assert.Equal(180, scope.Window.DashboardDays.Single(day => day.BarHeight > 4).BarHeight);
+            await Render();
+            AssertWithinWindow(button, scope.Window);
         }
+        Capture(scope.Window, $"dashboard-period-cycle-{language}");
+        scope.Window.MouseMove(button.TranslatePoint(new Point(button.Bounds.Width / 2, button.Bounds.Height / 2), scope.Window)!.Value);
+        await Render();
+        Capture(scope.Window, $"dashboard-period-hover-{language}");
     });
 }

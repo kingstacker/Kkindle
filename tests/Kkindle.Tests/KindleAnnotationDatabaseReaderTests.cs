@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Kkindle.Tests;
 
-public sealed class KindleAnnotationDatabaseReaderTests
+public sealed partial class KindleAnnotationDatabaseReaderTests
 {
     private const string BookId =
         "02b1ec32-aa42-4477-b395-b0dc41131082-EBOK-Gui_Mo:97D7128C-0";

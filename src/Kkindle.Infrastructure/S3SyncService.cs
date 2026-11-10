@@ -14,17 +14,17 @@ namespace Kkindle.Infrastructure;
 /// S3/WebDAV synchronisation for Kkindle's logical data.
 ///
 /// The live SQLite database is never placed in the bucket. Each device owns a
-/// compressed snapshot and book bytes are stored as content-addressed objects:
-/// <c>objects/{sha256}</c>. Snapshots are merged by stable IDs/content hashes,
+/// compressed snapshot and book bytes are stored as content-addressed objects
+/// (keyed names when encrypted). Snapshots are merged by stable IDs/content hashes,
 /// and timestamped tombstones carry deletions between devices. This follows
 /// the important part of SiYuan/dejavu's design while keeping Kkindle's
 /// existing SQLite schema and reader services intact.
 /// </summary>
 public sealed partial class S3SyncService : ISyncService
 {
-    // Additive changes keep this wire version. A future wire version can still
-    // be read when its explicit MinimumReaderVersion permits it.
-    private const int SnapshotVersion = 5;
+    // Keyed object names and padded blobs require reader 6. Future additive
+    // changes can still be read when MinimumReaderVersion explicitly permits it.
+    private const int SnapshotVersion = 6;
     private const long MaxSnapshotBytes = 256L * 1024 * 1024;
     private const int EncryptionSaltBytes = 16;
     private const int EncryptionNonceBytes = 12;
@@ -38,6 +38,7 @@ public sealed partial class S3SyncService : ISyncService
     private static readonly TimeSpan UnreferencedBlobRetention = TimeSpan.FromDays(30);
     private static readonly byte[] EncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC1");
     private static readonly byte[] StreamingEncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC2");
+    private static readonly byte[] PaddedEncryptionMagic = Encoding.ASCII.GetBytes("KKINDLE-SYNC3");
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -171,8 +172,7 @@ public sealed partial class S3SyncService : ISyncService
         }
         finally
         {
-            _encryptionSession = null;
-            _derivedEncryptionKeys.Clear();
+            ResetEncryptionSession();
             _syncGate.Release();
         }
     }
@@ -184,19 +184,29 @@ public sealed partial class S3SyncService : ISyncService
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
 
-        if (normalized.Provider == SyncProvider.S3) await _features.EnsureFeatureAsync(DeviceFeature.CustomS3, cancellationToken);
-        using var client = _clientFactory(normalized);
-        // Listing proves the credentials and bucket are usable, and decoding a
-        // single snapshot validates the encryption key. Downloading every
-        // device snapshot here made a connectivity test pull the whole cloud
-        // library before it could report success.
-        var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
-        if (keys.Count > 0)
+        await _features.EnsureFeatureAsync(MemberEntitlements.SyncFeature(normalized.Provider), cancellationToken);
+        await _syncGate.WaitAsync(cancellationToken);
+        try
         {
-            var payload = await DownloadObjectBytesAsync(client, keys[0], cancellationToken);
-            _ = await DecodeSnapshotAsync(payload, normalized.EncryptionKey, cancellationToken);
+            ResetEncryptionSession();
+            using var client = _clientFactory(normalized);
+            // Validate every device snapshot before a probe: a supported older
+            // device must not hide another device's incompatible protocol.
+            // Serialize with sync so session key erasure cannot race decryption.
+            var keys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
+            foreach (var key in keys)
+            {
+                var payload = await DownloadObjectBytesAsync(client, key, cancellationToken);
+                var snapshot = await DecodeSnapshotAsync(payload, normalized.EncryptionKey, cancellationToken);
+                ValidateSnapshotCompatibility(snapshot);
+            }
+            await client.TestWriteAsync(normalized.Prefix, cancellationToken);
         }
-        await client.TestWriteAsync(normalized.Prefix, cancellationToken);
+        finally
+        {
+            ResetEncryptionSession();
+            _syncGate.Release();
+        }
     }
 
     /// Local-only summary for the sync details dialog. It reads the persisted
@@ -246,7 +256,7 @@ public sealed partial class S3SyncService : ISyncService
         ArgumentNullException.ThrowIfNull(file);
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
-        if (normalized.Provider == SyncProvider.S3) await _features.EnsureFeatureAsync(DeviceFeature.CustomS3, cancellationToken);
+        await _features.EnsureFeatureAsync(MemberEntitlements.SyncFeature(normalized.Provider), cancellationToken);
         if (!IsSha256(file.Sha256))
             throw new InvalidDataException("同步文件缺少有效的 SHA-256 校验值。");
 
@@ -258,8 +268,7 @@ public sealed partial class S3SyncService : ISyncService
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
-            _derivedEncryptionKeys.Clear();
-            _legacyBlobKeys = null;
+            ResetEncryptionSession();
             _encryptionSession = normalized.EncryptionKey.Length == 0
                 ? null
                 : CreateEncryptionSession(normalized.EncryptionKey);
@@ -268,6 +277,7 @@ public sealed partial class S3SyncService : ISyncService
             var storageIdentity = BuildStorageIdentity(normalized);
             var state = await LoadStateAsync(deviceId, storageIdentity, cancellationToken);
             using var client = _clientFactory(normalized);
+            await InitializeBlobNamingForDownloadAsync(client, normalized, deviceId, storageIdentity, state, cancellationToken);
             progress?.Report(UiText.Get("正在下载《{0}》…", Path.GetFileName(file.RelativePath)));
             await EnsureLocalBlobAsync(
                 client,
@@ -288,9 +298,7 @@ public sealed partial class S3SyncService : ISyncService
         }
         finally
         {
-            _encryptionSession = null;
-            _legacyBlobKeys = null;
-            _derivedEncryptionKeys.Clear();
+            ResetEncryptionSession();
             _syncGate.Release();
         }
     }
@@ -391,14 +399,13 @@ public sealed partial class S3SyncService : ISyncService
     {
         var normalized = S3SyncSettings.Normalize(settings);
         ThrowIfInvalid(normalized);
-        if (normalized.Provider == SyncProvider.S3) await _features.EnsureFeatureAsync(DeviceFeature.CustomS3, cancellationToken);
+        await _features.EnsureFeatureAsync(MemberEntitlements.SyncFeature(normalized.Provider), cancellationToken);
         deviceId = NormalizeDeviceId(deviceId);
 
         await _syncGate.WaitAsync(cancellationToken);
         try
         {
-            _derivedEncryptionKeys.Clear();
-            _legacyBlobKeys = null;
+            ResetEncryptionSession();
             _encryptionSession = normalized.EncryptionKey.Length == 0
                 ? null
                 : CreateEncryptionSession(normalized.EncryptionKey);
@@ -433,18 +440,21 @@ public sealed partial class S3SyncService : ISyncService
 
             progress?.Report(UiText.Get("正在连接 {0}…", normalized.ProviderName));
             using var client = _clientFactory(normalized);
-            var snapshotKeys = await ListSnapshotKeysAsync(client, normalized, cancellationToken);
+            var snapshotObjects = await ListSnapshotObjectsAsync(client, normalized, cancellationToken);
+            var snapshotKeys = snapshotObjects.Select(item => item.Key).ToList();
 
             // Validate remote encryption before uploading any local bytes.
             progress?.Report(UiText.Get("正在读取其他设备的同步快照…"));
             var remoteSnapshots = await DownloadRemoteSnapshotsAsync(
                 client,
                 normalized,
-                snapshotKeys,
+                snapshotObjects,
+                storageIdentity,
                 deviceId,
                 state.LastUploadedSnapshot is not null,
                 progress,
                 cancellationToken);
+            InitializeBlobNamingSession(normalized, state.LastUploadedSnapshot, remoteSnapshots, createIfMissing: true);
 
             var tombstoneWatermark = Max(
                 local.TombstonesPrunedBefore ?? DateTimeOffset.MinValue,
@@ -560,6 +570,7 @@ public sealed partial class S3SyncService : ISyncService
                 MergeTombstones(FilterReadingTombstones(detectedDeletions, finalSnapshot.ReadingDataReset), recordedTombstones),
                 options?.ConfirmedDeletionFingerprint);
             finalSnapshot.Tombstones = MergeTombstones(finalSnapshot.Tombstones, recordedTombstones);
+            finalSnapshot.BlobNamingSalts = _blobNamingSession?.Salts is { Count: > 0 } salts ? salts.ToArray() : null;
             PreserveForwardCompatibleData(finalSnapshot, state.LastUploadedSnapshot, remoteSnapshots);
 
             // Publish exactly this captured view after all its objects exist.
@@ -568,8 +579,21 @@ public sealed partial class S3SyncService : ISyncService
             var uploadWarning = await UploadLocalObjectsAsync(
                 client, normalized, finalSnapshot, remoteOnlyFileHashes, progress, cancellationToken);
 
-            progress?.Report(UiText.Get("正在保存同步快照…"));
-            await UploadSnapshotAsync(client, normalized, finalSnapshot, cancellationToken);
+            var contentHash = SnapshotContentHash(finalSnapshot);
+            var ownSnapshotPresent = snapshotKeys.Any(key => IsSnapshotKeyForDevice(key, normalized, deviceId));
+            if (ownSnapshotPresent && state.LastSnapshotContentHash == contentHash
+                && state.LastSnapshotUploadAt is { } published && DateTimeOffset.UtcNow - published < SnapshotRepublishInterval)
+            {
+                // Same content as the published copy: keep its timestamp so other devices can reuse their cache.
+                progress?.Report(UiText.Get("同步快照没有变化，跳过上传。"));
+            }
+            else
+            {
+                progress?.Report(UiText.Get("正在保存同步快照…"));
+                await UploadSnapshotAsync(client, normalized, finalSnapshot, cancellationToken);
+                state.LastSnapshotContentHash = contentHash;
+                state.LastSnapshotUploadAt = DateTimeOffset.UtcNow;
+            }
 
             state.DeviceId = deviceId;
             state.StorageIdentity = storageIdentity;
@@ -648,9 +672,7 @@ public sealed partial class S3SyncService : ISyncService
         }
         finally
         {
-            _encryptionSession = null;
-            _legacyBlobKeys = null;
-            _derivedEncryptionKeys.Clear();
+            ResetEncryptionSession();
             _syncGate.Release();
         }
     }
@@ -1291,61 +1313,6 @@ public sealed partial class S3SyncService : ISyncService
     private static string SnapshotKey(S3SyncSettings settings, string deviceId) =>
         $"{settings.Prefix}/devices/{deviceId}/snapshot.bin";
 
-    private static string BlobKey(S3SyncSettings settings, string hash) =>
-        $"{settings.Prefix}/objects/{BlobNamespace(settings)}/{hash.ToLowerInvariant()}";
-
-    private static string BlobNamespace(S3SyncSettings settings)
-    {
-        if (settings.EncryptionKey.Length == 0) return "plain";
-        // A key-derived path exposes a fast password verifier. Custom stores
-        // use a public version marker, account stores use public user identity.
-        // Changing the encryption key still requires a new sync prefix.
-        var identity = settings.Provider == SyncProvider.AccountServer
-            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"KKINDLE-ACCOUNT-OBJECTS1|{AccountRegions.Slug(settings.AccountRegion)}|{settings.AccountUserId:N}"))).ToLowerInvariant()
-            : "v2";
-        return "encrypted/" + identity;
-    }
-
-    private async Task<SyncObjectRead> OpenBlobReadAsync(
-        ISyncObjectStore client, S3SyncSettings settings, string hash,
-        CancellationToken token, long rangeStart)
-    {
-        try { return await client.OpenReadAsync(BlobKey(settings, hash), token, rangeStart); }
-        catch (SyncObjectNotFoundException) when (settings.EncryptionKey.Length > 0
-            && settings.Provider is SyncProvider.S3 or SyncProvider.WebDav)
-        {
-            // Discover old paths from an unkeyed listing. Never send a newly
-            // computed passphrase fingerprint as a listing prefix or guessed
-            // GET path. Legacy objects are read only and remain authenticated.
-            await _legacyBlobGate.WaitAsync(token);
-            string? legacyKey;
-            try
-            {
-                if (_legacyBlobKeys is null)
-                {
-                    var root = $"{settings.Prefix}/objects/encrypted/";
-                    IReadOnlyList<string> listed;
-                    try { listed = await client.ListKeysAsync(root, token); }
-                    catch (SyncListingUnavailableException)
-                    {
-                        throw new InvalidDataException("读取旧版加密对象需要目录列表权限，请允许列出加密对象目录后重试。");
-                    }
-                    var legacyPrefix = root + EncryptionKeyFingerprint(settings.EncryptionKey) + "/";
-                    _legacyBlobKeys = listed.Where(key => key.StartsWith(legacyPrefix, StringComparison.OrdinalIgnoreCase)
-                            && IsSha256(key[legacyPrefix.Length..]))
-                        .GroupBy(key => key[legacyPrefix.Length..], StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-                }
-                legacyKey = _legacyBlobKeys.GetValueOrDefault(hash);
-            }
-            finally { _legacyBlobGate.Release(); }
-            if (legacyKey is null) throw new SyncObjectNotFoundException("远端同步对象不存在。");
-            // The legacy ciphertext may differ from a partial v2 download.
-            return await client.OpenReadAsync(legacyKey, token, rangeStart: 0);
-        }
-    }
-
     private static string EncryptionKeyFingerprint(string encryptionKey) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(encryptionKey))).ToLowerInvariant();
 
@@ -1364,6 +1331,58 @@ public sealed partial class S3SyncService : ISyncService
             ? new AccountSyncObjectStore(settings, accounts)
             : CreateObjectStore(settings);
         return new RegionalSyncObjectStore(store, accounts, region);
+    }
+
+    /// <summary>Snapshots older than this are republished even when unchanged, well before peers treat the device as retired.</summary>
+    private static readonly TimeSpan SnapshotRepublishInterval = TimeSpan.FromDays(30);
+
+    private static async Task<List<SyncObjectMetadata>> ListSnapshotObjectsAsync(
+        ISyncObjectStore client,
+        S3SyncSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var items = await client.ListObjectsAsync($"{settings.Prefix}/devices/", cancellationToken);
+        return items.Where(item => item.Key.EndsWith("/snapshot.bin", StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private static string SnapshotContentHash(S3SyncSnapshot snapshot)
+    {
+        var created = snapshot.CreatedAt;
+        try
+        {
+            snapshot.CreatedAt = default;
+            return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions)));
+        }
+        finally { snapshot.CreatedAt = created; }
+    }
+
+    private string SnapshotCacheDirectory => Path.Combine(_paths.Data, "s3-sync-snapshot-cache");
+
+    /// <summary>
+    /// Remote snapshots are cached as the encrypted bytes the store returned, keyed by object key and modification
+    /// time. WebDAV reports whole seconds only, so it is never served from the cache.
+    /// </summary>
+    private string? SnapshotCachePath(S3SyncSettings settings, string storageIdentity, SyncObjectMetadata item) =>
+        settings.Provider == SyncProvider.WebDav || item.LastModified is not { } modified ? null
+            : Path.Combine(SnapshotCacheDirectory, SnapshotCacheStem(storageIdentity, item.Key) + "-" + modified.UtcTicks + ".bin");
+
+    private static string SnapshotCacheStem(string storageIdentity, string key) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(storageIdentity + "\n" + key))).ToLowerInvariant();
+
+    private void PruneSnapshotCache(string storageIdentity, IEnumerable<string> keepPaths, IEnumerable<string> listedKeys)
+    {
+        if (!Directory.Exists(SnapshotCacheDirectory)) return;
+        var keep = keepPaths.ToHashSet(StringComparer.Ordinal);
+        var stems = listedKeys.Select(key => SnapshotCacheStem(storageIdentity, key)).ToHashSet(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(SnapshotCacheDirectory, "*.bin"))
+        {
+            var name = Path.GetFileName(file);
+            var stem = name.Split('-')[0];
+            // Drop superseded versions of listed keys; entries of other storages expire after 30 days unused.
+            if (keep.Contains(file)) continue;
+            if (stems.Contains(stem) || File.GetLastWriteTimeUtc(file) < DateTime.UtcNow.AddDays(-30))
+                try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static async Task<List<string>> ListSnapshotKeysAsync(
@@ -1473,13 +1492,13 @@ public sealed partial class S3SyncService : ISyncService
         CancellationToken cancellationToken)
     {
         var key = BlobKey(settings, item.Hash);
-        if (existingKeys is not null)
+        // Concurrent first syncs may have created independent random naming salts.
+        // Read/deduplicate every retained salt, then publish new objects under the
+        // same canonical namespace on all devices. No salt can orphan an object.
+        foreach (var candidate in BlobKeys(settings, item.Hash))
         {
-            if (existingKeys.ContainsKey(key)) return;
-        }
-        else if (await client.ExistsAsync(key, cancellationToken))
-        {
-            return;
+            if (existingKeys is not null ? existingKeys.ContainsKey(candidate)
+                : await client.ExistsAsync(candidate, cancellationToken)) return;
         }
 
         // Hold the same input stream through validation and upload. On Windows
@@ -1521,16 +1540,16 @@ public sealed partial class S3SyncService : ISyncService
         }
     }
 
-    private static async Task<ConcurrentDictionary<string, byte>?> TryListBlobKeysAsync(
+    private async Task<ConcurrentDictionary<string, byte>?> TryListBlobKeysAsync(
         ISyncObjectStore client,
         S3SyncSettings settings,
         CancellationToken cancellationToken)
     {
         var keys = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-        var prefix = $"{settings.Prefix}/objects/{BlobNamespace(settings)}/";
         try
         {
-            foreach (var key in await client.ListKeysAsync(prefix, cancellationToken)) keys.TryAdd(key, 0);
+            foreach (var prefix in BlobPrefixes(settings))
+                foreach (var key in await client.ListKeysAsync(prefix, cancellationToken)) keys.TryAdd(key, 0);
             return keys;
         }
         catch (SyncListingUnavailableException)
@@ -1649,15 +1668,16 @@ public sealed partial class S3SyncService : ISyncService
         {
             foreach (var hash in SyncEntities.SelectMany(entity => entity.Rows(snapshot))
                          .Select(row => row.BlobHash).Where(IsSha256))
-                referencedBlobKeys.Add(BlobKey(settings, hash!));
+                referencedBlobKeys.UnionWith(BlobKeys(settings, hash!));
         }
 
         IReadOnlyList<SyncObjectMetadata> blobObjects;
         try
         {
-            blobObjects = await client.ListObjectsAsync(
-                BlobKey(settings, string.Empty),
-                cancellationToken);
+            var listed = new List<SyncObjectMetadata>();
+            foreach (var prefix in BlobPrefixes(settings))
+                listed.AddRange(await client.ListObjectsAsync(prefix, cancellationToken));
+            blobObjects = listed;
         }
         catch (SyncListingUnavailableException)
         {
@@ -1848,15 +1868,17 @@ public sealed partial class S3SyncService : ISyncService
     private async Task<List<S3SyncSnapshot>> DownloadRemoteSnapshotsAsync(
         ISyncObjectStore client,
         S3SyncSettings settings,
-        IReadOnlyList<string> snapshotKeys,
+        IReadOnlyList<SyncObjectMetadata> snapshotObjects,
+        string storageIdentity,
         string localDeviceId,
         bool skipOwnSnapshot,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        var keysToRead = snapshotKeys
-            .Where(key => !skipOwnSnapshot || !IsSnapshotKeyForDevice(key, settings, localDeviceId))
+        var keysToRead = snapshotObjects
+            .Where(item => !skipOwnSnapshot || !IsSnapshotKeyForDevice(item.Key, settings, localDeviceId))
             .ToArray();
+        var cachePaths = keysToRead.Select(item => SnapshotCachePath(settings, storageIdentity, item)).ToArray();
         var results = new S3SyncSnapshot?[keysToRead.Length];
         var processed = 0;
         await Parallel.ForEachAsync(
@@ -1868,7 +1890,24 @@ public sealed partial class S3SyncService : ISyncService
             },
             async (index, token) =>
             {
-                var payload = await DownloadObjectBytesAsync(client, keysToRead[index], token);
+                var cachePath = cachePaths[index];
+                byte[]? payload = null;
+                if (cachePath is not null && File.Exists(cachePath))
+                {
+                    try { payload = await File.ReadAllBytesAsync(cachePath, token); }
+                    catch (IOException) { payload = null; }
+                }
+                if (payload is null)
+                {
+                    payload = await DownloadObjectBytesAsync(client, keysToRead[index].Key, token);
+                    if (cachePath is not null)
+                    {
+                        Directory.CreateDirectory(SnapshotCacheDirectory);
+                        var temporary = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                        await File.WriteAllBytesAsync(temporary, payload, token);
+                        File.Move(temporary, cachePath, overwrite: true);
+                    }
+                }
                 var snapshot = await DecodeSnapshotAsync(payload, settings.EncryptionKey, token);
                 ValidateSnapshotCompatibility(snapshot);
                 ReaderReadingDataReset.Validate(snapshot.ReadingDataReset);
@@ -1880,6 +1919,7 @@ public sealed partial class S3SyncService : ISyncService
                 progress?.Report(UiText.Get("已读取 {0}/{1} 台设备的快照…",
                     Interlocked.Increment(ref processed), keysToRead.Length));
             });
+        PruneSnapshotCache(storageIdentity, cachePaths.Where(path => path is not null)!, keysToRead.Select(item => item.Key));
         return results.Where(snapshot => snapshot is not null)
             .Select(snapshot => snapshot!)
             .ToList();
@@ -2126,51 +2166,9 @@ public sealed partial class S3SyncService : ISyncService
         await EncryptStreamToPathAsync(input, targetPath, passphrase, cancellationToken);
     }
 
-    private async Task EncryptStreamToPathAsync(
-        Stream input, string targetPath, string passphrase, CancellationToken cancellationToken)
-    {
-        var material = GetEncryptionMaterial(passphrase);
-        await using var output = new FileStream(
-            targetPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            BlobEncryptionChunkBytes,
-            useAsync: true);
-
-        await output.WriteAsync(StreamingEncryptionMagic, cancellationToken);
-        await output.WriteAsync(material.Salt, cancellationToken);
-        await WriteInt32Async(output, BlobEncryptionChunkBytes, cancellationToken);
-
-        var buffer = new byte[BlobEncryptionChunkBytes];
-        var chunkIndex = 0;
-        using var aes = new AesGcm(material.Key, EncryptionTagBytes);
-        while (true)
-        {
-            var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken);
-            if (read == 0) break;
-
-            var nonce = RandomNumberGenerator.GetBytes(EncryptionNonceBytes);
-            var ciphertext = new byte[read];
-            var tag = new byte[EncryptionTagBytes];
-            var associatedData = BuildChunkAssociatedData(chunkIndex++);
-            aes.Encrypt(
-                nonce,
-                buffer.AsSpan(0, read),
-                ciphertext,
-                tag,
-                associatedData);
-            await WriteInt32Async(output, read, cancellationToken);
-            await output.WriteAsync(nonce, cancellationToken);
-            await output.WriteAsync(tag, cancellationToken);
-            await output.WriteAsync(ciphertext, cancellationToken);
-        }
-
-        // A zero-length record terminates the stream. Empty files therefore
-        // remain representable without a special case.
-        await WriteInt32Async(output, 0, cancellationToken);
-        await output.FlushAsync(cancellationToken);
-    }
+    private Task EncryptStreamToPathAsync(
+        Stream input, string targetPath, string passphrase, CancellationToken cancellationToken) =>
+        EncryptPaddedBlobToPathAsync(input, targetPath, passphrase, cancellationToken);
 
     private async Task DecryptBlobToPathAsync(
         Stream encryptedStream,
@@ -2180,6 +2178,11 @@ public sealed partial class S3SyncService : ISyncService
     {
         var prefix = new byte[StreamingEncryptionMagic.Length];
         await ReadExactlyAsync(encryptedStream, prefix, cancellationToken);
+        if (prefix.AsSpan().SequenceEqual(PaddedEncryptionMagic))
+        {
+            await DecryptPaddedBlobToPathAsync(encryptedStream, targetPath, passphrase, cancellationToken);
+            return;
+        }
         if (!prefix.AsSpan().SequenceEqual(StreamingEncryptionMagic))
         {
             // Objects written by older versions use the one-shot format. Keep

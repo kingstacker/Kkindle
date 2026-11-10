@@ -16,12 +16,15 @@ internal sealed class PersistedRegionalAccount
     public AccountRegion Region { get; init; }
     public string ServerUrl { get; init; } = "";
     public string ProtectedSession { get; init; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? UsesDefaultServerUrl { get; init; }
 }
 
-internal sealed class RegionalAccountConnection(string serverUrl, AccountSessionResponse? session)
+internal sealed class RegionalAccountConnection(string serverUrl, AccountSessionResponse? session, bool? usesDefaultServerUrl = null)
 {
     public string ServerUrl { get; } = serverUrl;
     public AccountSessionResponse? Session { get; } = session;
+    public bool? UsesDefaultServerUrl { get; } = usesDefaultServerUrl;
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
@@ -65,7 +68,7 @@ internal sealed class AccountSessionStore(AppPaths paths, ISecretProtector prote
             }
             catch (Exception exception) when (exception is CryptographicException or FormatException or JsonException) { }
             finally { if (clear is not null) CryptographicOperations.ZeroMemory(clear); }
-            connections[item.Region] = new(server, session);
+            connections[item.Region] = new(server, session, item.UsesDefaultServerUrl);
         }
         return (Enum.IsDefined(settings.ActiveRegion) ? settings.ActiveRegion : AccountRegion.China, connections);
     }
@@ -84,7 +87,8 @@ internal sealed class AccountSessionStore(AppPaths paths, ISecretProtector prote
                 try { encrypted = Convert.ToBase64String(protector.Protect(clear)); }
                 finally { CryptographicOperations.ZeroMemory(clear); }
             }
-            values.Add(new() { Region = region, ServerUrl = connection.ServerUrl, ProtectedSession = encrypted });
+            values.Add(new() { Region = region, ServerUrl = connection.ServerUrl, ProtectedSession = encrypted,
+                UsesDefaultServerUrl = connection.UsesDefaultServerUrl });
         }
         var temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try

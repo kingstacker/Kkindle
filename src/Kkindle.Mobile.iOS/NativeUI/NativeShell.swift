@@ -4,6 +4,22 @@ import ImageIO
 
 struct NativeShell: View {
     @ObservedObject var store: NativeStore
+    @Environment(\.colorScheme) private var systemColorScheme
+    private var appColorScheme: ColorScheme {
+        switch store.preferences.themeMode {
+        case 1: return .light
+        case 2: return .dark
+        default: return systemColorScheme
+        }
+    }
+    private var ambientBooks: [LibraryBook] {
+        Array(store.library.filter { $0.coverPath != nil }
+            .sorted { $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt > $1.updatedAt }.prefix(18))
+    }
+    private var ambientKey: String {
+        guard store.preferences.colorfulMode else { return "off" }
+        return ambientBooks.map { "\($0.coverPath ?? "")|\($0.updatedAt)" }.joined(separator: "\n")
+    }
     var body: some View {
         TabView {
             NavigationView { NativeLibraryPage(store: store) }.navigationViewStyle(.stack)
@@ -17,11 +33,22 @@ struct NativeShell: View {
         }
         .font(NativeTheme.font()).foregroundStyle(NativeTheme.ink).tint(NativeTheme.ink)
         .environment(\.symbolVariants, .none)
-        .background(NativeTheme.page).preferredColorScheme(store.preferences.colorScheme)
-        .fullScreenCover(item: $store.readerBook) { book in NativeReaderPage(store: store, session: store.session, book: book) }
+        .background(NativeAmbientBackground()).preferredColorScheme(store.preferences.colorScheme)
+        .fullScreenCover(item: $store.readerBook) { book in
+            NativeReaderPage(store: store, session: store.session, book: book,
+                             appColorScheme: appColorScheme, appearanceSessionId: store.session.appearanceSessionId)
+        }
         .sheet(item: $store.txtReview) { review in NativeTxtReview(store: store, review: review) }
         .modifier(NativeFeedback(store: store, active: store.readerBook == nil))
         .disabled(store.restartRequired || store.dataBusy)
+        .task(id: ambientKey) {
+            guard store.preferences.colorfulMode else { store.ambientColors = []; return }
+            let paths = ambientBooks.compactMap(\.coverPath)
+            let colors = await Task.detached(priority: .utility) { NativeAmbientPalette.extract(paths: paths) }.value
+            guard !Task.isCancelled else { return }
+            store.ambientColors = colors
+        }
+        .environmentObject(store)
         .overlay {
             if store.restartRequired {
                 VStack(spacing: 16) {

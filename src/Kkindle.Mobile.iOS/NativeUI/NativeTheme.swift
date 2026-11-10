@@ -8,6 +8,9 @@ enum NativeTheme {
         .custom("KingHwaOldSong", size: size, relativeTo: style)
     }
 
+    /// The top-level tab pages use one title size so their headers align.
+    static let pageTitleFont = font(26, relativeTo: .largeTitle)
+
     private static func color(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
             let value = traits.userInterfaceStyle == .dark ? dark : light
@@ -22,22 +25,54 @@ enum NativeTheme {
     static let sunk = color(0xf5f5f5, 0x2a2a2a)
     static let strong = color(0xe6e6e6, 0x3a3a3a)
     static let ink = color(0x1c1c1c, 0xededed)
+    static let systemSwitchTint = Color(uiColor: .systemGreen)
     static let secondary = color(0x5e5e5e, 0xb0b0b0)
     static let muted = color(0x767676, 0x8c8c8c)
+    // Text drawn directly on the colourful wash: the pastel background lifts
+    // luminance, so the neutral greys lose contrast and need a deeper tone.
+    static let secondaryOnColorful = color(0x464646, 0xc8c8c8)
+    static let mutedOnColorful = color(0x565656, 0xb4b4b4)
     static let faint = color(0x9a9a9a, 0x6e6e6e)
     static let divider = color(0xefefef, 0x262626)
+    // Plan and notice accents shared with the desktop account center.
+    static let planFree = color(0x667085, 0xb0b8c6)
+    static let planLifetime = color(0x7955b4, 0xbaa0ea)
+    static let planPlus = color(0x98651d, 0xe6bc75)
+    static let success = color(0x288064, 0x78c8ac)
+    static let warning = color(0xa76b19, 0xe6bc75)
+
+    static func planAccent(_ plan: String) -> Color {
+        plan == "plus" ? planPlus : plan == "lifetime" ? planLifetime : planFree
+    }
 
     @MainActor static func configureControls() {
+        if #unavailable(iOS 16.0) {
+            // iOS 15 lists use UITableView and cannot hide their scroll background in SwiftUI.
+            UITableView.appearance().backgroundColor = .clear
+        }
         func uiFont(_ size: CGFloat) -> UIFont { UIFont(name: "KingHwaOldSong", size: size) ?? .systemFont(ofSize: size) }
         let navigation = UINavigationBarAppearance()
         navigation.configureWithTransparentBackground()
         navigation.titleTextAttributes = [.font: uiFont(17), .foregroundColor: UIColor.label]
         navigation.largeTitleTextAttributes = [.font: uiFont(26), .foregroundColor: UIColor.label]
+        // Back and toolbar titles are drawn by UINavigationBar, not by the
+        // SwiftUI font environment, so give both button appearances the font.
+        for appearance in [navigation.buttonAppearance, navigation.backButtonAppearance,
+                           navigation.doneButtonAppearance] {
+            appearance.normal.titleTextAttributes = [.font: uiFont(15)]
+            appearance.highlighted.titleTextAttributes = [.font: uiFont(15)]
+            appearance.disabled.titleTextAttributes = [.font: uiFont(15)]
+        }
         UINavigationBar.appearance().standardAppearance = navigation
         UINavigationBar.appearance().scrollEdgeAppearance = navigation
         UINavigationBar.appearance().compactAppearance = navigation
         UIBarButtonItem.appearance().setTitleTextAttributes([.font: uiFont(15)], for: .normal)
         UIBarButtonItem.appearance().setTitleTextAttributes([.font: uiFont(15)], for: .disabled)
+        // SwiftUI's segmented Picker is a UISegmentedControl; only the title
+        // font is replaced so the system track, selection and glass stay intact.
+        for state: UIControl.State in [.normal, .selected, .highlighted, .disabled] {
+            UISegmentedControl.appearance().setTitleTextAttributes([.font: uiFont(13)], for: state)
+        }
         UITabBarItem.appearance().setTitleTextAttributes([.font: uiFont(10)], for: .normal)
         UITabBarItem.appearance().setTitleTextAttributes([.font: uiFont(10)], for: .selected)
         UITabBar.appearance().tintColor = .label
@@ -105,8 +140,9 @@ struct NativeToggle: View {
     @Binding var isOn: Bool
     var identifier = ""
     var body: some View {
-        HStack {
-            Text(title).font(NativeTheme.font()).accessibilityHidden(true)
+        HStack(spacing: 12) {
+            Text(title).font(NativeTheme.font(13)).foregroundStyle(NativeTheme.secondary)
+                .frame(width: 58, alignment: .leading).accessibilityHidden(true)
             Spacer(minLength: 12)
             NativeSwitch(title: title, isOn: $isOn, identifier: identifier).fixedSize()
         }.frame(minHeight: 44).accessibilityElement(children: .contain)
@@ -115,7 +151,7 @@ struct NativeToggle: View {
 
 /// Keep UIKit's switch bounds and accessibility element together. SwiftUI can
 /// expand a Toggle's accessibility frame to its List row after scrolling.
-private struct NativeSwitch: UIViewRepresentable {
+struct NativeSwitch: UIViewRepresentable {
     let title: String
     @Binding var isOn: Bool
     let identifier: String
@@ -136,6 +172,7 @@ private struct NativeSwitch: UIViewRepresentable {
     func updateUIView(_ control: UISwitch, context: Context) {
         context.coordinator.isOn = $isOn
         control.isEnabled = enabled
+        control.onTintColor = nil
         control.accessibilityLabel = title
         control.accessibilityIdentifier = identifier
         if control.isOn != isOn { control.setOn(isOn, animated: false) }
@@ -170,12 +207,14 @@ struct NativeThinProgress: View {
 /// Plain native rows keep the keyboard, scrolling and accessibility behavior
 /// of List without introducing the gray grouped Settings-app appearance.
 struct NativeForm<Content: View>: View {
-    @ViewBuilder let content: Content
+    @EnvironmentObject private var store: NativeStore
+    let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
         List {
             content
                 .listRowInsets(EdgeInsets(top: 13, leading: 24, bottom: 13, trailing: 24))
-                .listRowSeparator(.hidden).listRowBackground(NativeTheme.page)
+                .listRowSeparator(.hidden).listRowBackground(store.preferences.colorfulMode ? Color.clear : NativeTheme.page)
         }.listStyle(.plain).textCase(nil).font(NativeTheme.font()).buttonStyle(.borderless)
             .modifier(NativeListBackground())
     }
@@ -183,8 +222,8 @@ struct NativeForm<Content: View>: View {
 
 struct NativeListBackground: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 16.0, *) { content.scrollContentBackground(.hidden).background(NativeTheme.page) }
-        else { content.background(NativeTheme.page) }
+        if #available(iOS 16.0, *) { content.scrollContentBackground(.hidden).background(NativeAmbientBackground()) }
+        else { content.background(NativeAmbientBackground()) }
     }
 }
 
@@ -202,4 +241,58 @@ struct NativeHideTabBar: ViewModifier {
         if #available(iOS 16.0, *) { content.toolbar(.hidden, for: .tabBar) }
         else { content }
     }
+}
+
+/// The system back button grows into a translucent history menu on long press;
+/// over a transparent bar that pill blurs the page title into a ghost. A plain
+/// chevron keeps the same back behavior without that overlay.
+struct NativeBackButton: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    func body(content: Content) -> some View {
+        content.navigationBarBackButtonHidden(true)
+            .background(NativeSwipeBackEnabler().frame(width: 0, height: 0))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "chevron.left") }
+                        .accessibilityLabel("返回")
+                }
+            }
+    }
+}
+
+/// Hiding the system back button also disables the leading-edge swipe. Hook the
+/// existing pop gesture back up, but only while there is a page to pop to.
+private struct NativeSwipeBackEnabler: UIViewControllerRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        let controller = UIViewController()
+        context.coordinator.host = controller
+        DispatchQueue.main.async { context.coordinator.install() }
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        context.coordinator.host = uiViewController
+        DispatchQueue.main.async { context.coordinator.install() }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        weak var host: UIViewController?
+
+        func install() {
+            guard let navigation = host?.navigationController,
+                  let gesture = navigation.interactivePopGestureRecognizer else { return }
+            gesture.delegate = self
+            gesture.isEnabled = true
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            (host?.navigationController?.viewControllers.count ?? 0) > 1
+        }
+    }
+}
+
+extension View {
+    func nativeBackButton() -> some View { modifier(NativeBackButton()) }
 }

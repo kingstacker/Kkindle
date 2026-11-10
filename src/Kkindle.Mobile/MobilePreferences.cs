@@ -32,10 +32,17 @@ public sealed record MobilePreferences
 {
     public MobileThemeMode ThemeMode { get; init; }
     public bool ListView { get; init; }
+    /// <summary>Grid gallery: show covers only, hiding title, author and progress.</summary>
+    public bool GalleryMode { get; init; }
+    /// <summary>Use colours sampled from book covers for the native app background.</summary>
+    public bool ColorfulMode { get; init; }
+    public bool ShowBookSyncStatus { get; init; }
     public bool CollectionsView { get; init; }
     public double PdfZoom { get; init; } = 1;
     public MobileBookSort Sort { get; init; }
     public ReaderTheme ReaderTheme { get; init; }
+    /// <summary>Follow the app's effective light or dark appearance for reader paper.</summary>
+    public bool ReaderThemeFollowsAppearance { get; init; } = true;
     public double ReaderFontScale { get; init; } = 1.35;
     public double ReaderLineHeight { get; init; } = 1.75;
     public double ReaderParagraphSpacing { get; init; } = ReaderLayoutDefaults.DefaultParagraphSpacing;
@@ -46,6 +53,10 @@ public sealed record MobilePreferences
     /// <summary>Vertical right-to-left typesetting, the traditional CJK layout.</summary>
     public bool ReaderVerticalWriting { get; init; }
     public MobilePageAnimation ReaderPageAnimation { get; init; } = MobilePageAnimation.Fade;
+
+    public ReaderTheme ResolveReaderTheme(bool darkAppearance) => ReaderThemeFollowsAppearance
+        ? (darkAppearance ? Kkindle.Core.ReaderTheme.Ink : Kkindle.Core.ReaderTheme.Classic)
+        : ReaderTheme;
 }
 
 /// <summary>
@@ -63,7 +74,18 @@ public sealed class MobilePreferencesStore(AppPaths paths)
         try
         {
             if (File.Exists(_path))
-                Current = JsonSerializer.Deserialize<MobilePreferences>(File.ReadAllText(_path)) ?? new();
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(_path));
+                var root = document.RootElement;
+                var current = root.Deserialize<MobilePreferences>() ?? new();
+                // Older settings cannot tell whether the paper was chosen manually.
+                // Preserve their existing appearance instead of changing it on upgrade.
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty(nameof(MobilePreferences.ReaderTheme), out _)
+                    && !root.TryGetProperty(nameof(MobilePreferences.ReaderThemeFollowsAppearance), out _))
+                    current = current with { ReaderThemeFollowsAppearance = false };
+                Current = current;
+            }
         }
         catch (Exception exception) when (exception is IOException or JsonException
             or UnauthorizedAccessException)

@@ -20,10 +20,14 @@ struct Done: Decodable {}
 struct MobilePreferences: Codable, Equatable {
     var themeMode = 0
     var listView = false
+    var galleryMode = false
+    var colorfulMode = false
+    var showBookSyncStatus = false
     var collectionsView = false
     var pdfZoom = 1.0
     var sort = 0
     var readerTheme = 0
+    var readerThemeFollowsAppearance = true
     var readerFontScale = 1.35
     var readerLineHeight = 1.75
     var readerParagraphSpacing = 0.0
@@ -37,8 +41,8 @@ struct MobilePreferences: Codable, Equatable {
     }
     /// The page colours from `ReaderPalette`. SwiftUI fills the margins around
     /// the rendered page, so any difference shows as a band above and below it.
-    var paper: Color {
-        switch readerTheme {
+    func paper(for theme: Int) -> Color {
+        switch theme {
         case 1: return Color(red: 244 / 255, green: 242 / 255, blue: 236 / 255)
         case 2: return Color(red: 238 / 255, green: 243 / 255, blue: 236 / 255)
         case 5: return Color(red: 14 / 255, green: 14 / 255, blue: 14 / 255)
@@ -57,6 +61,7 @@ struct LibraryBook: Decodable, Identifiable, Equatable {
     let progress: Double
     let favorite: Bool
     let readingStatus: Int
+    let syncStatus: Int?
     let collectionIds: [String]
     let updatedAt: String
     let createdAt: String
@@ -131,6 +136,7 @@ final class NativeReaderSession: ObservableObject {
     @Published var state = ReaderSnapshot()
     @Published var dialog: ReaderDialog?
     @Published var aiStreams: [String: String] = [:]
+    var appearanceSessionId = ""
 }
 
 @MainActor
@@ -139,6 +145,7 @@ final class NativeStore: ObservableObject {
     let readerController: UIViewController
     @Published var library: [LibraryBook] = []
     @Published var folders: [LibraryFolder] = []
+    @Published var ambientColors: [NativeAmbientColor] = []
     @Published var preferences = MobilePreferences()
     @Published var continueBookId: String?
     @Published var readerBook: LibraryBook?
@@ -161,6 +168,7 @@ final class NativeStore: ObservableObject {
     private var toastTask: Task<Void, Never>?
     private var preferenceRevision = 0
     private var preferenceWrites = 0
+    private var libraryRefreshRevision = 0
 
     init(handler: @escaping ManagedRequest, readerController: UIViewController) {
         self.handler = handler
@@ -223,7 +231,10 @@ final class NativeStore: ObservableObject {
 
     func refreshLibrary() async throws {
         let revision = preferenceRevision
+        libraryRefreshRevision += 1
+        let refreshRevision = libraryRefreshRevision
         let value: LibrarySnapshot = try await request("library.get")
+        guard refreshRevision == libraryRefreshRevision else { return }
         // Every assignment re-renders all tabs, even with an equal value.
         if library != value.books { library = value.books }
         if folders != value.collections { folders = value.collections }
@@ -247,7 +258,14 @@ final class NativeStore: ObservableObject {
             do {
                 let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
                 let saved: MobilePreferences = try await self.request("preferences.save", ["preferences": object])
-                if self.preferenceRevision == revision { self.preferences = saved }
+                if self.preferenceRevision == revision {
+                    self.preferences = saved
+                    // A second setting may have superseded the request that enabled badges.
+                    if saved.showBookSyncStatus || previous.showBookSyncStatus {
+                        do { try await self.refreshLibrary() }
+                        catch { if !Task.isCancelled { self.failure = error.localizedDescription } }
+                    }
+                }
             } catch {
                 if self.preferenceRevision == revision { self.preferences = previous }
                 throw error
@@ -261,7 +279,8 @@ final class NativeStore: ObservableObject {
         defer { openingReader = false }
         session.state = ReaderSnapshot()
         session.dialog = nil
-        var args: [String: Any] = ["bookId": book.id]
+        session.appearanceSessionId = UUID().uuidString
+        var args: [String: Any] = ["bookId": book.id, "sessionId": session.appearanceSessionId]
         if let location { args["location"] = location }
         let _: Done = try await request("reader.open", args)
         readerBook = book

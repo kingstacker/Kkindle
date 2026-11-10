@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Kkindle.Core;
 
@@ -22,9 +23,9 @@ public partial class MainWindow
             // is used and the system tints them for light/dark menu bars. The
             // full app icon is an opaque square, which would render as a solid
             // block, so the menu bar uses a transparent glyph instead.
-            var icon = new WindowIcon(AssetLoader.Open(new Uri(OperatingSystem.IsMacOS()
-                ? "avares://Kkindle.App/Assets/Icons/tray.png"
-                : "avares://Kkindle.App/Assets/Icons/kkindle.png")));
+            var icon = OperatingSystem.IsMacOS()
+                ? CreateMacTrayIcon()
+                : new WindowIcon(AssetLoader.Open(new Uri("avares://Kkindle.App/Assets/Icons/kkindle.png")));
 
             var openItem = new NativeMenuItem(T("打开 Kkindle"));
             openItem.Click += (_, _) => RestoreFromTray();
@@ -60,6 +61,35 @@ public partial class MainWindow
         {
             // A missing tray icon must not prevent startup either.
             _trayIcon = null;
+        }
+    }
+
+    private static WindowIcon CreateMacTrayIcon()
+    {
+        var uri = new Uri("avares://Kkindle.App/Assets/Icons/tray.png");
+        try
+        {
+            using var source = new Bitmap(AssetLoader.Open(uri));
+            using var enlarged = new RenderTargetBitmap(new PixelSize(128, 128));
+            using (var drawing = enlarged.CreateDrawingContext())
+            {
+                // The source has generous transparent padding. Keep a small
+                // margin while using more of the menu bar's available height.
+                var sourceSize = source.Size;
+                drawing.DrawImage(source,
+                    new Rect(sourceSize.Width * 14 / 128, sourceSize.Height * 14 / 128,
+                        sourceSize.Width * 100 / 128, sourceSize.Height * 100 / 128),
+                    new Rect(0, 0, 128, 128));
+            }
+            using var stream = new MemoryStream();
+            enlarged.Save(stream, PngBitmapEncoderOptions.Default);
+            stream.Position = 0;
+            return new WindowIcon(stream);
+        }
+        catch
+        {
+            // Retain a usable tray icon if the platform cannot render a bitmap.
+            return new WindowIcon(AssetLoader.Open(uri));
         }
     }
 

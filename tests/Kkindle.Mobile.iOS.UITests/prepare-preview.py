@@ -58,6 +58,7 @@ def main() -> None:
         if path.is_dir():
             shutil.copytree(path, seed_data / name)
     with sqlite3.connect(seed_data / "kkindle.db") as database:
+        fixture = {}
         for extension, title in (("epub", "Native UI EPUB"), ("pdf", "Native UI PDF")):
             row = database.execute(
                 "SELECT BookId FROM BookFiles WHERE lower(Format) = ? ORDER BY BookId LIMIT 1", (extension,)
@@ -65,6 +66,13 @@ def main() -> None:
             if row is None:
                 parser.error(f"The seed needs at least one local {extension.upper()} book.")
             database.execute("UPDATE Books SET Title = ? WHERE Id = ?", (title, row[0]))
+            fixture[extension] = row[0]
+        # The library filter test needs one book with several authors, a tag
+        # and a category; real libraries may not have any of those values.
+        database.execute(
+            "UPDATE Books SET Authors = ?, Tags = ?, Category = ? WHERE Id = ?",
+            ("筛选作者12, 筛选作者甲, 筛选作者乙", "测试标签", "测试分类", fixture["epub"]),
+        )
 
     run("codesign", "--force", "--deep", "--sign", "-", str(preview_app))
     if args.upgrade_preview:

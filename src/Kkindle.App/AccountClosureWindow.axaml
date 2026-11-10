@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Kkindle.AccountClosureWindow" Title="{DynamicResource Ui.Account.CloseAccount}"
+        Width="460" SizeToContent="Height" CanResize="False" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource PaperBrush}"
+        FontFamily="{StaticResource DefaultAppFontFamily}">
+  <Window.Styles>
+    <Style Selector="TextBlock"><Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" /></Style>
+    <Style Selector="TextBox"><Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" /></Style>
+    <Style Selector="Button"><Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" /></Style>
+  </Window.Styles>
+  <StackPanel Margin="24" Spacing="14">
+    <TextBlock Text="{DynamicResource Ui.Account.CloseAccountQuestion}" FontSize="21" FontWeight="SemiBold" TextWrapping="Wrap" />
+    <TextBlock Text="{DynamicResource Ui.Account.CloseAccountWarning}" FontSize="13" TextWrapping="Wrap" />
+    <TextBlock Text="{DynamicResource Ui.Account.CurrentPassword}" FontSize="13" />
+    <TextBox Name="ClosurePasswordBox" PasswordChar="•" MaxLength="128" TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" TextChanged="OnConfirmationChanged" />
+    <TextBlock Text="{DynamicResource Ui.Account.CloseAccountTypeHint}" FontSize="13" TextWrapping="Wrap" />
+    <TextBox Name="ClosureConfirmationBox" MaxLength="20" TextChanged="OnConfirmationChanged" />
+    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right">
+      <Button Name="ClosureCancelButton" Content="{DynamicResource Ui.Account.Cancel}" Click="OnCancelClick" />
+      <Button Name="ClosureConfirmButton" Content="{DynamicResource Ui.Account.ConfirmClosure}" IsEnabled="False" Click="OnConfirmClick" />
+    </StackPanel>
+  </StackPanel>
+</Window>

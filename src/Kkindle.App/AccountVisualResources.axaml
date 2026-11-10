@@ -1,0 +1,45 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Default">
+      <SolidColorBrush x:Key="AccountFreeAccentBrush" Color="#667085" />
+      <SolidColorBrush x:Key="AccountFreeTintBrush" Color="#11667085" />
+      <SolidColorBrush x:Key="AccountLifetimeAccentBrush" Color="#7955B4" />
+      <SolidColorBrush x:Key="AccountLifetimeTintBrush" Color="#147955B4" />
+      <SolidColorBrush x:Key="AccountPlusAccentBrush" Color="#98651D" />
+      <SolidColorBrush x:Key="AccountPlusTintBrush" Color="#1698651D" />
+      <SolidColorBrush x:Key="AccountSuccessBrush" Color="#288064" />
+      <SolidColorBrush x:Key="AccountSuccessTintBrush" Color="#12288064" />
+      <SolidColorBrush x:Key="AccountStorageBrush" Color="#557ED0" />
+      <SolidColorBrush x:Key="AccountDownloadBrush" Color="#557ED0" />
+      <SolidColorBrush x:Key="AccountUploadBrush" Color="#36A785" />
+      <SolidColorBrush x:Key="AccountTrackBrush" Color="#EAEDEF" />
+      <SolidColorBrush x:Key="AccountWarningBrush" Color="#A76B19" />
+      <SolidColorBrush x:Key="AccountWarningTintBrush" Color="#12A76B19" />
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="AccountFreeAccentBrush" Color="#B0B8C6" />
+      <SolidColorBrush x:Key="AccountFreeTintBrush" Color="#19B0B8C6" />
+      <SolidColorBrush x:Key="AccountLifetimeAccentBrush" Color="#BAA0EA" />
+      <SolidColorBrush x:Key="AccountLifetimeTintBrush" Color="#20BAA0EA" />
+      <SolidColorBrush x:Key="AccountPlusAccentBrush" Color="#E6BC75" />
+      <SolidColorBrush x:Key="AccountPlusTintBrush" Color="#20E6BC75" />
+      <SolidColorBrush x:Key="AccountSuccessBrush" Color="#78C8AC" />
+      <SolidColorBrush x:Key="AccountSuccessTintBrush" Color="#1978C8AC" />
+      <SolidColorBrush x:Key="AccountStorageBrush" Color="#8AAAF0" />
+      <SolidColorBrush x:Key="AccountDownloadBrush" Color="#8AAAF0" />
+      <SolidColorBrush x:Key="AccountUploadBrush" Color="#66CBAA" />
+      <SolidColorBrush x:Key="AccountTrackBrush" Color="#383D46" />
+      <SolidColorBrush x:Key="AccountWarningBrush" Color="#E6BC75" />
+      <SolidColorBrush x:Key="AccountWarningTintBrush" Color="#19E6BC75" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+  <!-- Account and device outlines adapted from Lucide. See Assets/Icons/Lucide-LICENSE.txt. -->
+  <StreamGeometry x:Key="AccountCloudGeometry">M20,16.5 A4.5,4.5 0 0 0 18,8 A6,6 0 0 0 6,9 A4,4 0 0 0 6,17 H19 M9,21 H15</StreamGeometry>
+  <StreamGeometry x:Key="AccountRefreshGeometry">M20,8 A8.5,8.5 0 1 0 20,16 M20,3 V8 H15</StreamGeometry>
+  <StreamGeometry x:Key="AccountUploadGeometry">M12,20 V4 M6,10 L12,4 L18,10</StreamGeometry>
+  <StreamGeometry x:Key="AccountDownloadGeometry">M12,4 V20 M6,14 L12,20 L18,14</StreamGeometry>
+  <StreamGeometry x:Key="AccountLockGeometry">M6,10 H18 V21 H6 Z M8,10 V7 A4,4 0 0 1 16,7 V10 M12,14 V17</StreamGeometry>
+  <StreamGeometry x:Key="AccountClockGeometry">M12,3 A9,9 0 1 0 12,21 A9,9 0 1 0 12,3 M12,7 V12 L15,14</StreamGeometry>
+  <StreamGeometry x:Key="AccountCheckGeometry">M5,12 L10,17 L20,7</StreamGeometry>
+</ResourceDictionary>

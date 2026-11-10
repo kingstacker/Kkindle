@@ -7,6 +7,7 @@ struct NativeMaterials: View {
     @State private var loading = true
     @State private var exporting = false
     @State private var expanded: Set<String> = []
+    private var mutedText: Color { store.preferences.colorfulMode ? NativeTheme.mutedOnColorful : NativeTheme.muted }
     private struct BookGroup: Identifiable {
         let id: String
         var records: [MaterialRecord]
@@ -30,9 +31,9 @@ struct NativeMaterials: View {
         let books = Dictionary(store.library.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return VStack(spacing: 0) {
             HStack {
-                Text("阅读资料").font(NativeTheme.font(26, relativeTo: .largeTitle)).accessibilityIdentifier("page.materials")
+                Text("阅读资料").font(NativeTheme.pageTitleFont).accessibilityIdentifier("page.materials")
                 Spacer()
-                Text("\(count) 条").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.muted)
+                Text("\(count) 条").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(mutedText)
                 Menu {
                     Button("导出 Markdown") { export(true) }; Button("导出纯文本") { export(false) }
                 } label: { Text("导出").font(NativeTheme.font(14)).frame(minHeight: 44) }
@@ -45,9 +46,9 @@ struct NativeMaterials: View {
                     if loading { ProgressView("正在读取阅读资料…").frame(maxWidth: .infinity).padding(.top, 96) }
                     if !loading && count == 0 {
                         VStack(spacing: 6) {
-                            Image(systemName: "note.text").font(.system(size: 34, weight: .ultraLight)).foregroundStyle(NativeTheme.muted)
+                            Image(systemName: "note.text").font(.system(size: 34, weight: .ultraLight)).foregroundStyle(mutedText)
                             Text("还没有阅读资料").font(NativeTheme.font(17)).padding(.top, 8)
-                            Text("书签、划线和笔记会汇集在这里").font(NativeTheme.font(13)).foregroundStyle(NativeTheme.muted)
+                            Text("书签、划线和笔记会汇集在这里").font(NativeTheme.font(13)).foregroundStyle(mutedText)
                         }.frame(maxWidth: .infinity).padding(.top, 96)
                     }
                     ForEach(groups) { group in
@@ -58,13 +59,13 @@ struct NativeMaterials: View {
                         } label: {
                             HStack(spacing: 14) {
                                 if let book = books[id] { BookCover(book: book, width: 48, height: 68) }
-                                else { Image(systemName: "book").font(.system(size: 28, weight: .ultraLight)).frame(width: 48, height: 68).foregroundStyle(NativeTheme.muted) }
+                                else { Image(systemName: "book").font(.system(size: 28, weight: .ultraLight)).frame(width: 48, height: 68).foregroundStyle(mutedText) }
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(records.first?.bookTitle ?? "未知书名").font(NativeTheme.font(15)).lineLimit(2)
-                                    Text("\(records.count) 条资料").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.muted)
+                                    Text("\(records.count) 条资料").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(mutedText)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                                 Image(systemName: expanded.contains(id) ? "chevron.down" : "chevron.right")
-                                    .font(.system(size: 14, weight: .regular)).foregroundStyle(NativeTheme.muted)
+                                    .font(.system(size: 14, weight: .regular)).foregroundStyle(mutedText)
                             }.padding(.vertical, 14).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityIdentifier("materials.book.\(id)")
                         if expanded.contains(id) {
@@ -75,7 +76,7 @@ struct NativeMaterials: View {
                     }
                 }.padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 28)
             }.refreshable { await load() }
-        }.background(NativeTheme.page).navigationBarHidden(true).task { await load() }
+        }.background(NativeAmbientBackground()).navigationBarHidden(true).task { await load() }
     }
     private func materialEntry(_ item: MaterialRecord) -> some View {
         Button {
@@ -113,21 +114,23 @@ struct NativeReadingDashboard: View {
     @State private var picked: String?
     @State private var allMedals = false
     private var dashboard: ReadingDashboard? { value?.dashboard }
+    private var mutedText: Color { store.preferences.colorfulMode ? NativeTheme.mutedOnColorful : NativeTheme.muted }
+    private var secondaryText: Color { store.preferences.colorfulMode ? NativeTheme.secondaryOnColorful : NativeTheme.secondary }
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("阅读数据").font(NativeTheme.font(26, relativeTo: .largeTitle)).frame(maxWidth: .infinity, alignment: .leading)
+            Text("阅读数据").font(NativeTheme.pageTitleFont).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 10).accessibilityIdentifier("page.dashboard")
             ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if let value {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("累计阅读").font(NativeTheme.font(13)).foregroundStyle(NativeTheme.muted)
+                        Text("累计阅读").font(NativeTheme.font(13)).foregroundStyle(mutedText)
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(durationValue(value.dashboard.totalSeconds)).font(NativeTheme.font(48, relativeTo: .largeTitle))
-                            Text(value.dashboard.totalSeconds < 3600 ? "分钟" : "小时").font(NativeTheme.font(16)).foregroundStyle(NativeTheme.secondary)
+                            Text(value.dashboard.totalSeconds < 3600 ? "分钟" : "小时").font(NativeTheme.font(16)).foregroundStyle(secondaryText)
                         }
-                        Text("连续阅读 \(value.streak) 天").font(NativeTheme.font(13)).foregroundStyle(NativeTheme.muted)
+                        Text("连续阅读 \(value.streak) 天").font(NativeTheme.font(13)).foregroundStyle(mutedText)
                     }
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                         statistic("已开始", "\(value.dashboard.booksStarted) 本", detail: String(format: "平均进度 %.1f%%", value.dashboard.averageProgress))
@@ -137,7 +140,7 @@ struct NativeReadingDashboard: View {
                     }
                     dailyChart(value)
                     Text("最近在读").font(NativeTheme.font(16, relativeTo: .headline))
-                    if value.dashboard.recentBooks.isEmpty { Text("还没有阅读记录").foregroundStyle(NativeTheme.secondary) }
+                    if value.dashboard.recentBooks.isEmpty { Text("还没有阅读记录").foregroundStyle(secondaryText) }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 14) {
                             ForEach(value.dashboard.recentBooks.prefix(10)) { item in
@@ -148,7 +151,7 @@ struct NativeReadingDashboard: View {
                                             Text(book.title).font(NativeTheme.font(13)).lineLimit(1)
                                             HStack(spacing: 6) {
                                                 NativeThinProgress(value: item.progressPercent)
-                                                Text("\(item.progressPercent, specifier: "%.0f")%").font(NativeTheme.font(11, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted)
+                                                Text("\(item.progressPercent, specifier: "%.0f")%").font(NativeTheme.font(11, relativeTo: .caption2)).foregroundStyle(mutedText)
                                             }
                                         }.frame(width: 96)
                                     }.buttonStyle(.plain)
@@ -162,25 +165,22 @@ struct NativeReadingDashboard: View {
                     }
                     progressDistribution(value.dashboard.books)
                     HStack { Text("阅读勋章").font(NativeTheme.font(17, relativeTo: .headline)); Spacer(); Button(allMedals ? "已解锁" : "全部") { allMedals.toggle() }.font(NativeTheme.font(12, relativeTo: .caption)) }
-                    Text("已解锁 \(value.medals.filter(\.isUnlocked).count) / \(value.medals.count)").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
+                    Text("已解锁 \(value.medals.filter(\.isUnlocked).count) / \(value.medals.count)").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(secondaryText)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 18) {
                         ForEach(value.medals.filter { allMedals || $0.isUnlocked }) { medal in
                             Button { store.showToast(medal.rule + (medal.isUnlocked ? "" : String(format: "（%.0f%%）", medal.fraction * 100))) } label: {
                                 VStack(spacing: 9) {
-                                    ZStack {
-                                        Circle().stroke(.primary.opacity(0.12), lineWidth: 2)
-                                        Circle().trim(from: 0, to: min(1, max(0, medal.fraction))).stroke(.primary, lineWidth: 2).rotationEffect(.degrees(-90))
-                                        Image(systemName: "seal").font(NativeTheme.font(21, relativeTo: .title2)).opacity(medal.isUnlocked ? 1 : 0.35)
-                                    }.frame(width: 50, height: 50)
+                                    NativeMedalEmblem(icon: medal.icon, fraction: medal.fraction)
+                                        .frame(width: 50, height: 50).accessibilityHidden(true)
                                     Text(medal.name).font(NativeTheme.font(12, relativeTo: .caption)).multilineTextAlignment(.center)
                                 }.frame(maxWidth: .infinity)
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.plain).accessibilityIdentifier("dashboard.medal.\(medal.name)")
                         }
                     }
                 } else { ProgressView("正在读取阅读数据…").frame(maxWidth: .infinity).padding(.top, 70) }
             }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 36)
             }.refreshable { await load() }
-        }.background(NativeTheme.page).navigationBarHidden(true).task(id: period) { await load() }
+        }.background(NativeAmbientBackground()).navigationBarHidden(true).task(id: period) { await load() }
     }
     private func durationValue(_ seconds: Int64) -> String {
         String(format: "%.1f", Double(seconds) / (seconds < 3600 ? 60 : 3600))
@@ -232,13 +232,13 @@ struct NativeReadingDashboard: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text(book.title).font(NativeTheme.font(14)).lineLimit(1); Spacer()
-                            Text(detail).font(NativeTheme.font(12.5, relativeTo: .caption)).foregroundStyle(NativeTheme.muted)
+                            Text(detail).font(NativeTheme.font(12.5, relativeTo: .caption)).foregroundStyle(mutedText)
                         }
                         NativeThinProgress(value: Double(item.cumulativeSeconds), total: Double(dashboard?.mostReadBooks.map(\.cumulativeSeconds).max() ?? 1), height: 4)
                     }
                 }
             }.buttonStyle(.plain)
-        } else { VStack(alignment: .leading, spacing: 8) { Text(item.title + "（已移出书库）"); Text(detail).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary) } }
+        } else { VStack(alignment: .leading, spacing: 8) { Text(item.title + "（已移出书库）"); Text(detail).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(secondaryText) } }
     }
     private func progressDistribution(_ books: [DashboardBook]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -260,5 +260,67 @@ struct NativeReadingDashboard: View {
             }
         }
         catch { if !Task.isCancelled { store.failure = error.localizedDescription } }
+    }
+}
+
+/// Draw the same catalog artwork and clockwise progress reveal as the desktop.
+private struct NativeMedalEmblem: View {
+    let icon: String
+    let fraction: Double
+
+    var body: some View {
+        let artwork = NativeMedalPath.parse(icon)
+        let progress = min(1, max(0, fraction.isFinite ? fraction : 0))
+        ZStack {
+            layer(artwork, color: NativeTheme.secondary.opacity(0.35))
+            if progress > 0 {
+                layer(artwork, color: NativeTheme.ink)
+                    .clipShape(NativeMedalReveal(fraction: progress))
+            }
+        }
+    }
+
+    private func layer(_ artwork: CGPath?, color: Color) -> some View {
+        GeometryReader { geometry in
+            let size = min(geometry.size.width, geometry.size.height)
+            ZStack {
+                Circle().stroke(color, lineWidth: size / 42)
+                if let artwork {
+                    NativeMedalGlyph(artwork: Path(artwork))
+                        .stroke(color, style: StrokeStyle(lineWidth: size * 1.35 / 42, lineCap: .round, lineJoin: .round))
+                }
+            }.frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+}
+
+/// Fit the actual path bounds, not its original coordinate canvas, in the badge.
+private struct NativeMedalGlyph: Shape {
+    let artwork: Path
+    func path(in rect: CGRect) -> Path {
+        let bounds = artwork.cgPath.boundingBoxOfPath
+        guard !bounds.isNull && !bounds.isEmpty else { return Path() }
+        let scale = min(rect.width, rect.height) * 20 / 42 / max(bounds.width, bounds.height)
+        let transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
+                                          tx: rect.midX - bounds.midX * scale,
+                                          ty: rect.midY - bounds.midY * scale)
+        return artwork.applying(transform)
+    }
+}
+
+private struct NativeMedalReveal: Shape {
+    let fraction: Double
+    func path(in rect: CGRect) -> Path {
+        guard fraction < 1 else { return Path(rect) }
+        guard fraction > 0 else { return Path() }
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = hypot(rect.width, rect.height) / 2 + 2
+        var path = Path()
+        path.move(to: center)
+        path.addLine(to: CGPoint(x: center.x, y: center.y - radius))
+        path.addArc(center: center, radius: radius, startAngle: .degrees(-90),
+                    endAngle: .degrees(-90 + 360 * fraction), clockwise: false)
+        path.closeSubpath()
+        return path
     }
 }

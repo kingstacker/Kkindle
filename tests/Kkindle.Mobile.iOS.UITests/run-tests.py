@@ -59,9 +59,11 @@ def main() -> int:
         # Upgrade setup deliberately uses another preview installation and is
         # run separately after the host has installed the legacy then native UI.
         command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testLegacyUpgradePreservesLibraryAndPreferences")
+        # The scroll test requires a separately populated, long preview library.
+        command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testLibraryHeaderStaysVisibleWhenBooksScroll")
         # The account scenario is selected explicitly with --only after both
         # regional localhost servers have been started with disposable data.
-        command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testRegionalAccountRegistrationAndCloudSync")
+        command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testRegionalAccountRegistrationAndFreeSyncRestriction")
         command.append("-skip-testing:NativeFrontendUITests/NativeFrontendTests/testAccountMembershipDevicesAndOrders")
     captures = []
     with (output / "xcodebuild.log").open("w") as log:

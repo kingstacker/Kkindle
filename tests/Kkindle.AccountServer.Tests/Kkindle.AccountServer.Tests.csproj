@@ -5,6 +5,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Fixtures/ActivatedDeviceFeatures.cs" Link="Fixtures/ActivatedDeviceFeatures.cs" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../src/Kkindle.AccountServer/Kkindle.AccountServer.csproj" />
     <ProjectReference Include="../../src/Kkindle.Infrastructure/Kkindle.Infrastructure.csproj" />

@@ -9,12 +9,17 @@ namespace Kkindle.Infrastructure;
 // identified by their content hash and reader rows refer to portable IDs.
 internal sealed class S3SyncSnapshot : S3SyncExtensibleData
 {
-    public int Version { get; set; } = 5;
+    public int Version { get; set; } = 6;
     // Missing on legacy snapshots: their Version is the required reader version.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MinimumReaderVersion { get; set; }
     public string DeviceId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    // Custom encrypted stores retain all immutable random naming salts here.
+    // This transport metadata is encrypted with the snapshot and merged as a
+    // set, so concurrent first syncs never replace another device's namespace.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? BlobNamingSalts { get; set; }
     public S3SyncSettingsSnapshot? Settings { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ReadingDataReset? ReadingDataReset { get; set; }
@@ -283,6 +288,10 @@ internal sealed class S3SyncState
     public Dictionary<Guid, string> LocalFilePaths { get; set; } = [];
     public Dictionary<Guid, string> LocalCoverPaths { get; set; } = [];
     public Dictionary<string, DateTimeOffset> LocalDeletionTimes { get; set; } = [];
+    // Hash of the last published snapshot with CreatedAt cleared, and when it was published. An unchanged
+    // snapshot is not re-uploaded, so other devices do not download it again (official cloud traffic is metered).
+    public string? LastSnapshotContentHash { get; set; }
+    public DateTimeOffset? LastSnapshotUploadAt { get; set; }
 }
 
 // Unknown optional fields survive capture, baseline persistence and re-upload.

@@ -7,10 +7,11 @@
     <TextBlock Classes="label" Text="纸张" />
     <c:NativeSegmentGroup>
       <Border Classes="segments">
-        <Grid ColumnDefinitions="*,*,*">
-          <Button Grid.Column="0" Name="PaperWhite" Classes="seg" Content="白" Click="OnPaperClick" />
-          <Button Grid.Column="1" Name="PaperBeige" Classes="seg" Content="米" Click="OnPaperClick" />
-          <Button Grid.Column="2" Name="PaperInk" Classes="seg" Content="黑" Click="OnPaperClick" />
+        <Grid ColumnDefinitions="*,*,*,*">
+          <Button Grid.Column="0" Name="PaperFollow" Classes="seg" Content="跟随" Click="OnPaperClick" />
+          <Button Grid.Column="1" Name="PaperWhite" Classes="seg" Content="白" Click="OnPaperClick" />
+          <Button Grid.Column="2" Name="PaperBeige" Classes="seg" Content="米" Click="OnPaperClick" />
+          <Button Grid.Column="3" Name="PaperInk" Classes="seg" Content="黑" Click="OnPaperClick" />
         </Grid>
       </Border>
     </c:NativeSegmentGroup>

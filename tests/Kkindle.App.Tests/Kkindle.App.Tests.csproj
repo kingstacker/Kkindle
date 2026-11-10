@@ -5,6 +5,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="../Fixtures/Azw3/native-compressed.azw3" Link="Fixtures/Azw3/native-compressed.azw3" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../Fixtures/PdfFixture.cs" Link="Fixtures/PdfFixture.cs" />
     <Compile Include="../Fixtures/FakePdfDocument.cs" Link="Fixtures/FakePdfDocument.cs" />
     <Compile Include="../Fixtures/AccountHttpHandler.cs" Link="Fixtures/AccountHttpHandler.cs" />

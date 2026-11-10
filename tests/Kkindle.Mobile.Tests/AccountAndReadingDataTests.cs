@@ -66,6 +66,7 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
         async Task Register()
         {
             Get<TextBox>("UsernameBox").Text = "test_reader";
+            Get<TextBox>("RegistrationEmailBox").Text = "reader@example.invalid";
             Get<TextBox>("PasswordBox").Text = AccountHttpHandler.TestPassword;
             Get<TextBox>("ConfirmPasswordBox").Text = AccountHttpHandler.TestPassword;
             Click(Get<Button>("SubmitButton"));
@@ -95,7 +96,9 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
             await Until(() => Get<Button>("SubmitButton").IsEnabled);
             Click(Get<Button>("RegisterModeButton"));
             Assert.True(Get<StackPanel>("ConfirmPasswordPanel").IsVisible);
+            Assert.True(Get<StackPanel>("RegistrationEmailPanel").IsVisible);
             Get<TextBox>("UsernameBox").Text = "test_reader";
+            Get<TextBox>("RegistrationEmailBox").Text = "reader@example.invalid";
             Get<TextBox>("PasswordBox").Text = AccountHttpHandler.TestPassword;
             Get<TextBox>("ConfirmPasswordBox").Text = "fictional-mismatch";
             Click(Get<Button>("SubmitButton"));
@@ -143,7 +146,7 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
             page.FindControl<TextBox>("UsernameBox")!.Text = "test_reader";
             page.FindControl<TextBox>("PasswordBox")!.Text = "fictional-wrong-password";
             Click(page.FindControl<Button>("SubmitButton")!);
-            await Until(() => page.FindControl<TextBlock>("StatusText")!.Text == "用户名或密码错误。");
+            await Until(() => page.FindControl<TextBlock>("StatusText")!.Text == "用户名、邮箱或密码错误。");
             Assert.True(page.FindControl<StackPanel>("SignInPanel")!.IsVisible);
             Assert.False((await accounts.GetStatusAsync()).IsLoggedIn);
             Assert.Equal("", page.FindControl<TextBox>("PasswordBox")!.Text);
@@ -163,7 +166,7 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
         var paths = new AppPaths(root); var protector = new TestProtector();
         using var handler = new MembershipHttpHandler(); using var http = new HttpClient(handler);
         using var accounts = new AccountService(paths, protector, http);
-        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password, true);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password, true, email: handler.User.Email, confirmPassword: MembershipHttpHandler.Password);
         var services = Services(paths, protector); using var modules = MobileComposition.Create(services);
         var confirmations = 0;
         var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths))
@@ -175,7 +178,8 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
         {
             window.Show();
             await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 2 && Get<StackPanel>("MembershipPanel").IsEnabled);
-            Assert.Contains("终生功能会员", Get<TextBlock>("MembershipSummary").Text);
+            Assert.Contains("功能解锁", Get<TextBlock>("MembershipSummary").Text);
+            Assert.Contains("已登录 2/6 台", Get<TextBlock>("MembershipSummary").Text);
             var kick = Get<StackPanel>("DeviceListPanel").Children.OfType<StackPanel>().SelectMany(row => row.Children).OfType<Button>()
                 .Single(button => button.Tag is Guid id && id == handler.OtherDeviceId);
             Click(kick);
@@ -231,6 +235,33 @@ public sealed class AccountAndReadingDataTests(MobileUiSession session)
             window.Close(); await Task.Delay(100); SqliteConnection.ClearAllPools();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
+        return true;
+    }, CancellationToken.None);
+
+    [Fact]
+    public Task MobileActivationRefreshesRightsAndClearsCodesOnRegionChange() => session.Session.Dispatch(async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "kkindle-mobile-code-" + Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root); var protector = new TestProtector();
+        using var handler = new MembershipHttpHandler { LifetimeFeatures = false }; using var http = new HttpClient(handler);
+        using var accounts = new AccountService(paths, protector, http);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password);
+        var services = Services(paths, protector); using var modules = MobileComposition.Create(services);
+        var shell = new MobileShell(modules, services, new MobilePreferencesStore(paths));
+        var page = new AccountPage(accounts, shell, new DeviceMembershipService(accounts));
+        var window = new Window { Width = 411, Height = 880, Content = page };
+        T Get<T>(string name) where T : Control => page.FindControl<T>(name)!;
+        try
+        {
+            window.Show(); await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 2 && Get<StackPanel>("MembershipPanel").IsEnabled);
+            Get<TextBox>("ActivationCodeBox").Text = "fictional-plus-code"; Click(Get<Button>("ActivationRedeemButton"));
+            await Until(() => Get<TextBlock>("ActivationStatusText").Text?.Contains("已增加 1 年") == true);
+            Assert.Contains("Plus", Get<TextBlock>("MembershipSummary").Text); Assert.Equal("", Get<TextBox>("ActivationCodeBox").Text);
+            Get<TextBox>("ActivationCodeBox").Text = "fictional-lifetime-code"; Click(Get<Button>("InternationalRegionButton"));
+            await Until(() => Get<StackPanel>("SignInPanel").IsVisible && Get<Button>("SubmitButton").IsEnabled);
+            Assert.Equal("", Get<TextBox>("ActivationCodeBox").Text); Assert.False(Get<StackPanel>("MembershipPanel").IsVisible);
+        }
+        finally { page.OnClosed(); window.Close(); SqliteConnection.ClearAllPools(); if (Directory.Exists(root)) Directory.Delete(root, true); }
         return true;
     }, CancellationToken.None);
 

@@ -48,20 +48,26 @@
                      TextInputOptions.ShowSuggestions="False" />
           </StackPanel>
           <StackPanel Spacing="6">
-            <TextBlock Classes="label" Text="用户名" />
-            <TextBox Name="UsernameBox" MaxLength="32" TextInputOptions.AutoCapitalization="False"
+            <TextBlock Classes="label" Name="LoginIdentifierLabel" Text="用户名或邮箱" />
+            <TextBox Name="UsernameBox" MaxLength="254" TextInputOptions.AutoCapitalization="False"
                      TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
-            <TextBlock Classes="muted" FontSize="12" Text="3–32 位字母、数字、点、下划线或连字符" TextWrapping="Wrap" />
+            <TextBlock Name="UsernameHintText" Classes="muted" FontSize="12" Text="使用用户名或邮箱登录同一个账号" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Name="RegistrationEmailPanel" IsVisible="False" Spacing="6">
+            <TextBlock Classes="label" Text="邮箱" />
+            <TextBox Name="RegistrationEmailBox" MaxLength="254" TextInputOptions.ContentType="Email"
+                     TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
+            <TextBlock Classes="muted" FontSize="12" Text="注册邮箱不可修改。" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel Spacing="6">
-            <TextBlock Classes="label" Text="密码" />
+            <TextBlock Classes="label" Text="登录密码" />
             <TextBox Name="PasswordBox" PasswordChar="•" MaxLength="128"
                      TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
                      TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
             <TextBlock Classes="muted" FontSize="12" Text="8–128 位，区分大小写" />
           </StackPanel>
           <StackPanel Name="ConfirmPasswordPanel" IsVisible="False" Spacing="6">
-            <TextBlock Classes="label" Text="确认密码" />
+            <TextBlock Classes="label" Text="确认登录密码" />
             <TextBox Name="ConfirmPasswordBox" PasswordChar="•" MaxLength="128"
                      TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
                      TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
@@ -71,13 +77,22 @@
           <TextBlock Classes="title" Text="会员与设备" />
           <TextBlock Name="MembershipSummary" TextWrapping="Wrap" />
           <TextBlock Name="MembershipStatus" Classes="muted" TextWrapping="Wrap" />
-          <TextBlock Classes="muted" FontSize="12" Text="功能会员绑定账号，不使用激活码。每个账号最多登录 5 台设备；客户端每天检查一次设备状态。" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="Free 不支持多端同步。功能解锁使用自备 S3 / WebDAV；Plus 提供官方云同步、10GB 空间和每年 150GB 下载。Plus 到期后停止官方云同步与下载，云数据保留一个月后自动销毁。每个账号最多登录 6 台设备。" TextWrapping="Wrap" />
           <Button Classes="secondary" Content="刷新会员与设备" Click="OnMembershipRefreshClick" />
           <StackPanel Name="DeviceListPanel" Spacing="10" />
-          <TextBlock Classes="label" Text="购买会员、空间或下载流量" />
+          <TextBlock Classes="label" Text="购买会员" />
+          <TextBlock Name="NoRefundPolicyText" Classes="muted" FontSize="12" Text="功能解锁、Plus 会员及扩容服务均不支持退款，请在购买前确认方案和期限。" TextWrapping="Wrap" />
           <ComboBox Name="ProductsBox" HorizontalAlignment="Stretch" />
           <TextBlock Name="ProductDescription" Classes="muted" TextWrapping="Wrap" FontSize="12" />
           <Button Name="PurchaseButton" Classes="primary" Content="创建购买订单" Click="OnPurchaseClick" />
+          <TextBlock Classes="muted" FontSize="12" Text="Plus 最多可持有 5 年有效期，付费和激活码共用上限。" TextWrapping="Wrap" />
+          <TextBlock Classes="label" Text="激活码兑换" />
+          <TextBlock Classes="muted" FontSize="12" Text="激活码绑定当前已登录账户。功能会员永久有效，Plus 激活码每个增加 1 年。" TextWrapping="Wrap" />
+          <TextBox Name="ActivationCodeBox" MaxLength="80" PlaceholderText="输入激活码"
+                   TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True"
+                   TextChanged="OnActivationCodeChanged" />
+          <Button Name="ActivationRedeemButton" Classes="secondary" Content="兑换激活码" IsEnabled="False" Click="OnActivationRedeemClick" />
+          <TextBlock Name="ActivationStatusText" Classes="muted" TextWrapping="Wrap" IsVisible="False" />
           <TextBlock Classes="label" Text="订单" />
           <StackPanel Name="OrderListPanel" Spacing="10" />
         </StackPanel>

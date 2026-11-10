@@ -38,9 +38,14 @@ public sealed class WebDavTransportTests
         var root = TestHelpers.CreateTempDirectory();
         try
         {
-            // Public constructor verifies actual provider routing and the
-            // production HttpClient, not just an injected storage adapter.
-            var service = new S3SyncService(new AppPaths(root), new TestHelpers.PlaintextSecretProtector());
+            // Public provider routing and the production HttpClient remain
+            // under test. Grant only the fixture's sync entitlement; production
+            // constructors still deny unauthorised membership access.
+            var paths = new AppPaths(root);
+            var protector = new TestHelpers.PlaintextSecretProtector();
+            using var accounts = new AccountService(paths, protector);
+            var service = new S3SyncService(paths, protector, accounts, Kkindle.Core.AccountRegion.China,
+                TestHelpers.ActivatedFeatures);
             await service.TestConnectionAsync(server.Settings(listener.Origin));
             Assert.Empty(server.Files);
             foreach (var method in new[] { "PROPFIND", "MKCOL", "PUT", "MOVE", "GET", "DELETE" })

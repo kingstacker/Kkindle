@@ -5,6 +5,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="../Fixtures/Azw3/native-compressed.azw3" Link="Fixtures/Azw3/native-compressed.azw3" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\..\src\Kkindle.Platform.Common\Kkindle.Platform.Common.csproj" />
     <ProjectReference Include="..\..\src\Kkindle.Platform.MacOS\Kkindle.Platform.MacOS.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />

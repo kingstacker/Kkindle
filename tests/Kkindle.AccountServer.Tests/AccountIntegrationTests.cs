@@ -22,6 +22,7 @@ public sealed partial class AccountIntegrationTests
         await using var server = await LocalServer.CreateAsync();
         var first = await RegisterAsync(server.Http, "test_reader");
         Assert.Equal("test_reader", first.User.Username);
+        Assert.Equal("test_reader@example.invalid", first.User.Email);
         Assert.Equal(43, first.Token.Length);
         using var duplicate = await CredentialsAsync(server.Http, "register", "TEST_READER", TestPassword);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
@@ -30,7 +31,7 @@ public sealed partial class AccountIntegrationTests
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, unknown.StatusCode);
         Assert.Equal(await wrong.Content.ReadAsStringAsync(), await unknown.Content.ReadAsStringAsync());
-        using var correct = await CredentialsAsync(server.Http, "login", "TEST_READER", TestPassword);
+        using var correct = await CredentialsAsync(server.Http, "login", "TEST_READER@EXAMPLE.INVALID", TestPassword);
         var signedIn = await correct.Content.ReadFromJsonAsync(AccountJsonContext.Default.AccountSessionResponse);
         Assert.Equal(first.User, signedIn!.User);
         Assert.NotEqual(first.Token, signedIn.Token);
@@ -87,7 +88,7 @@ public sealed partial class AccountIntegrationTests
         var paths = new AppPaths(Path.Combine(server.Directory, "client"));
         var protector = new TestProtector();
         using var client = new AccountService(paths, protector);
-        var status = await client.SignInAsync(server.Url, "test_reader", TestPassword, register: true);
+        var status = await client.SignInAsync(server.Url, "test_reader", TestPassword, register: true, email: "reader@example.invalid", confirmPassword: TestPassword);
         Assert.True(status.IsLoggedIn);
         var persisted = await File.ReadAllTextAsync(Path.Combine(paths.Data, "account-session.json"));
         Assert.DoesNotContain(TestPassword, persisted);
@@ -112,7 +113,7 @@ public sealed partial class AccountIntegrationTests
         var paths = new AppPaths(Path.Combine(server.Directory, "client"));
         var protector = new TestProtector();
         using var client = new AccountService(paths, protector);
-        await client.SignInAsync(server.Url, "test_reader", TestPassword, register: true);
+        await client.SignInAsync(server.Url, "test_reader", TestPassword, register: true, email: "reader@example.invalid", confirmPassword: TestPassword);
         var token = await ReadStoredTokenAsync(paths, protector);
         Assert.True(await client.SignOutAsync());
         using (var old = await AuthorizedAsync(server.Http, HttpMethod.Get, "session", token))
@@ -132,7 +133,7 @@ public sealed partial class AccountIntegrationTests
         var paths = new AppPaths(Path.Combine(server.Directory, "client"));
         var protector = new TestProtector();
         using var client = new AccountService(paths, protector, clock: clock);
-        await client.SignInAsync(server.Url, "test_reader", TestPassword, register: true);
+        await client.SignInAsync(server.Url, "test_reader", TestPassword, register: true, email: "reader@example.invalid", confirmPassword: TestPassword);
         var token = await ReadStoredTokenAsync(paths, protector);
         await server.Application.StopAsync();
         await using var restarted = await AccountServerHost.BuildAsync([
@@ -191,6 +192,8 @@ public sealed partial class AccountIntegrationTests
 
     private static Task<HttpResponseMessage> CredentialsAsync(HttpClient http, string action, string username, string password) =>
         http.PostAsJsonAsync("api/accounts/" + action, new AccountCredentials { Username = username, Password = password,
+            Email = action == "register" ? username.ToLowerInvariant() + "@example.invalid" : null,
+            ConfirmPassword = action == "register" ? password : null,
             Region = http.DefaultRequestHeaders.GetValues("X-Kkindle-Region").Single() == "international" ? AccountRegion.International : AccountRegion.China },
             AccountJsonContext.Default.AccountCredentials);
 
