@@ -2,6 +2,9 @@ import SwiftUI
 
 struct NativeMembershipSections: View {
     @ObservedObject var store: NativeStore
+    var onSignOut: (() -> Void)?
+    var signingOut = false
+    var accountStatus = ""
     @State private var details: DeviceFeatureStatus?
     @State private var products: [MembershipProduct] = []
     @State private var orders: [PurchaseOrder] = []
@@ -15,40 +18,36 @@ struct NativeMembershipSections: View {
 
     var body: some View {
         Group {
-            Section("会员与设备") {
-                if let member = details?.membership {
-                    Text(member.tierName).font(NativeTheme.font(19, relativeTo: .title3)).accessibilityIdentifier("membership.tier")
-                    Text(member.hasLifetimeFeatures && member.tier != "free" ? "自备 S3 / WebDAV 多端同步已解锁" : "Free 不支持多端同步")
-                        .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
-                        .accessibilityIdentifier("membership.sync")
-                    if member.tier == "pro", let expiry = member.proExpiresAt { Text("Plus 有效至 \(expiry.prefix(10))").font(NativeTheme.font(12)) }
-                    if member.tier != "pro" {
-                        if let expiry = member.proExpiresAt {
-                            Text("Plus 已于 \(expiry.prefix(10)) 到期。官方云同步与下载已停用，云端书籍及其他同步数据保留一个月；在保留期内续费可恢复访问，保留期结束后自动销毁。")
-                                .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
-                                .accessibilityIdentifier("membership.expired")
-                        }
-                    }
-                }
-                Text("Free 不支持多端同步。功能解锁使用自备 S3 / WebDAV；Plus 提供官方云同步、10GB 空间和每年 150GB 下载。Plus 到期后停止官方云同步与下载，云数据保留一个月后自动销毁。每个账号最多登录 6 台设备。")
-                    .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
-                Button("刷新会员与设备") { perform { await refresh() } }.accessibilityIdentifier("membership.refresh")
-                if busy { ProgressView() }
-                if !status.isEmpty { Text(status).font(NativeTheme.font(12)).foregroundStyle(NativeTheme.secondary).accessibilityIdentifier("membership.status") }
+            Section {
+                NativeAccountHeader(account: store.account, membership: details?.membership,
+                                    busy: busy, signingOut: signingOut,
+                                    status: status, accountStatus: accountStatus,
+                                    refresh: { perform { await refresh() } }, signOut: onSignOut)
+            }
+            if let member = details?.membership, member.isPlusExpired, let notice = member.plusExpiryMessage {
+                NativeExpiryNotice(text: notice)
             }
             if let details { NativeAccountUsage(status: details) }
-            Section("已登录设备 \(details?.membership.loggedInDeviceCount ?? 0) / \(details?.membership.deviceLimit ?? 6)") {
-                if !deviceCapacity.isEmpty {
+            Section("已登录设备") {
+                HStack(alignment: .center, spacing: 12) {
                     Text(deviceCapacity).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
                         .accessibilityIdentifier("membership.devices.capacity")
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text("\(details?.membership.loggedInDeviceCount ?? 0) / \(details?.membership.deviceLimit ?? 6) 台")
+                            .font(NativeTheme.font(15, relativeTo: .subheadline)).monospacedDigit()
+                        HStack(spacing: 4) {
+                            ForEach(0..<max(0, details?.membership.deviceLimit ?? 6), id: \.self) { index in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(index < (details?.membership.loggedInDeviceCount ?? 0) ? NativeTheme.success : NativeTheme.strong)
+                                    .frame(width: 16, height: 4)
+                            }
+                        }.accessibilityHidden(true)
+                    }
                 }
-                ForEach(details?.devices.filter { $0.state == "active" } ?? []) { device in
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(device.name + (device.deviceId == details?.currentDeviceId ? "（当前设备）" : ""))
-                            .font(NativeTheme.font(14)).accessibilityIdentifier("membership.device.\(device.deviceId)")
-                        Text("\(device.platform) · 最近访问 \(device.lastSeenAt.prefix(16).replacingOccurrences(of: "T", with: " ")) UTC")
-                            .font(NativeTheme.font(11, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
-                        Button("踢出设备", role: .destructive) { kickTarget = device }.accessibilityIdentifier("membership.kick.\(device.deviceId)")
+                ForEach(activeDevices) { device in
+                    NativeDeviceRow(device: device, current: device.deviceId == details?.currentDeviceId) {
+                        kickTarget = device
                     }
                 }
             }
@@ -95,6 +94,16 @@ struct NativeMembershipSections: View {
         guard let member = details?.membership else { return "" }
         let remaining = max(0, member.deviceLimit - member.loggedInDeviceCount)
         return remaining > 0 ? "还可登录 \(remaining) 台设备" : "设备名额已满，可退出旧设备后登录新设备。"
+    }
+
+    /// The desktop lists the current device first, then the most recently seen.
+    private var activeDevices: [AccountDevice] {
+        (details?.devices ?? []).filter { $0.state == "active" }.sorted {
+            let left = $0.deviceId == details?.currentDeviceId
+            let right = $1.deviceId == details?.currentDeviceId
+            if left != right { return left }
+            return $0.lastSeenAt > $1.lastSeenAt
+        }
     }
 
     private func refresh() async {
@@ -159,6 +168,7 @@ struct NativeMembershipPlans: View {
     let account: AccountStatus?
     var loading = false
     let purchase: (MembershipProduct) -> Void
+    @State private var selection = 2
 
     private var signedIn: Bool { account?.isLoggedIn == true }
     private var plan: String { membership?.plan ?? "" }
@@ -182,27 +192,47 @@ struct NativeMembershipPlans: View {
     private func price(_ product: MembershipProduct?) -> String? { signedIn ? product?.price ?? "—" : nil }
 
     var body: some View {
-        Section("会员方案") {
+        Section {
             VStack(alignment: .leading, spacing: 6) {
+                Text("会员方案").font(NativeTheme.font(17, relativeTo: .headline).weight(.semibold))
                 Text("选择适合你的阅读方式，随时升级。").font(NativeTheme.font(13, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
                 Text("功能解锁、Plus 会员及扩容服务均不支持退款，请在购买前确认方案和期限。")
                     .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
                     .accessibilityIdentifier("membership.no-refund-policy")
             }.id(Self.anchor)
-            NativePlanCard(name: "Plus", tagline: "让每一本书，随你而行", price: price(plus), suffix: "/年", period: "按年付费，随时续费",
-                           badge: "推荐", accent: NativeTheme.planPlus, isCurrent: plan == "plus",
-                           benefits: ["包含功能解锁的同步权益", "10GB Kkindle 私人云空间", "书籍与阅读数据自动同步", "每会员年度 150GB 下载额度", "最多 6 台设备登录"],
-                           footer: "到期后云端数据保留一个月；Plus 不附赠永久功能解锁。") {
-                purchaseButton(plus == nil ? "暂未开放" : !canRenewPlus ? "暂不可续费" : plan == "plus" ? "续费 Plus" : "开通 Plus",
-                               product: plus, enabled: canRenewPlus, accent: NativeTheme.planPlus, filled: true)
-            }
-            NativePlanCard(name: "功能解锁", tagline: "你的书库，由你掌控", price: price(lifetime), period: "一次购买，永久使用",
-                           accent: NativeTheme.planLifetime, isCurrent: plan == "lifetime",
-                           benefits: ["包含全部 Free 权益", "自备 S3 / WebDAV 多端同步", "进度与批注完整同步", "最多 6 台设备登录", "一次购买，永久使用"],
-                           footer: "需自行配置 S3 / WebDAV；存储与流量费用自行承担。") {
-                purchaseButton(plan == "lifetime" ? "已永久解锁" : lifetime == nil ? "暂未开放" : "解锁功能",
-                               product: lifetime, enabled: lifetime != nil && plan != "lifetime", accent: NativeTheme.planLifetime, filled: false)
-            }
+            Picker("会员方案", selection: $selection) {
+                Text("Free").tag(0)
+                Text("功能解锁").tag(1)
+                Text("Plus").tag(2)
+            }.pickerStyle(.segmented)
+                .accessibilityIdentifier("membership.plans.tabs")
+            planCard(selection)
+                .id(selection)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 24).onEnded { value in
+                        guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                        if value.translation.width < -40 { select(selection + 1) }
+                        else if value.translation.width > 40 { select(selection - 1) }
+                    }
+                )
+                .accessibilityHint("左右轻扫可切换会员方案")
+            Text(hint).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
+                .accessibilityIdentifier("membership.plans.hint")
+        }.onChange(of: membership?.plan) { newPlan in
+            // Open on the paid plan the account already holds; otherwise show
+            // the recommended Plus offer first.
+            if newPlan == "lifetime" { select(1) }
+            else if newPlan != nil { select(2) }
+        }
+    }
+
+    private func select(_ index: Int) {
+        selection = min(2, max(0, index))
+    }
+
+    @ViewBuilder private func planCard(_ index: Int) -> some View {
+        switch index {
+        case 0:
             NativePlanCard(name: "Free", tagline: "让阅读自由开始", price: "¥0", period: "永久免费",
                            accent: NativeTheme.planFree, isCurrent: plan == "free",
                            benefits: ["本地书库管理与阅读", "USB Kindle 书籍与批注双向同步", "插件功能", "自定义 AI 接口", "加密备份"],
@@ -210,8 +240,22 @@ struct NativeMembershipPlans: View {
                 Button(plan == "free" ? "当前方案" : "永久免费") {}
                     .buttonStyle(NativePlanButtonStyle(accent: NativeTheme.planFree, filled: false)).disabled(true)
             }
-            Text(hint).font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
-                .accessibilityIdentifier("membership.plans.hint")
+        case 1:
+            NativePlanCard(name: "功能解锁", tagline: "你的书库，由你掌控", price: price(lifetime), period: "一次购买，永久使用",
+                           accent: NativeTheme.planLifetime, isCurrent: plan == "lifetime",
+                           benefits: ["包含全部 Free 权益", "自备 S3 / WebDAV 多端同步", "进度与批注完整同步", "最多 6 台设备登录", "一次购买，永久使用"],
+                           footer: "需自行配置 S3 / WebDAV；存储与流量费用自行承担。") {
+                purchaseButton(plan == "lifetime" ? "已永久解锁" : lifetime == nil ? "暂未开放" : "解锁功能",
+                               product: lifetime, enabled: lifetime != nil && plan != "lifetime", accent: NativeTheme.planLifetime, filled: false)
+            }
+        default:
+            NativePlanCard(name: "Plus", tagline: "让每一本书，随你而行", price: price(plus), suffix: "/年", period: "按年付费，随时续费",
+                           badge: "推荐", accent: NativeTheme.planPlus, isCurrent: plan == "plus",
+                           benefits: ["包含功能解锁的同步权益", "10GB Kkindle 私人云空间", "书籍与阅读数据自动同步", "每会员年度 150GB 下载额度", "最多 6 台设备登录"],
+                           footer: "到期后云端数据保留一个月；Plus 不附赠永久功能解锁。") {
+                purchaseButton(plus == nil ? "暂未开放" : !canRenewPlus ? "暂不可续费" : plan == "plus" ? "续费 Plus" : "开通 Plus",
+                               product: plus, enabled: canRenewPlus, accent: NativeTheme.planPlus, filled: true)
+            }
         }
     }
 

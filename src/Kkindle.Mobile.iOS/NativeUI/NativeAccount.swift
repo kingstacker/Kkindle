@@ -28,13 +28,8 @@ struct NativeAccountPage: View {
                 }
             }
             if let account = store.account, account.isLoggedIn {
-                Section("已登录") {
-                    Text(account.user?.username ?? "").font(NativeTheme.font(21, relativeTo: .title2))
-                        .accessibilityIdentifier("account.username")
-                    if let expiry = account.expiresAt { Text("会话有效至 \(expiry.prefix(10))").font(NativeTheme.font(12, relativeTo: .caption)) }
-                }
-                NativeMembershipSections(store: store)
-                actionSection
+                NativeMembershipSections(store: store, onSignOut: { signOut() },
+                                         signingOut: busy, accountStatus: status)
             } else {
                 Section {
                     Picker("账号操作", selection: $register) { Text("登录").tag(false); Text("注册").tag(true) }
@@ -87,12 +82,8 @@ struct NativeAccountPage: View {
                         .accessibilityIdentifier("account.status")
                 }
                 if loading || busy { ProgressView() }
-                if store.account?.isLoggedIn == true {
-                    Button("退出登录") { signOut() }.buttonStyle(NativePrimaryButtonStyle()).accessibilityIdentifier("account.logout")
-                } else {
-                    Button(register ? "注册并登录" : "登录") { signIn() }.buttonStyle(NativePrimaryButtonStyle())
-                        .accessibilityIdentifier("account.submit")
-                }
+                Button(register ? "注册并登录" : "登录") { signIn() }.buttonStyle(NativePrimaryButtonStyle())
+                    .accessibilityIdentifier("account.submit")
             }
         }
     }

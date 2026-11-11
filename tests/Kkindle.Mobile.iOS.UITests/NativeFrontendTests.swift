@@ -610,7 +610,7 @@ final class NativeFrontendTests: XCTestCase {
         reveal(tier)
         XCTAssertTrue(tier.waitForExistence(timeout: 20))
         XCTAssertEqual(tier.label, "Free")
-        XCTAssertEqual(app.staticTexts["membership.sync"].label, "Free 不支持多端同步")
+        XCTAssertEqual(app.staticTexts["membership.sync"].label, "Free · 畅享本地阅读")
         let locked = app.staticTexts["Kkindle 云同步未开通"]
         reveal(locked)
         XCTAssertTrue(locked.waitForExistence(timeout: 15))
