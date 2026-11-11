@@ -7,6 +7,8 @@ struct NativeAmbientColor: Equatable {
     let red: Double
     let green: Double
     let blue: Double
+    var x: Double? = nil
+    var y: Double? = nil
     var color: Color { Color(red: red, green: green, blue: blue) }
 }
 
@@ -21,8 +23,8 @@ enum NativeAmbientPalette {
         let brightness: Double
         let count: Int
 
-        /// Prefer plenty of colour over plenty of pixels; paper and ink are
-        /// already excluded before scoring.
+        /// Prefer plenty of colour over plenty of pixels; the vivid pass
+        /// excludes paper and ink before scoring.
         var score: Double {
             Double(count).squareRoot() * (0.35 + saturation * 1.15) * (0.55 + brightness * 0.6)
         }
@@ -47,8 +49,7 @@ enum NativeAmbientPalette {
 
     /// Read small thumbnails from actual library covers; no cover image is retained.
     static func extract(paths: [String]) -> [NativeAmbientColor] {
-        var picked: [Candidate] = []
-        var muted: [Candidate] = []
+        var picked: [NativeAmbientColor] = []
         for path in paths {
             if picked.count == 6 { break }
             guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
@@ -71,11 +72,8 @@ enum NativeAmbientPalette {
             for index in stride(from: 0, to: pixels.count, by: 4) {
                 guard pixels[index + 3] > 200 else { continue }
                 let r = Int(pixels[index]), g = Int(pixels[index + 1]), b = Int(pixels[index + 2])
-                let high = max(r, g, b), low = min(r, g, b)
-                let saturation = high == 0 ? 0 : Double(high - low) / Double(high)
-                // Paper and ink make up most of a cover; leaving them out stops
-                // black-and-white art from washing the background grey.
-                if saturation < 0.18 && (high > 225 || high < 45) { continue }
+                // Keep neutral samples for genuinely black-and-white covers;
+                // the vivid candidate pass below still prefers coloured artwork.
                 let key = (r / 32) * 64 + (g / 32) * 8 + b / 32
                 let old = buckets[key] ?? (0, 0, 0, 0)
                 buckets[key] = (old.count + 1, old.red + r, old.green + g, old.blue + b)
@@ -91,21 +89,15 @@ enum NativeAmbientPalette {
                                  hue: hue(red: red, green: green, blue: blue),
                                  saturation: saturation, brightness: high, count: bucket.count)
             }
-            // A vivid region is what makes the wash colourful; a muted one is
-            // remembered only for a library that has no colour at all.
-            let vivid = candidates.filter { $0.saturation >= 0.30 && $0.brightness >= 0.18 && $0.brightness <= 0.90 }
+            let vivid = candidates.filter { $0.saturation >= 0.30 && $0.brightness >= 0.18 }
             if let best = vivid.max(by: { $0.score < $1.score }) {
-                picked.append(best)
-            } else if let quiet = candidates.filter({ $0.saturation >= 0.08 }).max(by: { $0.score < $1.score }) {
-                muted.append(quiet)
+                picked.append(best.vividColor)
+            } else if let quiet = candidates.max(by: { $0.score < $1.score }) {
+                picked.append(quiet.mutedColor)
             }
         }
-        if picked.isEmpty {
-            return muted.sorted { $0.hue < $1.hue }.prefix(6).map(\.mutedColor)
-        }
-        // Hue order spreads neighbouring colours apart on the page instead of
-        // stacking near-identical samples from similarly coloured covers.
-        return picked.sorted { $0.hue < $1.hue }.map(\.vividColor)
+        // Preserve cover order so each sample can stay next to its source book.
+        return picked
     }
 
     private static func hue(red: Double, green: Double, blue: Double) -> Double {
@@ -141,21 +133,21 @@ enum NativeAmbientPalette {
 /// Blurred fields are generated from sampled colours, never from book text or covers.
 struct NativeAmbientWash: View {
     @EnvironmentObject private var store: NativeStore
-    init() {}
+    var colorsOverride: [NativeAmbientColor]? = nil
     var body: some View {
         GeometryReader { geometry in
-            let colors = store.ambientColors
+            let colors = colorsOverride ?? store.ambientColors
             if !colors.isEmpty {
-                let radius = max(geometry.size.width * 0.70,
+                let radius = max(geometry.size.width * 0.55,
                                  geometry.size.height / CGFloat(max(colors.count, 2)) * 1.2)
                 let middle = colors[colors.count / 2].color
                 ZStack {
                     // A low-opacity base keeps the corners and the gaps between
                     // the radial fields tinted instead of fading to plain white.
                     LinearGradient(stops: [
-                        .init(color: colors[0].color.opacity(0.55), location: 0),
-                        .init(color: middle.opacity(0.40), location: 0.5),
-                        .init(color: colors[colors.count - 1].color.opacity(0.55), location: 1)
+                        .init(color: colors[0].color.opacity(0.12), location: 0),
+                        .init(color: middle.opacity(0.10), location: 0.5),
+                        .init(color: colors[colors.count - 1].color.opacity(0.12), location: 1)
                     ], startPoint: .topLeading, endPoint: .bottomTrailing)
                     ForEach(Array(colors.enumerated()), id: \.offset) { index, color in
                         Circle().fill(RadialGradient(gradient: Gradient(stops: [
@@ -164,8 +156,8 @@ struct NativeAmbientWash: View {
                             .init(color: color.color.opacity(0), location: 1)
                         ]), center: .center, startRadius: 0, endRadius: radius))
                             .frame(width: radius * 2, height: radius * 2)
-                            .position(x: geometry.size.width * (index.isMultiple(of: 2) ? 0.25 : 0.75),
-                                      y: geometry.size.height * CGFloat(index + 1) / CGFloat(colors.count + 1))
+                            .position(x: geometry.size.width * CGFloat(color.x ?? (index.isMultiple(of: 2) ? 0.25 : 0.75)),
+                                      y: geometry.size.height * CGFloat(color.y ?? Double(index + 1) / Double(colors.count + 1)))
                     }
                 }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
             }
@@ -177,13 +169,20 @@ struct NativeAmbientBackground: View {
     @EnvironmentObject private var store: NativeStore
     @Environment(\.colorScheme) private var scheme
     let fallback: Color
-    init(fallback: Color = NativeTheme.page) { self.fallback = fallback }
+    let colorsOverride: [NativeAmbientColor]?
+    init(fallback: Color = NativeTheme.page, colorsOverride: [NativeAmbientColor]? = nil) {
+        self.fallback = fallback; self.colorsOverride = colorsOverride
+    }
     var body: some View {
+        let colors = colorsOverride ?? store.ambientColors
         ZStack {
             fallback
-            if store.preferences.colorfulMode && !store.ambientColors.isEmpty {
-                NativeAmbientWash().opacity(scheme == .dark ? 0.36 : 0.34)
+            if store.preferences.colorfulMode && !colors.isEmpty {
+                NativeAmbientWash(colorsOverride: colors).opacity(scheme == .dark ? 0.36 : 0.34)
             }
-        }.ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+        }.animation(.easeInOut(duration: 0.4), value: colors.map {
+            NativeAmbientColor(red: $0.red, green: $0.green, blue: $0.blue)
+        })
+            .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
     }
 }

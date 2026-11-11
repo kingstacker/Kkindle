@@ -254,6 +254,7 @@ public sealed class S3SyncTests
             var deviceId = Guid.NewGuid().ToString("N");
             var settings = new S3SyncSettings
             {
+                ProviderChosenByUser = true,
                 Enabled = true,
                 AutomaticSyncEnabled = false,
                 DownloadBookFilesOnSync = true,
@@ -275,6 +276,42 @@ public sealed class S3SyncTests
             Assert.DoesNotContain(settings.AccessKey, persisted, StringComparison.Ordinal);
             Assert.DoesNotContain(settings.SecretKey, persisted, StringComparison.Ordinal);
             Assert.DoesNotContain(settings.EncryptionKey, persisted, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TestHelpers.TryDelete(root);
+        }
+    }
+
+    [Fact]
+    public async Task SettingsStore_PersistsProviderChoiceAndInfersOlderCustomConnections()
+    {
+        var root = TestHelpers.CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root);
+            var store = new S3SyncSettingsStore(paths, new TestHelpers.PlaintextSecretProtector());
+            var deviceId = Guid.NewGuid().ToString("N");
+
+            await store.SaveAsync(deviceId, new S3SyncSettings { ProviderChosenByUser = true });
+            Assert.True((await store.LoadAsync()).Settings.ProviderChosenByUser);
+
+            // Settings files written before the flag existed still count a
+            // saved custom connection as the user's choice.
+            await store.SaveAsync(deviceId, new S3SyncSettings
+            {
+                Endpoint = "https://s3.example.test", AccessKey = "access", SecretKey = "secret", Bucket = "books"
+            });
+            var legacy = await store.LoadAsync();
+            Assert.True(legacy.Settings.ProviderChosenByUser);
+            Assert.True(legacy.Settings.HasChosenCustomProvider);
+
+            // A bare default S3 provider is not a choice and stays eligible
+            // for the automatic Plus default.
+            await store.SaveAsync(deviceId, new S3SyncSettings());
+            var untouched = await store.LoadAsync();
+            Assert.False(untouched.Settings.ProviderChosenByUser);
+            Assert.False(untouched.Settings.HasChosenCustomProvider);
         }
         finally
         {

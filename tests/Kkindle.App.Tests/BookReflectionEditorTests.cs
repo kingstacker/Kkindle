@@ -468,6 +468,7 @@ public sealed partial class SettingsTests
     [Fact]
     public Task NativeReflectionImagesCanBeSizedAndDeleted() => Run(async () =>
     {
+        ((Kkindle.App)Application.Current!).ApplyLanguage("zh-CN");
         const string pixel =
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
         var surface = new BookReflectionEditorSurface(

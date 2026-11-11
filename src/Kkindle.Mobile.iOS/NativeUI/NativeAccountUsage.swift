@@ -103,6 +103,7 @@ struct NativeAccountHeader: View {
 /// The desktop expiry notice: a warning tinted card above the locked usage panel.
 struct NativeExpiryNotice: View {
     let text: String
+    var identifier = "membership.expired"
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "clock.badge.exclamationmark").font(.system(size: 16, weight: .medium))
@@ -111,7 +112,7 @@ struct NativeExpiryNotice: View {
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(NativeTheme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(NativeTheme.warning.opacity(0.25), lineWidth: 1))
-            .accessibilityIdentifier("membership.expired")
+            .accessibilityIdentifier(identifier)
     }
 }
 
@@ -255,6 +256,24 @@ private struct NativeDownloadUsage: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("membership.download.period")
             }
+            if let earlyQuota = member.plusEarlyDownloadQuotaBytes, let endText = member.plusEarlyDownloadEndText {
+                NativeUsageRow(name: "新用户下载限额",
+                               value: "\(memberSize(member.plusEarlyDownloadUsedBytes ?? 0)) / \(memberSize(earlyQuota))",
+                               identifier: "membership.download.early")
+                Text("截止 \(endText)")
+                    .font(NativeTheme.font(11, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("membership.download.early.period")
+            }
+            if let metadataQuota = member.metadataDownloadQuotaBytes, let metadataUsed = member.metadataDownloadUsedBytes {
+                NativeUsageRow(name: "今日元数据流量",
+                               value: "\(memberSize(metadataUsed)) / \(memberSize(metadataQuota))",
+                               identifier: "membership.download.metadata")
+                Text("UTC 零点重置")
+                    .font(NativeTheme.font(11, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("membership.download.metadata.period")
+            }
         }
     }
 
@@ -265,8 +284,9 @@ private struct NativeDownloadUsage: View {
     }
 }
 
-/// One large number and one thin bar instead of the desktop's ring: a phone has
-/// less width, but the same used figure, percentage and remaining value appear.
+/// The desktop account center's usage card: used and total figures on the left,
+/// an 80-point usage ring with the percentage inside on the right, then the
+/// remaining figures under a divider.
 private struct NativeUsageCard<Footer: View>: View {
     let symbol: String
     let title: String
@@ -304,18 +324,46 @@ private struct NativeUsageCard<Footer: View>: View {
                         .font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(NativeTheme.secondary)
                         .accessibilityIdentifier(quotaIdentifier)
                 }
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(available ? memberPercent(ratio) : "—")
-                        .font(NativeTheme.font(17, relativeTo: .body)).monospacedDigit()
-                        .accessibilityIdentifier(percentIdentifier)
-                    Text(percentLabel).font(NativeTheme.font(10, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted)
-                }
+                Spacer(minLength: 8)
+                NativeUsageRing(ratio: available ? ratio : 0,
+                                percent: available ? memberPercent(ratio) : "—",
+                                label: percentLabel,
+                                percentIdentifier: percentIdentifier)
             }
-            NativeThinProgress(value: available ? Double(used) : 0, total: Double(max(1, quota)), height: 6)
             NativeTheme.divider.frame(height: 1)
             VStack(spacing: 8) { footer }
         }.padding(16).background(NativeTheme.sunk, in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+/// Mirrors the desktop `AccountUsageRing`: a 7-point track, a round-capped value
+/// arc starting at twelve o'clock, and the percentage inside the ring.
+private struct NativeUsageRing: View {
+    let ratio: Double
+    let percent: String
+    let label: String
+    let percentIdentifier: String
+
+    private var value: Double { ratio.isFinite ? min(1, max(0, ratio)) : 0 }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(NativeTheme.strong, lineWidth: 7)
+            if value > 0 {
+                Circle()
+                    .trim(from: 0, to: value)
+                    .stroke(NativeTheme.ink, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            VStack(spacing: 2) {
+                Text(percent)
+                    .font(NativeTheme.font(16, relativeTo: .headline).weight(.semibold)).monospacedDigit()
+                    .accessibilityIdentifier(percentIdentifier)
+                Text(label)
+                    .font(NativeTheme.font(10, relativeTo: .caption2)).foregroundStyle(NativeTheme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+        }.frame(width: 80, height: 80)
     }
 }
 

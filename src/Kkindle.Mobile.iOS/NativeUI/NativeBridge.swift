@@ -145,7 +145,11 @@ final class NativeStore: ObservableObject {
     let readerController: UIViewController
     @Published var library: [LibraryBook] = []
     @Published var folders: [LibraryFolder] = []
-    @Published var ambientColors: [NativeAmbientColor] = []
+    @Published var visibleAmbientColors: [NativeAmbientColor] = []
+    @Published var fallbackAmbientColors: [NativeAmbientColor] = []
+    var ambientColors: [NativeAmbientColor] {
+        visibleAmbientColors.isEmpty ? fallbackAmbientColors : visibleAmbientColors
+    }
     @Published var preferences = MobilePreferences()
     @Published var continueBookId: String?
     @Published var readerBook: LibraryBook?

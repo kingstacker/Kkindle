@@ -29,19 +29,19 @@ struct NativeMaterials: View {
         let groups = self.groups
         let count = groups.reduce(0) { $0 + $1.records.count }
         let books = Dictionary(store.library.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return VStack(spacing: 0) {
-            HStack {
-                Text("阅读资料").font(NativeTheme.pageTitleFont).accessibilityIdentifier("page.materials")
-                Spacer()
-                Text("\(count) 条").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(mutedText)
-                Menu {
-                    Button("导出 Markdown") { export(true) }; Button("导出纯文本") { export(false) }
-                } label: { Text("导出").font(NativeTheme.font(14)).frame(minHeight: 44) }
-                    .disabled(exporting || count == 0).accessibilityLabel("导出阅读资料")
-            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 10)
-            Picker("资料筛选", selection: $filter) { Text("全部").tag("all"); Text("划线").tag("highlight"); Text("笔记").tag("note"); Text("书签").tag("bookmark") }
-                .pickerStyle(.segmented).padding(.horizontal, 12).padding(.bottom, 8)
-            ScrollView {
+        return ScrollView {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("阅读资料").font(NativeTheme.pageTitleFont).accessibilityIdentifier("page.materials")
+                    Spacer()
+                    Text("\(count) 条").font(NativeTheme.font(12, relativeTo: .caption)).foregroundStyle(mutedText)
+                    Menu {
+                        Button("导出 Markdown") { export(true) }; Button("导出纯文本") { export(false) }
+                    } label: { Text("导出").font(NativeTheme.font(14)).frame(minHeight: 44) }
+                        .disabled(exporting || count == 0).accessibilityLabel("导出阅读资料")
+                }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 10)
+                Picker("资料筛选", selection: $filter) { Text("全部").tag("all"); Text("划线").tag("highlight"); Text("笔记").tag("note"); Text("书签").tag("bookmark") }
+                    .pickerStyle(.segmented).padding(.horizontal, 12).padding(.bottom, 8)
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if loading { ProgressView("正在读取阅读资料…").frame(maxWidth: .infinity).padding(.top, 96) }
                     if !loading && count == 0 {
@@ -75,8 +75,11 @@ struct NativeMaterials: View {
                         NativeTheme.divider.frame(height: 1)
                     }
                 }.padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 28)
-            }.refreshable { await load() }
-        }.background(NativeAmbientBackground()).navigationBarHidden(true).task { await load() }
+            }
+        }.refreshable { await load() }
+            .background(NativeAmbientBackground()).navigationBarHidden(true)
+            .overlay(alignment: .top) { NativeStatusBarGlass() }
+            .task { await load() }
     }
     private func materialEntry(_ item: MaterialRecord) -> some View {
         Button {
@@ -118,10 +121,10 @@ struct NativeReadingDashboard: View {
     private var secondaryText: Color { store.preferences.colorfulMode ? NativeTheme.secondaryOnColorful : NativeTheme.secondary }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text("阅读数据").font(NativeTheme.pageTitleFont).frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 10).accessibilityIdentifier("page.dashboard")
-            ScrollView {
+        ScrollView {
+            VStack(spacing: 0) {
+                Text("阅读数据").font(NativeTheme.pageTitleFont).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 10).accessibilityIdentifier("page.dashboard")
             VStack(alignment: .leading, spacing: 28) {
                 if let value {
                     VStack(alignment: .leading, spacing: 4) {
@@ -179,8 +182,11 @@ struct NativeReadingDashboard: View {
                     }
                 } else { ProgressView("正在读取阅读数据…").frame(maxWidth: .infinity).padding(.top, 70) }
             }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 36)
-            }.refreshable { await load() }
-        }.background(NativeAmbientBackground()).navigationBarHidden(true).task(id: period) { await load() }
+            }
+        }.refreshable { await load() }
+            .background(NativeAmbientBackground()).navigationBarHidden(true)
+            .overlay(alignment: .top) { NativeStatusBarGlass() }
+            .task(id: period) { await load() }
     }
     private func durationValue(_ seconds: Int64) -> String {
         String(format: "%.1f", Double(seconds) / (seconds < 3600 ? 60 : 3600))

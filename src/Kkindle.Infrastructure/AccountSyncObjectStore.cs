@@ -262,22 +262,25 @@ internal sealed class AccountSyncObjectStore : ISyncObjectStore
         if (response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Created or HttpStatusCode.NoContent) return;
         var error = response.Headers.TryGetValues("X-Kkindle-Error", out var values) ? values.FirstOrDefault() : null;
         if (error is "too_many_uploads" or "upload_incomplete" or "upload_not_found" or "upload_length_mismatch" or "upload_copy_mismatch"
-            or "upload_rate_limited" or "transfer_expired")
+            or "upload_rate_limited" or "download_rate_limited" or "transfer_expired")
             throw new IOException(error switch
             {
                 "too_many_uploads" => "同时进行的上传过多，请稍后重试。",
                 "upload_length_mismatch" => "上传数据不完整，请重新同步。",
                 "upload_copy_mismatch" => "云存储发布失败，请重新同步。",
                 "upload_rate_limited" => "上传请求过于频繁，请稍后重试。",
+                "download_rate_limited" => "下载请求过于频繁，请稍后重试。",
                 _ => "同步链接已失效，请重新同步。"
             });
         if (error is "plus_required" or "pro_required") throw new DeviceFeatureRequiredException(MemberEntitlements.AccountCloudRequirement);
-        if (error is "account_banned" or "traffic_quota_exceeded" or "storage_quota_exceeded" or "encryption_required" or "data_unavailable"
-            or "client_update_required")
+        if (error is "account_banned" or "traffic_quota_exceeded" or "new_user_traffic_exceeded" or "metadata_traffic_exceeded"
+            or "storage_quota_exceeded" or "encryption_required" or "data_unavailable" or "client_update_required")
             throw new InvalidOperationException(error switch
             {
                 "account_banned" => "此账号已被封禁，请联系管理员。",
                 "traffic_quota_exceeded" => "本会员年度下载额度与额外下载余额已用尽。请等待下一会员年度开始；提前续费不会增加本年度额度。",
+                "new_user_traffic_exceeded" => "新开通 Plus 的临时下载额度已用尽，额度到期后将恢复本年度下载额度。",
+                "metadata_traffic_exceeded" => "同步元数据今日流量已达上限，将于次日 UTC 零点重置；书籍下载额度不受影响。",
                 "storage_quota_exceeded" => "Kkindle 云空间已满，请清理不再需要的云数据。",
                 "encryption_required" => "Kkindle 云同步必须设置同步密钥，请先打开同步设置。",
                 "client_update_required" => "账号服务已升级，请更新 Kkindle 后继续同步。",

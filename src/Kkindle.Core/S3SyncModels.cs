@@ -15,6 +15,9 @@ public enum SyncProvider
 public sealed record S3SyncSettings
 {
     public SyncProvider Provider { get; init; } = SyncProvider.S3;
+    // A saved user choice. The automatic Plus default may select Kkindle cloud
+    // sync only while this is false, so choosing S3 / WebDAV stays in effect.
+    public bool ProviderChosenByUser { get; init; }
     public bool Enabled { get; init; }
     public bool AutomaticSyncEnabled { get; init; } = true;
     // Metadata-only remains the default so a first sync does not pull every
@@ -42,6 +45,11 @@ public sealed record S3SyncSettings
     public Guid AccountUserId { get; init; }
 
     public bool IsConfigured => Validate() is null;
+    /// <summary>
+    /// A saved custom provider the user chose deliberately. Automatic Plus
+    /// defaults must keep it instead of switching to Kkindle cloud sync.
+    /// </summary>
+    public bool HasChosenCustomProvider => Provider != SyncProvider.AccountServer && ProviderChosenByUser;
     public string ProviderName => Provider switch { SyncProvider.WebDav => "WebDAV", SyncProvider.AccountServer => UiText.Get("Kkindle 云同步"), _ => "S3" };
 
     public string? Validate()

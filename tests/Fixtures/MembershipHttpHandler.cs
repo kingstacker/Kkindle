@@ -9,6 +9,8 @@ namespace Kkindle.TestFixtures;
 public sealed class MembershipHttpHandler : HttpMessageHandler
 {
     public const string Password = "fictional-membership-test-password";
+    public const string ResetCode = "12345678";
+    public const string EmailVerificationCode = "87654321";
     public AccountUser User { get; private set; } = new(Guid.NewGuid(), "fictional_member", "member@example.invalid");
     private string _password = Password;
     private readonly string _bearer = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -19,10 +21,16 @@ public sealed class MembershipHttpHandler : HttpMessageHandler
     public List<PurchaseOrder> Orders { get; } = [];
     public bool LifetimeFeatures { get; set; } = true;
     public DateTimeOffset? ProExpiresAt { get; set; }
+    public bool TrialAvailable { get; set; }
+    public DateTimeOffset? TrialClaimedAt { get; private set; }
+    public DateTimeOffset? TrialExpiresAt { get; private set; }
     public bool Revoked { get; set; }
     public bool Offline { get; set; }
     public int SessionChecks { get; private set; }
     public int FeatureChecks { get; private set; }
+    public int PasswordResetRequests { get; private set; }
+    public int EmailVerificationRequests { get; private set; }
+    public bool EmailServiceAvailable { get; set; } = true;
     public Guid? LastKickedDevice { get; private set; }
     public PurchaseRequest? LastPurchase { get; private set; }
     public ActivationCodeRedeemRequest? LastActivationRequest { get; private set; }
@@ -64,6 +72,24 @@ public sealed class MembershipHttpHandler : HttpMessageHandler
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(new AccountSessionResponse
                 { Region = region, User = User, Token = _bearer, ExpiresAt = Now.AddDays(30) }, AccountJsonContext.Default.AccountSessionResponse) };
         }
+        if (action == "password-reset/request")
+        {
+            PasswordResetRequests++;
+            await request.Content!.ReadFromJsonAsync(AccountJsonContext.Default.AccountPasswordResetRequest, token);
+            return EmailServiceAvailable ? new(HttpStatusCode.Accepted) : Error(HttpStatusCode.ServiceUnavailable, "email_unavailable");
+        }
+        if (action == "password-reset/confirm")
+        {
+            var reset = (await request.Content!.ReadFromJsonAsync(AccountJsonContext.Default.AccountPasswordResetConfirm, token))!;
+            var identifier = reset.Username.Trim();
+            var matches = identifier.Equals(User.Username, StringComparison.OrdinalIgnoreCase)
+                || identifier.Equals(User.Email, StringComparison.OrdinalIgnoreCase);
+            if (!matches || reset.Code != ResetCode || !EmailServiceAvailable) return Error(HttpStatusCode.BadRequest, "invalid_reset_code");
+            _password = reset.NewPassword;
+            Revoked = true;
+            User = User with { EmailVerified = true };
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(User, AccountJsonContext.Default.AccountUser) };
+        }
         if (action == "session") SessionChecks++;
         if (request.Headers.Authorization?.Parameter != _bearer || Revoked) return new(HttpStatusCode.Unauthorized);
         if (action == "session") return new(HttpStatusCode.OK) { Content = JsonContent.Create(
@@ -86,6 +112,19 @@ public sealed class MembershipHttpHandler : HttpMessageHandler
                 if (Devices[index].DeviceId != CurrentDeviceId) Devices[index] = Devices[index] with { State = "signed_out" };
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(new AccountSessionResponse
                 { Region = region, User = User, Token = _bearer, ExpiresAt = Now.AddDays(30) }, AccountJsonContext.Default.AccountSessionResponse) };
+        }
+        if (action == "email/verify/request")
+        {
+            EmailVerificationRequests++;
+            if (User.Email is null) return Error(HttpStatusCode.Conflict, "email_not_set");
+            return EmailServiceAvailable ? new(HttpStatusCode.Accepted) : Error(HttpStatusCode.ServiceUnavailable, "email_unavailable");
+        }
+        if (action == "email/verify")
+        {
+            var verification = (await request.Content!.ReadFromJsonAsync(AccountJsonContext.Default.AccountEmailVerificationConfirm, token))!;
+            if (verification.Code != EmailVerificationCode) return Error(HttpStatusCode.BadRequest, "invalid_email_code");
+            User = User with { EmailVerified = true };
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(User, AccountJsonContext.Default.AccountUser) };
         }
         if (action == "close")
         {
@@ -155,6 +194,18 @@ public sealed class MembershipHttpHandler : HttpMessageHandler
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(Status(region),
                 AccountJsonContext.Default.DeviceFeatureStatus) };
         }
+        if (action == "trial")
+        {
+            if (TrialClaimedAt is null)
+            {
+                if (!TrialAvailable || ProExpiresAt is not null) return Error(HttpStatusCode.Conflict, "trial_unavailable");
+                TrialClaimedAt = Now;
+                TrialExpiresAt = Now.AddDays(7);
+                ProExpiresAt = TrialExpiresAt;
+            }
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(Status(region).Membership,
+                AccountJsonContext.Default.AccountMembership) };
+        }
         if (action == "products") return ProductsUnavailable ? new(HttpStatusCode.ServiceUnavailable)
             : new(HttpStatusCode.OK) { Content = JsonContent.Create(Products, AccountJsonContext.Default.MembershipProductArray) };
         if (action == "orders" && request.Method == HttpMethod.Get) return new(HttpStatusCode.OK)
@@ -188,10 +239,13 @@ public sealed class MembershipHttpHandler : HttpMessageHandler
         var plus = ProExpiresAt > Now;
         var features = LifetimeFeatures || plus;
         var member = new AccountMembership(User.Id, region, plus ? "pro" : LifetimeFeatures ? "lifetime" : "free", features,
-            ProExpiresAt, MemberEntitlements.DeviceLimit, active, features ? active : 0, 256, 1024, 128, plus ? 150L * 1024 * 1024 * 1024 : 0, 0,
-            512, plus ? 10L * 1024 * 1024 * 1024 : 0, null, plus ? 150L * 1024 * 1024 * 1024 : 0, 0,
+            ProExpiresAt, MemberEntitlements.DeviceLimit, active, features ? active : 0, 256, 1024, 128, plus ? 100L * 1024 * 1024 * 1024 : 0, 0,
+            512, plus ? 20L * 1024 * 1024 * 1024 : 0, null, plus ? 100L * 1024 * 1024 * 1024 : 0, 0,
             plus ? ProExpiresAt!.Value.AddDays(-365) : null, plus ? ProExpiresAt : null, Now.AddYears(5),
-            Orders.Where(order => order.Kind == "pro" && order.State == "pending" && order.ExpiresAt > Now).Sum(order => order.DurationDays));
+            Orders.Where(order => order.Kind == "pro" && order.State == "pending" && order.ExpiresAt > Now).Sum(order => order.DurationDays),
+            null, 0, null, 512L * 1024 * 1024, 0, Now.UtcDateTime.Date.AddDays(1),
+            TrialAvailable && TrialClaimedAt is null && ProExpiresAt is null,
+            TrialClaimedAt is not null, TrialClaimedAt, TrialExpiresAt);
         var status = new DeviceFeatureStatus(member, Devices.ToArray(), CurrentDeviceId);
         return TransformStatus?.Invoke(status) ?? status;
     }

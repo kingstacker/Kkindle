@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
+using Kkindle.ApplicationServices;
 using Kkindle.Core;
 using Kkindle.Infrastructure;
 using Kkindle.TestFixtures;
@@ -227,6 +228,49 @@ public sealed partial class SettingsTests
         await Until(() => scope.Get<Border>("SettingsSearchResultsPanel").IsVisible);
         Assert.Contains(scope.Call<List<SettingsSearchResult>>("BuildSettingsSearchResults", "Endpoint"),
             result => ReferenceEquals(result.Target, scope.Get<Expander>("SettingsS3Expander")));
+    });
+
+    [Fact]
+    public Task PlusSignInDefaultsToCloudSyncButKeepsAProviderTheUserChose() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        using var handler = new MembershipHttpHandler { ProExpiresAt = DateTimeOffset.UtcNow.AddDays(365) };
+        using var http = new HttpClient(handler);
+        var accounts = scope.Field<ApplicationModules>("_modules").Accounts.Service;
+        typeof(AccountService).GetField("_http", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(accounts, http);
+        var status = await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username,
+            MembershipHttpHandler.Password, true, email: handler.User.Email, confirmPassword: MembershipHttpHandler.Password);
+
+        var stored = await scope.Sync.LoadSettingsAsync();
+        var chosen = stored.Settings with
+        {
+            Provider = SyncProvider.S3, ProviderChosenByUser = true, Enabled = true,
+            Endpoint = "https://s3.example.invalid", AccessKey = "fictional-access-key",
+            SecretKey = "fictional-secret-key", Bucket = "fictional-bucket",
+            EncryptionKey = "fictional-sync-key"
+        };
+        await scope.Sync.SaveSettingsAsync(stored.DeviceId, chosen);
+        scope.Set("_s3SyncStoredSettings", new S3SyncStoredSettings(stored.DeviceId, chosen));
+        scope.Call("PopulateS3SyncControls", (object?)null);
+
+        Assert.False(await scope.Call<Task<bool>>("PersistPlusCloudSyncSettingsAsync",
+            new AccountStateChangedEventArgs(status, null)));
+        var kept = (await scope.Sync.LoadSettingsAsync()).Settings;
+        Assert.Equal(SyncProvider.S3, kept.Provider);
+        Assert.True(kept.ProviderChosenByUser);
+        Assert.Equal(Guid.Empty, kept.AccountUserId);
+
+        // Without a saved choice the same Plus sign-in selects Kkindle cloud sync.
+        var unchosen = chosen with { ProviderChosenByUser = false };
+        await scope.Sync.SaveSettingsAsync(stored.DeviceId, unchosen);
+        scope.Set("_s3SyncStoredSettings", new S3SyncStoredSettings(stored.DeviceId, unchosen));
+        scope.Call("PopulateS3SyncControls", (object?)null);
+        Assert.True(await scope.Call<Task<bool>>("PersistPlusCloudSyncSettingsAsync",
+            new AccountStateChangedEventArgs(status, null)));
+        var adopted = (await scope.Sync.LoadSettingsAsync()).Settings;
+        Assert.Equal(SyncProvider.AccountServer, adopted.Provider);
+        Assert.Equal(handler.User.Id, adopted.AccountUserId);
+        Assert.False(adopted.ProviderChosenByUser);
     });
 
     private static AccountMembership CloudSettingsMembership(AccountUser user, AccountRegion region, string tier, DateTimeOffset? expiry) =>

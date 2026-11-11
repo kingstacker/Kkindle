@@ -178,6 +178,137 @@ public sealed class DeviceMembershipTests
     }
 
     [Theory]
+    [InlineData(40, null)]
+    [InlineData(30, 30)]
+    [InlineData(29, 30)]
+    [InlineData(8, 30)]
+    [InlineData(7, 7)]
+    [InlineData(6, 7)]
+    [InlineData(2, 7)]
+    [InlineData(1, 1)]
+    [InlineData(0.5, 1)]
+    [InlineData(0, null)]
+    [InlineData(-1, null)]
+    public void PlusRenewalReminderUsesThirtySevenAndOneDayThresholds(double days, int? expected)
+    {
+        var now = new DateTimeOffset(2026, 11, 11, 8, 0, 0, TimeSpan.Zero);
+        Assert.Equal(expected, MemberEntitlements.PlusRenewalReminder(now.AddDays(days), now));
+    }
+
+    [Fact]
+    public async Task PlusRenewalRemindersArriveAtThirtySevenAndOneDaysOncePerExpiry()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        scope.Handler.LifetimeFeatures = false;
+        scope.Handler.ProExpiresAt = scope.Clock.UtcNow.AddDays(40);
+        var notices = new List<AccountMembershipExpiringEventArgs>();
+        void Listen(AccountDeviceMonitor monitor) => monitor.MembershipExpiring += (_, notice) => notices.Add(notice);
+        void Advance(TimeSpan delta) { scope.Clock.Advance(delta); scope.Handler.Now = scope.Clock.UtcNow; }
+
+        using var monitor = new AccountDeviceMonitor(scope.Accounts, scope.Paths, scope.Clock);
+        Listen(monitor);
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Empty(notices);
+
+        Advance(TimeSpan.FromDays(11));
+        Assert.True(await monitor.CheckIfDueAsync());
+        var first = Assert.Single(notices);
+        Assert.Equal(29, first.DaysRemaining);
+        Assert.Contains("剩余 29 天", first.Message);
+
+        // A restart inside the same 30-day threshold stays quiet.
+        Advance(TimeSpan.FromDays(1));
+        using (var restarted = new AccountDeviceMonitor(scope.Accounts, scope.Paths, scope.Clock))
+        {
+            Listen(restarted);
+            Assert.True(await restarted.CheckIfDueAsync());
+        }
+        Assert.Single(notices);
+
+        Advance(TimeSpan.FromDays(22));
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Equal(2, notices.Count);
+        Assert.Equal(6, notices[^1].DaysRemaining);
+
+        Advance(TimeSpan.FromDays(5.5));
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Equal(3, notices.Count);
+        Assert.Equal(1, notices[^1].DaysRemaining);
+
+        // Buying more time resets the thresholds for the new expiry date.
+        scope.Handler.ProExpiresAt = scope.Clock.UtcNow.AddDays(29);
+        Advance(TimeSpan.FromDays(1));
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Equal(4, notices.Count);
+        Assert.Equal(28, notices[^1].DaysRemaining);
+    }
+
+    [Fact]
+    public async Task LifetimeWithoutPlusReceivesNoRenewalReminder()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        var notices = 0;
+        using var monitor = new AccountDeviceMonitor(scope.Accounts, scope.Paths, scope.Clock);
+        monitor.MembershipExpiring += (_, _) => notices++;
+        Assert.True(await monitor.CheckIfDueAsync());
+        Assert.Equal(0, notices);
+    }
+
+    [Fact]
+    public async Task PasswordResetUsesTheEmailedCodeAndClearsTheLocalSession()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        var url = AccountRegions.DefaultServerUrl(AccountRegion.China);
+        await scope.Accounts.RequestPasswordResetAsync(url, scope.Handler.User.Email!);
+        Assert.Equal(1, scope.Handler.PasswordResetRequests);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => scope.Accounts.ResetPasswordAsync(
+            url, scope.Handler.User.Email!, "1234", "fictional-new-password", "fictional-new-password"));
+        var invalid = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Accounts.ResetPasswordAsync(
+            url, scope.Handler.User.Email!, "00000000", "fictional-new-password", "fictional-new-password"));
+        Assert.Contains("验证码无效", invalid.Message);
+        Assert.True((await scope.Accounts.GetStatusAsync()).IsLoggedIn);
+
+        var user = await scope.Accounts.ResetPasswordAsync(
+            url, scope.Handler.User.Email!, MembershipHttpHandler.ResetCode, "fictional-new-password", "fictional-new-password");
+        Assert.True(user.EmailVerified);
+        Assert.False((await scope.Accounts.GetStatusAsync()).IsLoggedIn);
+        Assert.True((await scope.Accounts.SignInAsync(url, scope.Handler.User.Username, "fictional-new-password")).IsLoggedIn);
+    }
+
+    [Fact]
+    public async Task PasswordResetRequestDoesNotRevealUnknownAccountsAndReportsMailOutages()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        var url = AccountRegions.DefaultServerUrl(AccountRegion.China);
+        await scope.Accounts.SignOutAsync();
+        await scope.Accounts.RequestPasswordResetAsync(url, "fictional_missing_reader");
+        Assert.Equal(1, scope.Handler.PasswordResetRequests);
+        scope.Handler.EmailServiceAvailable = false;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Accounts.RequestPasswordResetAsync(url, scope.Handler.User.Username));
+        Assert.Contains("邮件服务暂不可用", error.Message);
+    }
+
+    [Fact]
+    public async Task EmailVerificationSendsACodeAndMarksTheAccountVerified()
+    {
+        using var scope = await AccountScope.CreateAsync();
+        Assert.False((await scope.Accounts.GetStatusAsync()).User!.EmailVerified);
+        await scope.Accounts.RequestEmailVerificationAsync();
+        Assert.Equal(1, scope.Handler.EmailVerificationRequests);
+
+        var invalid = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Accounts.ConfirmEmailVerificationAsync("00000000"));
+        Assert.Contains("邮箱验证码无效", invalid.Message);
+        Assert.False((await scope.Accounts.GetStatusAsync()).User!.EmailVerified);
+
+        var status = await scope.Accounts.ConfirmEmailVerificationAsync(MembershipHttpHandler.EmailVerificationCode);
+        Assert.True(status.User!.EmailVerified);
+        Assert.True((await scope.Accounts.GetStatusAsync(validateSession: true)).User!.EmailVerified);
+    }
+
+    [Theory]
     [InlineData("account")]
     [InlineData("region")]
     [InlineData("device")]

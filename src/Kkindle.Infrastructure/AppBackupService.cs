@@ -372,6 +372,7 @@ public sealed partial class AppBackupService
             S3 = new BackupS3Settings
             {
                 Provider = s3.Settings.Provider,
+                ProviderChosenByUser = s3.Settings.ProviderChosenByUser,
                 Enabled = s3.Settings.Enabled,
                 AutomaticSyncEnabled = s3.Settings.AutomaticSyncEnabled,
                 IntervalMinutes = s3.Settings.IntervalMinutes,
@@ -664,9 +665,15 @@ public sealed partial class AppBackupService
             : !string.IsNullOrWhiteSpace(currentSettings.AccessKey) && !string.IsNullOrWhiteSpace(currentSettings.SecretKey);
         var encryptionReady = !imported.EncryptionEnabled
             || !string.IsNullOrWhiteSpace(currentSettings.EncryptionKey);
+        // A restored custom connection is an explicit choice; older packages
+        // without the flag are inferred from the connection they carry.
+        var importedCustom = imported.Provider != SyncProvider.AccountServer
+            && (imported.ProviderChosenByUser || imported.Provider == SyncProvider.WebDav
+                || !string.IsNullOrWhiteSpace(imported.Endpoint) || !string.IsNullOrWhiteSpace(imported.Bucket));
         return S3SyncSettings.Normalize(currentSettings with
         {
             Provider = imported.Provider,
+            ProviderChosenByUser = importedCustom || currentSettings.ProviderChosenByUser,
             // A portable package does not contain credentials. Keep an
             // imported endpoint/configuration visible, but avoid enabling an
             // automatic sync that cannot authenticate on a new machine.
@@ -908,6 +915,7 @@ public sealed partial class AppBackupService
     private sealed class BackupS3Settings
     {
         public SyncProvider Provider { get; set; }
+        public bool ProviderChosenByUser { get; set; }
         public bool Enabled { get; set; }
         public bool AutomaticSyncEnabled { get; set; } = true;
         public int IntervalMinutes { get; set; } = 30;

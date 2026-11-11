@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NativeLibraryPage: View {
     @ObservedObject var store: NativeStore
+    var isActive = true
     @State private var query = ""
     @State private var searching = false
     @FocusState private var searchFocused: Bool
@@ -16,6 +17,11 @@ struct NativeLibraryPage: View {
     @State private var creatingFolder = false
     @State private var renamingFolder: LibraryFolder?
     @State private var folderBusy = false
+    @StateObject private var scrollState = NativeLibraryScrollState()
+    @State private var pageVisible = false
+    @State private var visibleCovers: [NativeVisibleCover] = []
+    @State private var visiblePositions: [NativeCoverPosition] = []
+    @State private var sampledColors: [NativeVisibleCover: NativeAmbientColor] = [:]
 
     /// Page labels sit on the colour wash rather than a card; keep them readable there.
     private var mutedText: Color { store.preferences.colorfulMode ? NativeTheme.mutedOnColorful : NativeTheme.muted }
@@ -29,6 +35,7 @@ struct NativeLibraryPage: View {
         return filterResult
     }
     private var filterPending: Bool { advancedFilter.count > 0 && currentFilterResult == nil }
+    private var floatingMasthead: Bool { scrollState.showMasthead || (searching && scrollState.offset > 64) }
     private var books: [LibraryBook] {
         if filterPending { return [] }
         let matchingIDs = currentFilterResult?.ids
@@ -46,15 +53,45 @@ struct NativeLibraryPage: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            masthead
-            GeometryReader { geometry in
-                ScrollView {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    NativeLibraryScrollReader(state: scrollState)
+                    masthead(floating: false)
                     if store.preferences.collectionsView { foldersView(width: geometry.size.width) }
                     else { booksView(width: geometry.size.width) }
-                }.refreshable { await refresh() }
-            }
+                }
+            }.refreshable { await refresh() }
+                .coordinateSpace(name: NativeLibraryScrollState.space)
+                .onPreferenceChange(NativeCoverPositionKey.self) { positions in
+                    guard isActive, pageVisible, store.readerBook == nil, store.preferences.colorfulMode,
+                          !store.preferences.collectionsView else { return }
+                    let positions = positions.filter { $0.frame.maxY > 0 && $0.frame.minY < geometry.size.height }
+                        .sorted { left, right in
+                            if abs(left.frame.minY - right.frame.minY) > 1 { return left.frame.minY < right.frame.minY }
+                            return left.frame.minX < right.frame.minX
+                        }.prefix(18).map { position in
+                            NativeCoverPosition(cover: position.cover, frame: CGRect(
+                                x: position.frame.midX / max(1, geometry.size.width),
+                                y: (position.frame.midY + geometry.safeAreaInsets.top)
+                                    / max(1, geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom),
+                                width: 0, height: 0))
+                        }
+                    visiblePositions = positions
+                    let covers = positions.map(\.cover)
+                    if covers != visibleCovers { visibleCovers = covers }
+                    publishVisibleColors()
+                }
+                .overlay(alignment: .top) {
+                    if floatingMasthead {
+                        masthead(floating: true)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
         }.background(NativeAmbientBackground()).navigationBarHidden(true)
+        .overlay(alignment: .top) {
+            if !floatingMasthead { NativeLibraryStatusBarGlass(scroll: scrollState) }
+        }
         .sheet(isPresented: $creatingFolder) {
             NativeNameSheet(store: store, title: "新建收藏夹", initial: "", button: "创建") { name in
                 let _: CreatedFolder = try await store.request("collection.create", ["name": name]); try await store.refreshLibrary()
@@ -74,13 +111,40 @@ struct NativeLibraryPage: View {
                 }
             }
         }
+        .onAppear { pageVisible = true; publishVisibleColors() }
+        .onDisappear { pageVisible = false }
         .task {
             defer { loading = false }
             await refresh()
         }
         .task(id: filterRequest) { await updateFilterResults(for: filterRequest) }
+        .task(id: visibleCovers) {
+            guard store.preferences.colorfulMode else { return }
+            let missing = visibleCovers.filter { sampledColors[$0] == nil }
+            let samples = await Task.detached(priority: .utility) {
+                missing.compactMap { cover -> (NativeVisibleCover, NativeAmbientColor)? in
+                    guard let color = NativeAmbientPalette.extract(paths: [cover.path]).first else { return nil }
+                    return (cover, color)
+                }
+            }.value
+            guard !Task.isCancelled else { return }
+            // Retain only the current viewport, rather than every cover scrolled past.
+            sampledColors = sampledColors.filter { visibleCovers.contains($0.key) }
+            for (cover, color) in samples { sampledColors[cover] = color }
+            publishVisibleColors()
+        }
     }
-    private var masthead: some View {
+    private func publishVisibleColors() {
+        guard isActive, pageVisible, store.readerBook == nil, store.preferences.colorfulMode,
+              !store.preferences.collectionsView else { return }
+        let colors = visiblePositions.compactMap { position -> NativeAmbientColor? in
+            guard var color = sampledColors[position.cover] else { return nil }
+            color.x = Double(position.frame.minX); color.y = Double(position.frame.minY)
+            return color
+        }
+        if store.visibleAmbientColors != colors { store.visibleAmbientColors = colors }
+    }
+    private func masthead(floating: Bool) -> some View {
         HStack(spacing: 0) {
             if searching {
                 NativeSearchField(text: $query, prompt: store.preferences.collectionsView ? "搜索收藏夹" : "搜索书名或作者",
@@ -112,7 +176,13 @@ struct NativeLibraryPage: View {
             }.buttonStyle(.plain).disabled(importing || folderBusy)
                 .accessibilityLabel(store.preferences.collectionsView ? "新建收藏夹" : "导入书籍")
                 .accessibilityIdentifier("library.import")
-        }.padding(.leading, 24).padding(.trailing, 12).padding(.top, 16).padding(.bottom, 4)
+        }.padding(.leading, 24).padding(.trailing, 12).padding(.top, 16).padding(.bottom, floating ? 28 : 4)
+            .background {
+                if floating {
+                    NativeMastheadGlass(scroll: scrollState, colors: nil)
+                        .ignoresSafeArea(edges: .top)
+                }
+            }
     }
     private var filters: some View {
         HStack(spacing: 0) {
@@ -158,7 +228,7 @@ struct NativeLibraryPage: View {
                     .foregroundStyle(mutedText).padding(.bottom, 14)
                 if books.isEmpty { emptyView }
                 else {
-                    NativeBookShelf(store: store, books: books, pageWidth: pageWidth) { book in bookActions(book) }
+                    NativeBookShelf(store: store, books: books, pageWidth: pageWidth, tracksVisibleCovers: true) { book in bookActions(book) }
                 }
             }
         }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 28)
@@ -288,6 +358,100 @@ struct NativeLibraryPage: View {
     }
 }
 
+private struct NativeVisibleCover: Hashable {
+    let path: String
+    let version: String
+}
+
+private struct NativeCoverPosition: Equatable {
+    let cover: NativeVisibleCover
+    let frame: CGRect
+}
+
+private struct NativeCoverPositionKey: PreferenceKey {
+    static var defaultValue: [NativeCoverPosition] { [] }
+    static func reduce(value: inout [NativeCoverPosition], nextValue: () -> [NativeCoverPosition]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// Tracks the scroll direction to reveal the shelf actions on a downward drag.
+final class NativeLibraryScrollState: ObservableObject {
+    static let space = "library.scroll"
+    @Published private(set) var offset: CGFloat = 0
+    @Published private(set) var showMasthead = false
+    private var anchor: CGFloat?
+    private var directionAnchor: CGFloat = 0
+
+    /// The header surface appears within a few points of movement, matching
+    /// the system's scroll-edge transition.
+    var glassOpacity: Double { min(1, max(0, offset / 6)) }
+
+    func update(top: CGFloat) {
+        guard top.isFinite else { return }
+        if anchor == nil { anchor = top }
+        guard let anchor else { return }
+        let value = max(0, anchor - top)
+        if abs(value - offset) > 0.5 {
+            if value < 64 {
+                showMasthead = false
+                directionAnchor = value
+            } else if value > directionAnchor + 12 {
+                if showMasthead { withAnimation(.easeInOut(duration: 0.2)) { showMasthead = false } }
+                directionAnchor = value
+            } else if value < directionAnchor - 12 {
+                if !showMasthead { withAnimation(.easeInOut(duration: 0.2)) { showMasthead = true } }
+                directionAnchor = value
+            }
+            offset = value
+        }
+    }
+}
+
+private struct NativeLibraryScrollReader: View {
+    @ObservedObject var state: NativeLibraryScrollState
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.onChange(of: proxy.frame(in: .named(NativeLibraryScrollState.space)).minY) { top in
+                state.update(top: top)
+            }
+        }.frame(height: 0)
+    }
+}
+
+private struct NativeMastheadGlass: View {
+    @ObservedObject var scroll: NativeLibraryScrollState
+    let colors: [NativeAmbientColor]?
+    @EnvironmentObject private var store: NativeStore
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.regularMaterial)
+            NativeTheme.page.opacity(0.15)
+            if store.preferences.colorfulMode {
+                NativeAmbientWash(colorsOverride: colors).opacity(0.22)
+                    .animation(.easeInOut(duration: 0.6), value: colors)
+            }
+        }
+            // Let the blur dissolve into the shelf instead of ending on a
+            // hard line, like the system's soft scroll-edge treatment.
+            .mask {
+                LinearGradient(stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.80),
+                    .init(color: .clear, location: 1)
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .opacity(scroll.glassOpacity)
+    }
+}
+
+private struct NativeLibraryStatusBarGlass: View {
+    @ObservedObject var scroll: NativeLibraryScrollState
+    var body: some View {
+        NativeStatusBarGlass().opacity(scroll.glassOpacity)
+    }
+}
+
 enum NativeBookReadingStatus {
     static func value(_ book: LibraryBook) -> Int {
         if book.readingStatus == 2 || book.progress >= 99.5 { return 2 }
@@ -326,11 +490,13 @@ struct NativeBookShelf<Actions: View>: View {
     @ObservedObject var store: NativeStore
     let books: [LibraryBook]
     let pageWidth: CGFloat
+    let tracksVisibleCovers: Bool
     private let actions: (LibraryBook) -> Actions
 
-    init(store: NativeStore, books: [LibraryBook], pageWidth: CGFloat,
+    init(store: NativeStore, books: [LibraryBook], pageWidth: CGFloat, tracksVisibleCovers: Bool = false,
          @ViewBuilder actions: @escaping (LibraryBook) -> Actions) {
-        self.store = store; self.books = books; self.pageWidth = pageWidth; self.actions = actions
+        self.store = store; self.books = books; self.pageWidth = pageWidth
+        self.tracksVisibleCovers = tracksVisibleCovers; self.actions = actions
     }
     private var columns: Int { max(3, Int((pageWidth - 32) / 136)) }
     private var coverWidth: CGFloat { max(1, (pageWidth - 48 - CGFloat(columns - 1) * 16) / CGFloat(columns)) }
@@ -356,6 +522,19 @@ struct NativeBookShelf<Actions: View>: View {
             else { NativeBookTile(book: book, width: coverWidth, muted: mutedText, galleryMode: galleryMode,
                                   showSyncStatus: store.preferences.showBookSyncStatus) }
         }.buttonStyle(.plain).contextMenu { actions(book) }.accessibilityIdentifier("book.\(book.id)")
+            .background {
+                if tracksVisibleCovers, store.preferences.colorfulMode, let path = book.coverPath {
+                    GeometryReader { proxy in
+                        let tile = proxy.frame(in: .named(NativeLibraryScrollState.space))
+                        let cover = CGRect(x: tile.minX, y: tile.minY + (store.preferences.listView ? 10 : 0),
+                                           width: store.preferences.listView ? 46 : coverWidth,
+                                           height: store.preferences.listView ? 66 : coverWidth * 1.45)
+                        Color.clear.preference(key: NativeCoverPositionKey.self, value: [
+                            NativeCoverPosition(cover: NativeVisibleCover(path: path, version: book.updatedAt), frame: cover)
+                        ])
+                    }
+                }
+            }
     }
 }
 

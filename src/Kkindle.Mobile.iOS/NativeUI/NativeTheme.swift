@@ -11,6 +11,13 @@ enum NativeTheme {
     /// The top-level tab pages use one title size so their headers align.
     static let pageTitleFont = font(26, relativeTo: .largeTitle)
 
+    /// The window's real top inset. SwiftUI geometry inside a page can report
+    /// zero here, while the status-bar glass needs the device value.
+    static var statusBarHeight: CGFloat {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        return (windows.first { $0.isKeyWindow } ?? windows.first { !$0.isHidden })?.safeAreaInsets.top ?? 0
+    }
+
     private static func color(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
             let value = traits.userInterfaceStyle == .dark ? dark : light
@@ -77,6 +84,26 @@ enum NativeTheme {
         UITabBarItem.appearance().setTitleTextAttributes([.font: uiFont(10)], for: .selected)
         UITabBar.appearance().tintColor = .label
         UITabBar.appearance().unselectedItemTintColor = .secondaryLabel
+    }
+}
+
+/// Protects status text while letting the material fade into scrolling content.
+struct NativeStatusBarGlass: View {
+    var body: some View {
+        Rectangle().fill(.ultraThinMaterial)
+            .frame(height: NativeTheme.statusBarHeight + 28)
+            .mask {
+                LinearGradient(stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.65),
+                    .init(color: .clear, location: 1)
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .opacity(0.35)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

@@ -53,6 +53,8 @@ public partial class MainWindow
         {
             var current = await _modules.Accounts.Service.GetStatusAsync(cancellationToken: _lifetimeCancellation.Token);
             if (current.User?.Id != state.Account.User?.Id || current.Region != state.Account.Region || current.RequiresDataRestart) return false;
+            // The default applies only before the user saved their own provider.
+            if (_s3SyncStoredSettings.Settings.HasChosenCustomProvider) return false;
             var editVersion = _s3SettingsEditVersion;
             var draft = ReadS3SyncSettingsFromControls();
             var hadDraft = _s3SettingsDirty;
@@ -97,6 +99,7 @@ public partial class MainWindow
         _deviceChecksStarted = true;
         _modules.Accounts.Service.DeviceInvalidated += OnDeviceInvalidated;
         _modules.Accounts.Monitor.MembershipExpired += OnMembershipExpired;
+        _modules.Accounts.Monitor.MembershipExpiring += OnMembershipExpiring;
         _modules.Accounts.Monitor.Start();
     }
 
@@ -106,6 +109,14 @@ public partial class MainWindow
             if (_lifetimeCancellation.IsCancellationRequested) return;
             await RefreshAccountSummaryAsync();
             await ShowMessageAsync(UiText.Get("会员已过期"), e.Message);
+        });
+
+    private void OnMembershipExpiring(object? sender, Kkindle.Infrastructure.AccountMembershipExpiringEventArgs e) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            if (_lifetimeCancellation.IsCancellationRequested) return;
+            await RefreshAccountSummaryAsync();
+            await ShowMessageAsync(UiText.Get("会员即将到期"), e.Message);
         });
 
     private void OnDeviceInvalidated(object? sender, Kkindle.Infrastructure.AccountDeviceInvalidatedEventArgs e) =>
@@ -199,11 +210,11 @@ public partial class MainWindow
         {
             if (_accountNavigationMembership.ProExpiresAt is { } expiry && expiry <= DateTimeOffset.UtcNow)
             {
-                var retentionEnd = MemberEntitlements.CloudRetentionEndsAt(expiry);
+                var retentionEnd = MemberEntitlements.CloudRetentionEndsAt(expiry, _accountNavigationMembership.TrialExpiresAt);
                 notice = DateTimeOffset.UtcNow < retentionEnd
                     ? UiText.Get("Plus 已到期，同步与下载已暂停。云端数据保留至 {0:yyyy/MM/dd}，届时自动销毁。", retentionEnd.LocalDateTime)
                     : UiText.Get("Plus 已到期，同步与下载已暂停。云端数据保留期已结束。");
-                details = MemberEntitlements.PlusExpiryMessage(expiry, DateTimeOffset.UtcNow);
+                details = MemberEntitlements.PlusExpiryMessage(expiry, DateTimeOffset.UtcNow, _accountNavigationMembership.TrialExpiresAt);
             }
             else notice = UiText.Get("Kkindle 云同步需要 Plus 会员。");
         }

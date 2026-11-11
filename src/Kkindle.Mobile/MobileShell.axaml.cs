@@ -132,6 +132,11 @@ public partial class MobileShell : UserControl
             if (_modules.IsDisposed) return;
             await ConfirmAsync("会员已过期", args.Message, "知道了");
         });
+        _modules.Accounts.Monitor.MembershipExpiring += (_, args) => Dispatcher.UIThread.Post(async () =>
+        {
+            if (_modules.IsDisposed) return;
+            await ConfirmAsync("会员即将到期", args.Message, "知道了");
+        });
         _modules.Accounts.Monitor.Start();
     }
 

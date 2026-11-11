@@ -43,7 +43,7 @@ struct CoverResult: Decodable { let cover: String? }
 struct MessageResult: Decodable { let message: String; let warning: String? }
 struct TextResult: Decodable { let text: String }
 struct ProfileSummary: Decodable { let version: String; let sync: String; let ai: String; let kindle: String; let storage: String; let account: AccountStatus }
-struct AccountUser: Decodable { let id: String; let username: String }
+struct AccountUser: Decodable { let id: String; let username: String; let email: String?; let emailVerified: Bool? }
 struct AccountStatus: Decodable {
     let serverUrl: String; let user: AccountUser?; let expiresAt: String?; let isLoggedIn: Bool
     let region: Int; let requiresDataRestart: Bool
@@ -62,6 +62,14 @@ struct AccountMembership: Decodable {
     let downloadCreditBytes: Int64; let storageBytes: Int64; let storageQuota: Int64; let storageAddonNextExpiresAt: String?
     let plusRenewalLimitAt: String?; let pendingPlusDays: Int?
     let plusDownloadQuotaBytes: Int64?; let plusDownloadUsedBytes: Int64?; let plusDownloadExpiresAt: String?
+    let plusEarlyDownloadQuotaBytes: Int64?; let plusEarlyDownloadUsedBytes: Int64?
+    let plusEarlyDownloadEndsAt: String?
+    let metadataDownloadQuotaBytes: Int64?; let metadataDownloadUsedBytes: Int64?
+    let metadataDownloadResetsAt: String?
+    let trialAvailable: Bool?
+    let trialClaimed: Bool?
+    let trialClaimedAt: String?
+    let trialExpiresAt: String?
     var tierName: String { tier == "pro" ? "Plus 会员" : tier == "lifetime" ? "功能解锁" : "Free" }
     /// The plan as sold, like the desktop: a lapsed Plus no longer counts as Plus.
     var plan: String {
@@ -70,20 +78,64 @@ struct AccountMembership: Decodable {
     }
     var planName: String { plan == "plus" ? "Plus 会员" : plan == "lifetime" ? "功能解锁" : "Free" }
     var isPlusExpired: Bool { Self.date(proExpiresAt).map { $0 <= Date() } ?? false }
+    var plusRenewalMessage: String? {
+        guard plan == "plus", let expiry = Self.date(proExpiresAt), expiry > Date() else { return nil }
+        let remaining = expiry.timeIntervalSinceNow
+        guard remaining <= 30 * 86_400 else { return nil }
+        let days = max(1, Int(ceil(remaining / 86_400)))
+        if isTrialPlus {
+            return days <= 1
+                ? "Plus 免费试用将于 \(Self.day(expiry)) 到期（不足 1 天）。到期后 Kkindle 云同步、下载及自备 S3 / WebDAV 将停用，试用期云端数据保留 7 天；开通正式 Plus 可继续使用。请及时开通。"
+                : "Plus 免费试用将于 \(Self.day(expiry)) 到期（剩余 \(days) 天）。到期后 Kkindle 云同步、下载及自备 S3 / WebDAV 将停用，试用期云端数据保留 7 天；开通正式 Plus 可继续使用。请及时开通。"
+        }
+        return days <= 1
+            ? "Plus 将于 \(Self.day(expiry)) 到期（不足 1 天）。到期后 Kkindle 云同步、下载及自备 S3 / WebDAV 将停用，云端数据保留一个月；已购买功能解锁的自备同步不受影响。请及时续费。"
+            : "Plus 将于 \(Self.day(expiry)) 到期（剩余 \(days) 天）。到期后 Kkindle 云同步、下载及自备 S3 / WebDAV 将停用，云端数据保留一个月；已购买功能解锁的自备同步不受影响。请及时续费。"
+    }
+    var isPlusExpiringSoon: Bool { plusRenewalMessage != nil }
+    var trialExpiresAtDate: Date? { Self.date(trialExpiresAt) }
+    var isTrialActive: Bool { trialClaimed == true && (trialExpiresAtDate.map { $0 > Date() } ?? false) }
+    var canClaimTrial: Bool { trialAvailable == true }
+    var trialStatusMessage: String {
+        guard isTrialActive, let end = trialExpiresAtDate else {
+            return "只有主动打开领取开关才会领取；试用到期后，云端数据保留 7 天后自动销毁。"
+        }
+        return "试用期至 \(Self.day(end))，到期后云端数据保留 7 天后自动销毁。可随时开通正式 Plus 继续使用。"
+    }
+    /// The active or most recent Plus period was the free trial rather than a paid subscription.
+    private var isTrialPlus: Bool {
+        guard let trial = trialExpiresAtDate else { return false }
+        return Self.date(proExpiresAt) == trial
+    }
     var planExpiryText: String {
         if plan == "plus", let expiry = Self.date(proExpiresAt) { return "有效至 " + Self.day(expiry) }
         return plan == "lifetime" ? "永久有效" : isPlusExpired ? "Plus 已到期" : "永久免费"
     }
     var plusDownloadPeriodText: String? { Self.date(plusDownloadExpiresAt).map { "本期有效至 " + Self.day($0) } }
-    /// The desktop's expiry notice. The cloud data retention runs one UTC calendar month from expiry.
+    var plusEarlyDownloadEndText: String? {
+        guard let end = Self.date(plusEarlyDownloadEndsAt), end > Date() else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+        return formatter.string(from: end)
+    }
+    /// The desktop's expiry notice. Paid cloud data is retained for one UTC calendar month;
+    /// a lapsed free trial keeps it for 7 days.
     var plusExpiryMessage: String? {
         guard let expiry = Self.date(proExpiresAt), expiry <= Date() else { return nil }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
+        if isTrialPlus {
+            guard let retention = calendar.date(byAdding: .day, value: 7, to: expiry) else { return nil }
+            return Date() < retention
+                ? "Plus 免费试用已于 \(Self.day(expiry)) 到期。Kkindle 云同步、下载及试用期间使用的自备 S3 / WebDAV 已停用；已购买的功能解锁不受影响。试用期云端书籍及其他同步数据保留至 \(Self.day(retention))；在保留期内开通 Plus 可恢复访问，保留期结束后自动销毁。"
+                : "Plus 免费试用已于 \(Self.day(expiry)) 到期。Kkindle 云同步、下载及试用期间使用的自备 S3 / WebDAV 已停用；已购买的功能解锁不受影响。试用期云端数据的 7 天保留期已结束，数据已进入自动销毁流程。"
+        }
         guard let retention = calendar.date(byAdding: .month, value: 1, to: expiry) else { return nil }
         return Date() < retention
-            ? "Plus 已于 \(Self.day(expiry)) 到期。Kkindle 云同步与下载已停用，云端书籍及其他同步数据保留至 \(Self.day(retention))；在保留期内续费可恢复访问，保留期结束后自动销毁。"
-            : "Plus 已于 \(Self.day(expiry)) 到期。Kkindle 云同步与下载已停用，云端书籍及其他同步数据的一个月保留期已结束，数据将自动销毁。"
+            ? "Plus 已于 \(Self.day(expiry)) 到期。Kkindle 云同步、下载及 Plus 期间使用的自备 S3 / WebDAV 已停用；已购买的功能解锁不受影响。云端书籍及其他同步数据保留至 \(Self.day(retention))；在保留期内续费可恢复访问，保留期结束后自动销毁。"
+            : "Plus 已于 \(Self.day(expiry)) 到期。Kkindle 云同步、下载及 Plus 期间使用的自备 S3 / WebDAV 已停用；已购买的功能解锁不受影响。云端书籍及其他同步数据的一个月保留期已结束，数据已进入自动销毁流程。"
     }
     func canExtendPlus(days: Int) -> Bool {
         guard days > 0 && days <= 1825 && (pendingPlusDays ?? 0) >= 0 else { return false }
@@ -153,6 +205,7 @@ struct PurchaseOrder: Decodable, Identifiable {
 
 struct SyncForm: Codable {
     var provider = 0
+    var providerChosenByUser = false
     var enabled = false
     var automaticSyncEnabled = true
     var downloadBookFilesOnSync = false
@@ -258,12 +311,12 @@ struct TxtRules: Codable, Equatable { var encoding = 0; var headingPreset = 0; v
 struct TxtChapter: Decodable, Identifiable { let number: Int; let title: String; let isVolume: Bool; var id: Int { number } }
 struct TxtPreview: Decodable { let chapterCount: Int; let detectedEncoding: String; let chapters: [TxtChapter]; let hasPreviousPage: Bool; let hasNextPage: Bool }
 
-/// Account storage and transfer sizes in the desktop's format, such as "1.5 GiB".
+/// Account storage and transfer sizes in the desktop's format, such as "1.5 GB".
 func memberSize(_ bytes: Int64) -> String {
     let value = max(0, bytes)
-    let (amount, unit): (Double, String) = value >= 1_073_741_824 ? (Double(value) / 1_073_741_824, "GiB")
-        : value >= 1_048_576 ? (Double(value) / 1_048_576, "MiB")
-        : value >= 1024 ? (Double(value) / 1024, "KiB") : (Double(value), "B")
+    let (amount, unit): (Double, String) = value >= 1_073_741_824 ? (Double(value) / 1_073_741_824, "GB")
+        : value >= 1_048_576 ? (Double(value) / 1_048_576, "MB")
+        : value >= 1024 ? (Double(value) / 1024, "KB") : (Double(value), "B")
     let formatter = NumberFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.numberStyle = .decimal

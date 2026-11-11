@@ -17,6 +17,7 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
     private string Checkpoint => Path.Combine(paths.Data, "device-check.json");
 
     public event EventHandler<AccountMembershipExpiredEventArgs>? MembershipExpired;
+    public event EventHandler<AccountMembershipExpiringEventArgs>? MembershipExpiring;
 
     public void Start()
     {
@@ -52,12 +53,29 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
             if (checkedAccount.Region != account.Region || checkedAccount.ServerUrl != account.ServerUrl
                 || (checkedAccount.IsLoggedIn && checkedAccount.User?.Id != account.User?.Id)) return false;
             AccountMembershipExpiredEventArgs? notice = null;
+            AccountMembershipExpiringEventArgs? expiring = null;
             if (checkedAccount.IsLoggedIn)
             {
                 var status = await new DeviceMembershipService(accounts).RefreshAsync(token);
                 now = _clock.GetUtcNow();
                 if (status.Membership.Tier == "pro" && status.Membership.ProExpiresAt is { } nextExpiry && nextExpiry > now)
+                {
                     checks[activeExpiryKey] = nextExpiry;
+                    if (MemberEntitlements.PlusRenewalReminder(nextExpiry, now) is { } threshold)
+                    {
+                        var reminderKey = "plus-expiring:" + threshold + ":" + key;
+                        if (!checks.TryGetValue(reminderKey, out var notified) || notified != nextExpiry)
+                        {
+                            // Remember this threshold only: a user who first opens the app
+                            // at 6 days gets the 7-day notice without a burst of 30/7/1,
+                            // and later 1-day notices still arrive on their own check.
+                            checks[reminderKey] = nextExpiry;
+                            expiring = new(nextExpiry, Math.Max(1, (int)Math.Ceiling((nextExpiry - now).TotalDays)),
+                                MemberEntitlements.CloudRetentionEndsAt(nextExpiry, status.Membership.TrialExpiresAt),
+                                MemberEntitlements.PlusRenewalMessage(nextExpiry, now, status.Membership.TrialExpiresAt));
+                        }
+                    }
+                }
                 else
                     checks.Remove(activeExpiryKey);
                 if (status.Membership.ProExpiresAt is { } expiry && expiry <= now && status.Membership.Tier != "pro")
@@ -66,7 +84,8 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
                     if (!checks.TryGetValue(noticeKey, out var notifiedExpiry) || notifiedExpiry != expiry)
                     {
                         checks[noticeKey] = expiry;
-                        notice = new(expiry, MemberEntitlements.CloudRetentionEndsAt(expiry), MemberEntitlements.PlusExpiryMessage(expiry, now));
+                        notice = new(expiry, MemberEntitlements.CloudRetentionEndsAt(expiry, status.Membership.TrialExpiresAt),
+                            MemberEntitlements.PlusExpiryMessage(expiry, now, status.Membership.TrialExpiresAt));
                     }
                 }
             }
@@ -83,6 +102,7 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
             }
             finally { File.Delete(temporary); }
             if (notice is not null) MembershipExpired?.Invoke(this, notice);
+            if (expiring is not null) MembershipExpiring?.Invoke(this, expiring);
             return true;
         }
         finally { _gate.Release(); }
@@ -112,6 +132,9 @@ public sealed class AccountDeviceMonitor(AccountService accounts, AppPaths paths
 }
 
 public sealed record AccountMembershipExpiredEventArgs(DateTimeOffset ExpiredAt, DateTimeOffset CloudRetentionEndsAt, string Message);
+
+public sealed record AccountMembershipExpiringEventArgs(DateTimeOffset ExpiresAt, int DaysRemaining,
+    DateTimeOffset CloudRetentionEndsAt, string Message);
 
 [JsonSerializable(typeof(Dictionary<string, DateTimeOffset>))]
 internal partial class DeviceCheckJsonContext : JsonSerializerContext;

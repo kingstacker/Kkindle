@@ -19,6 +19,8 @@ public partial class AccountCenterView : UserControl, IDisposable
     private PurchaseOrder[] _orders = [];
     private bool _busy;
     private bool _presenting;
+    private bool _resetMode;
+    private bool _emailCodeSent;
     private Guid _activationRequestId;
     private string? _activationAttemptCode;
     private Task? _refreshTask;
@@ -117,6 +119,9 @@ public partial class AccountCenterView : UserControl, IDisposable
             DeviceSlotsPanel.Children.Clear();
             DeviceCountText.Text = "—";
             DeviceCapacityText.Text = "";
+            TrialCard.IsVisible = false;
+            _presenting = true;
+            try { TrialClaimToggle.IsChecked = false; } finally { _presenting = false; }
             SetMembershipMessage("");
             ClearPasswords();
             ClearActivationCode();
@@ -128,6 +133,8 @@ public partial class AccountCenterView : UserControl, IDisposable
             PresentOrders();
         }
         _status = status;
+        if (status.IsLoggedIn) _resetMode = false;
+        if (status.User is null || status.User.EmailVerified) _emailCodeSent = false;
         _presenting = true;
         try { RegionBox.SelectedIndex = (int)status.Region; }
         finally { _presenting = false; }
@@ -136,7 +143,7 @@ public partial class AccountCenterView : UserControl, IDisposable
         AccountPanel.IsVisible = status.IsLoggedIn;
         AccountSettingsCard.IsVisible = status.IsLoggedIn;
         SignInPanel.IsVisible = !status.IsLoggedIn;
-        SubmitButton.IsVisible = !status.IsLoggedIn;
+        ApplyResetMode();
         SignOutButton.IsVisible = status.IsLoggedIn;
         MembershipPanel.IsVisible = status.IsLoggedIn && _membership is not null;
         UsernameText.Text = status.User?.Username;
@@ -152,7 +159,31 @@ public partial class AccountCenterView : UserControl, IDisposable
             MembershipHintText.Text = "";
         }
         if (status.IsLoggedIn) ClearPasswords();
+        PresentEmailVerification();
         PublishAccountState();
+    }
+
+    private void ApplyResetMode()
+    {
+        ResetPanel.IsVisible = _resetMode;
+        SubmitButton.IsVisible = !_resetMode && _status?.IsLoggedIn != true;
+        ForgotPasswordButton.IsVisible = !_resetMode;
+        LoginPasswordPanel.IsVisible = !_resetMode;
+        ConfirmPasswordPanel.IsVisible = !_resetMode && Register;
+        RegistrationEmailPanel.IsVisible = !_resetMode && Register;
+        ModeBox.IsEnabled = !_resetMode;
+    }
+
+    private void PresentEmailVerification()
+    {
+        var user = _status?.User;
+        var available = _status?.IsLoggedIn == true && user?.Email is not null;
+        var verified = user?.EmailVerified == true;
+        EmailVerifiedText.Text = available
+            ? UiText.Get(verified ? "注册邮箱已验证。" : "注册邮箱尚未验证。验证后可找回密码。")
+            : UiText.Get("此账号未设置注册邮箱，无法验证或找回密码。");
+        SendEmailCodeButton.IsVisible = available && !verified && !_emailCodeSent;
+        EmailCodePanel.IsVisible = available && !verified && _emailCodeSent;
     }
 
     private void SetBusy(bool value)
@@ -173,6 +204,8 @@ public partial class AccountCenterView : UserControl, IDisposable
     {
         if (_presenting || _busy || RegionPanel is null || _accounts is null || RegionBox.SelectedIndex < 0) return;
         SetBusy(true);
+        _resetMode = false;
+        _emailCodeSent = false;
         ClearPasswords();
         ClearActivationCode();
         UsernameBox.Text = "";
@@ -194,6 +227,7 @@ public partial class AccountCenterView : UserControl, IDisposable
         if (ConfirmPasswordPanel is null) return;
         ConfirmPasswordPanel.IsVisible = Register;
         PresentLoginMode();
+        ApplyResetMode();
         SubmitButton.Content = UiText.Get(Register ? "注册并登录" : "登录");
         ClearPasswords();
         StatusText.Text = "";
@@ -232,6 +266,95 @@ public partial class AccountCenterView : UserControl, IDisposable
         finally { ClearPasswords(); SetBusy(false); }
     }
 
+    private async void OnForgotPasswordClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null || Register) return;
+        var identifier = (UsernameBox.Text ?? "").Trim();
+        if (!AccountValidation.IsLogin(identifier))
+        { StatusText.Text = UiText.Get("请输入有效的用户名或邮箱。"); return; }
+        SetBusy(true);
+        StatusText.Text = UiText.Get("正在发送验证码…");
+        try
+        {
+            await _accounts.RequestPasswordResetAsync(_status?.ServerUrl ?? "", identifier, _lifetime.Token);
+            _resetMode = true;
+            ApplyResetMode();
+            ResetCodeBox.Text = ""; ResetPasswordBox.Text = ""; ResetConfirmPasswordBox.Text = "";
+            StatusText.Text = UiText.Get("若该账号已绑定邮箱，验证码已发送（15 分钟内有效）。请查收邮件并设置新密码。");
+            ResetCodeBox.Focus();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { StatusText.Text = UiText.Localize(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private async void OnResetSubmitClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null) return;
+        if ((ResetPasswordBox.Text ?? "") != (ResetConfirmPasswordBox.Text ?? ""))
+        { StatusText.Text = UiText.Get("两次输入的密码不一致。"); return; }
+        SetBusy(true);
+        StatusText.Text = UiText.Get("正在重置密码…");
+        try
+        {
+            var user = await _accounts.ResetPasswordAsync(_status?.ServerUrl ?? "", UsernameBox.Text ?? "",
+                ResetCodeBox.Text ?? "", ResetPasswordBox.Text ?? "", ResetConfirmPasswordBox.Text ?? "", _lifetime.Token);
+            UsernameBox.Text = user.Username;
+            _resetMode = false;
+            ApplyResetMode();
+            ClearPasswords();
+            StatusText.Text = UiText.Get("密码已重置，请使用新密码登录。");
+            PasswordBox.Focus();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { StatusText.Text = UiText.Localize(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private void OnResetCancelClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        _resetMode = false;
+        ApplyResetMode();
+        ResetCodeBox.Text = ""; ResetPasswordBox.Text = ""; ResetConfirmPasswordBox.Text = "";
+        StatusText.Text = UiText.Get("已返回登录。");
+    }
+
+    private async void OnSendEmailCodeClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null) return;
+        SetBusy(true);
+        StatusText.Text = UiText.Get("正在发送邮箱验证码…");
+        try
+        {
+            await _accounts.RequestEmailVerificationAsync(_lifetime.Token);
+            _emailCodeSent = true;
+            EmailCodeBox.Text = "";
+            PresentEmailVerification();
+            EmailCodeBox.Focus();
+            StatusText.Text = UiText.Get("验证码已发送至注册邮箱（15 分钟内有效）。");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { StatusText.Text = UiText.Localize(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private async void OnConfirmEmailCodeClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null) return;
+        SetBusy(true);
+        StatusText.Text = UiText.Get("正在验证邮箱…");
+        try
+        {
+            Present(await _accounts.ConfirmEmailVerificationAsync(EmailCodeBox.Text ?? "", _lifetime.Token));
+            EmailCodeBox.Text = "";
+            StatusText.Text = UiText.Get("邮箱验证成功。");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { StatusText.Text = UiText.Localize(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
     private async void OnSignOutClick(object? sender, RoutedEventArgs e)
     {
         if (_busy || _accounts is null) return;
@@ -251,6 +374,7 @@ public partial class AccountCenterView : UserControl, IDisposable
     {
         PasswordBox.Text = ""; ConfirmPasswordBox.Text = ""; ProfilePasswordBox.Text = "";
         CurrentPasswordBox.Text = ""; NewPasswordBox.Text = ""; ConfirmNewPasswordBox.Text = "";
+        ResetCodeBox.Text = ""; ResetPasswordBox.Text = ""; ResetConfirmPasswordBox.Text = "";
     }
 
     private async void OnProfileSaveClick(object? sender, RoutedEventArgs e)
@@ -355,7 +479,10 @@ public partial class AccountCenterView : UserControl, IDisposable
         var member = status.Membership;
         var tier = AccountVisuals.Tier(member);
         var cloud = tier == "plus" && status.CanUseAccountCloudSync;
-        var expired = member.ProExpiresAt is { } expiry && expiry <= DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        var expired = member.ProExpiresAt is { } expiry && expiry <= now;
+        var expiring = tier == "plus" && member.ProExpiresAt is { } renewalAt && renewalAt > now
+            && MemberEntitlements.PlusRenewalReminder(renewalAt, now) is not null;
         SetMembershipAppearance(tier);
         TierBadgeText.Text = UiText.Get(tier switch { "plus" => "Plus 会员", "lifetime" => "功能解锁", _ => "Free" });
         MembershipSummary.Text = UiText.Get(tier switch
@@ -373,8 +500,10 @@ public partial class AccountCenterView : UserControl, IDisposable
         MembershipExpiryText.Text = tier == "plus" && member.ProExpiresAt is { } until
             ? UiText.Get("有效至 {0:yyyy/MM/dd}", until.LocalDateTime)
             : UiText.Get(tier == "lifetime" ? "永久有效" : expired ? "Plus 已到期" : "永久免费");
-        ExpiryNoticeBorder.IsVisible = expired;
-        ExpiryNoticeText.Text = expired ? MemberEntitlements.PlusExpiryMessage(member.ProExpiresAt!.Value, DateTimeOffset.UtcNow) : "";
+        ExpiryNoticeBorder.IsVisible = expired || expiring;
+        ExpiryNoticeText.Text = expired
+            ? MemberEntitlements.PlusExpiryMessage(member.ProExpiresAt!.Value, now, member.TrialExpiresAt)
+            : expiring ? MemberEntitlements.PlusRenewalMessage(member.ProExpiresAt!.Value, now, member.TrialExpiresAt) : "";
         CloudUsagePanel.IsVisible = cloud;
         CloudLockedPanel.IsVisible = !cloud;
         CloudLockedTitleText.Text = UiText.Get(expired ? "Kkindle 云同步已停用" : "Kkindle 云同步未开通");
@@ -384,7 +513,25 @@ public partial class AccountCenterView : UserControl, IDisposable
         ViewPlusButton.Content = UiText.Get(expired ? "续费 Plus" : "了解 Plus");
         if (cloud) PresentUsage(member);
         PresentDevices(status);
+        PresentTrial(member);
         PresentProducts();
+    }
+
+    private void PresentTrial(AccountMembership member)
+    {
+        var active = member.TrialClaimed && member.TrialExpiresAt is { } until && until > DateTimeOffset.UtcNow;
+        TrialCard.IsVisible = member.TrialAvailable || active;
+        _presenting = true;
+        try
+        {
+            TrialClaimToggle.IsChecked = member.TrialClaimed;
+            TrialClaimToggle.IsEnabled = member.TrialAvailable;
+        }
+        finally { _presenting = false; }
+        TrialStatusText.IsVisible = active;
+        TrialStatusText.Text = active
+            ? UiText.Get("试用期至 {0:yyyy/MM/dd}，到期后云端数据保留 7 天；可随时开通正式 Plus 继续使用。", member.TrialExpiresAt!.Value.LocalDateTime)
+            : "";
     }
 
     private void SetMembershipAppearance(string tier)
@@ -433,6 +580,21 @@ public partial class AccountCenterView : UserControl, IDisposable
         DownloadCreditText.Text = member.DownloadCreditBytes > 0
             ? UiText.Get("额外可用流量 {0}，含旧版购买余额 {1}；不计入年度限额。", MemberSize(additional), MemberSize(Math.Max(0, member.DownloadCreditBytes)))
             : UiText.Get("额外可用流量 {0}，不计入年度限额。", MemberSize(additional));
+        var earlyEnds = member.PlusEarlyDownloadEndsAt;
+        var earlyQuota = member.PlusEarlyDownloadQuotaBytes;
+        var earlyUsed = member.PlusEarlyDownloadUsedBytes ?? 0;
+        var earlyActive = earlyEnds is { } end && end > DateTimeOffset.UtcNow && earlyQuota is >= 0;
+        EarlyLimitText.IsVisible = earlyActive;
+        if (earlyActive)
+            EarlyLimitText.Text = UiText.Get("新用户下载限额：已用 {0} / {1}，截止 {2:yyyy/MM/dd HH:mm}",
+                MemberSize(Math.Max(0, earlyUsed)), MemberSize(Math.Max(0, earlyQuota!.Value)), earlyEnds!.Value.LocalDateTime);
+        var metadataQuota = member.MetadataDownloadQuotaBytes;
+        var metadataUsed = member.MetadataDownloadUsedBytes;
+        var metadataVisible = metadataQuota is >= 0 && metadataUsed is > 0;
+        MetadataUsageText.IsVisible = metadataVisible;
+        if (metadataVisible)
+            MetadataUsageText.Text = UiText.Get("今日元数据流量：已用 {0} / {1}，UTC 零点重置",
+                MemberSize(Math.Max(0, metadataUsed!.Value)), MemberSize(Math.Max(0, metadataQuota!.Value)));
         Avalonia.Automation.AutomationProperties.SetName(TrafficCard,
             UiText.Get("年度下载：已用 {0}，限额 {1}，剩余 {2}；本月下载 {3}。",
                 AnnualDownloadUsedText.Text, hasAnnualUsage ? MemberSize(annualQuota) : "—", DownloadRemainingText.Text, MemberSize(download)));
@@ -502,7 +664,7 @@ public partial class AccountCenterView : UserControl, IDisposable
     {
         Benefits(FreeBenefitsPanel, ["本地书库管理与阅读", "USB Kindle 书籍与批注双向同步", "插件功能", "自定义 AI 接口", "加密备份"]);
         Benefits(LifetimeBenefitsPanel, ["包含全部 Free 权益", "自备 S3 / WebDAV 多端同步", "进度与批注完整同步", "最多 6 台设备登录", "一次购买，永久使用"]);
-        Benefits(PlusBenefitsPanel, ["包含功能解锁的同步权益", "10GB Kkindle 私人云空间", "书籍与阅读数据自动同步", "每会员年度 150GB 下载额度", "最多 6 台设备登录"]);
+        Benefits(PlusBenefitsPanel, ["订阅期内包含功能解锁的同步权益", "10GB Kkindle 私人云空间", "书籍与阅读数据自动同步", "每会员年度 50GB 下载额度", "最多 6 台设备同时云同步"]);
     }
 
     private void Benefits(StackPanel panel, string[] benefits)
@@ -534,17 +696,26 @@ public partial class AccountCenterView : UserControl, IDisposable
         PlusPriceText.Text = plus is null ? "—" : Price(plus.PriceMinor, plus.Currency);
         LifetimePurchaseButton.Tag = lifetime;
         PlusPurchaseButton.Tag = plus;
-        LifetimePurchaseButton.IsEnabled = lifetime is not null && tier != "lifetime";
+        var hasLifetime = _memberStatus?.Membership.HasLifetimeFeatures == true;
+        LifetimePurchaseButton.IsEnabled = lifetime is not null && !hasLifetime;
         var canRenew = plus is not null && _memberStatus is { } status
             && MemberEntitlements.CanExtendPlus(status.Membership, plus.DurationDays, DateTimeOffset.UtcNow);
         PlusPurchaseButton.IsEnabled = canRenew;
-        LifetimePurchaseButton.Content = UiText.Get(tier == "lifetime" ? "已永久解锁" : lifetime is null ? "暂未开放" : "解锁功能");
+        LifetimePurchaseButton.Content = UiText.Get(hasLifetime ? "已永久解锁" : lifetime is null ? "暂未开放" : "解锁功能");
         PlusPurchaseButton.Content = UiText.Get(plus is null ? "暂未开放" : !canRenew ? "暂不可续费" : tier == "plus" ? "续费 Plus" : "开通 Plus");
         ToolTip.SetTip(PlusPurchaseButton, UiText.Get("Plus 最多可持有 5 年有效期，付费和激活码共用上限。"));
         var demo = Uri.TryCreate(_status?.ServerUrl, UriKind.Absolute, out var endpoint) && endpoint.IsLoopback;
         PlanPurchaseHintText.Text = UiText.Get(_products.Length == 0 ? "购买服务暂未开放，请稍后刷新。"
             : demo ? "本机演示价：创建订单不会实际扣款。" : "创建订单后，确认付款并到账即可开通权益。")
             + " " + UiText.Get("Plus 最多可持有 5 年有效期，付费和激活码共用上限。");
+        var international = _status?.Region == AccountRegion.International;
+        PlansRegionText.Text = UiText.Get(AccountRegions.DisplayName(_status?.Region ?? AccountRegion.China));
+        PlansUnavailableText.IsVisible = international;
+        NoRefundPolicyText.IsVisible = !international;
+        PlanCardsGrid.IsVisible = !international;
+        PlanPurchaseHintText.IsVisible = !international;
+        ActivationCard.IsVisible = !international;
+        OrdersCard.IsVisible = !international;
     }
 
     private void PresentOrders()
@@ -591,8 +762,8 @@ public partial class AccountCenterView : UserControl, IDisposable
 
     private static string MemberSize(decimal bytes)
     {
-        var (value, unit) = bytes >= 1073741824 ? (bytes / 1073741824, "GiB") : bytes >= 1048576
-            ? (bytes / 1048576, "MiB") : bytes >= 1024 ? (bytes / 1024, "KiB") : (bytes, "B");
+        var (value, unit) = bytes >= 1073741824 ? (bytes / 1073741824, "GB") : bytes >= 1048576
+            ? (bytes / 1048576, "MB") : bytes >= 1024 ? (bytes / 1024, "KB") : (bytes, "B");
         return value.ToString("0.##", UiText.CurrentCulture) + " " + unit;
     }
 
@@ -620,6 +791,28 @@ public partial class AccountCenterView : UserControl, IDisposable
         try { await _membership.KickAsync(device, _lifetime.Token); Present(await _accounts!.GetStatusAsync(cancellationToken: _lifetime.Token)); await LoadMembershipAsync(); }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception error) when (error is not OutOfMemoryException) { SetMembershipMessage(UiText.Localize(error.Message)); }
+        finally { SetBusy(false); }
+    }
+    private async void OnTrialClaimToggle(object? sender, RoutedEventArgs e)
+    {
+        if (_presenting || _busy || _membership is null || _status?.IsLoggedIn != true
+            || TrialClaimToggle.IsChecked != true) return;
+        SetBusy(true);
+        SetMembershipMessage(UiText.Get("正在领取免费试用…"));
+        try
+        {
+            var member = await _membership.ClaimTrialAsync(_lifetime.Token);
+            if (_status?.User?.Id != member.AccountId || _status.Region != member.Region) return;
+            await LoadMembershipAsync();
+            SetMembershipMessage(UiText.Get("Plus 免费试用已开通，7 天内可使用云同步、下载和自备存储同步。"));
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _presenting = true;
+            try { TrialClaimToggle.IsChecked = false; } finally { _presenting = false; }
+            SetMembershipMessage(UiText.Localize(error.Message));
+        }
         finally { SetBusy(false); }
     }
     private async void OnPlanPurchaseClick(object? sender, RoutedEventArgs e)

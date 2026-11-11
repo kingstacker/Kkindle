@@ -61,6 +61,7 @@ struct NativeProfilePage: View {
                 Button { tapVersion() } label: { NativeSettingsRow(title: "版本", value: summary?.version ?? "", chevron: false) }
             }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 32).buttonStyle(.plain)
         }.background(NativeAmbientBackground()).navigationBarHidden(true)
+            .overlay(alignment: .top) { NativeStatusBarGlass() }
             .sheet(isPresented: $developer) {
                 NativeNameSheet(store: store, title: "开发者模式", initial: "", button: "进入", isSecure: true) { password in
                     try await store.command("settings.developer.toggle", ["password": password])
@@ -128,6 +129,7 @@ struct NativeSyncSettings: View {
     @State private var form = SyncForm()
     @State private var formLoaded = false
     @State private var savedProvider = 0
+    @State private var providerTouched = false
     @State private var summary = ""
     @State private var status = ""
     @State private var busy = false
@@ -141,10 +143,18 @@ struct NativeSyncSettings: View {
     private var signedIn: Bool { store.account?.isLoggedIn == true }
     private var memberKey: String { accountMode ? (store.account?.user?.id ?? "signed-out") : "" }
 
+    /// A deliberate picker change outranks the automatic Plus default until saved.
+    private var providerSelection: Binding<Int> {
+        Binding(get: { form.provider }, set: { value in
+            form.provider = value
+            if !loading { providerTouched = true }
+        })
+    }
+
     var body: some View {
         NativeForm {
             Section {
-                Picker("同步方式", selection: $form.provider) { Text("账号云同步").tag(2); Text("S3").tag(0); Text("WebDAV").tag(1) }
+                Picker("同步方式", selection: providerSelection) { Text("账号云同步").tag(2); Text("S3").tag(0); Text("WebDAV").tag(1) }
                     .pickerStyle(.segmented).accessibilityIdentifier("sync.provider")
                 if !accountMode {
                     Toggle("启用同步", isOn: $form.enabled).tint(NativeTheme.systemSwitchTint)
@@ -338,8 +348,18 @@ struct NativeSyncSettings: View {
             // This reruns on return from the account page; keep unsaved edits.
             if !formLoaded { form = saved; formLoaded = true }
             let account: AccountStatus = try await store.request("settings.account.get"); store.account = account
+            await applyAccountCloudSyncDefault(saved: saved)
         }
         catch { if !Task.isCancelled { status = error.localizedDescription } }
+    }
+    /// A Plus account opens on Kkindle cloud sync until the user saves a
+    /// provider of their own; that saved choice always keeps its interface.
+    private func applyAccountCloudSyncDefault(saved: SyncForm) async {
+        guard !providerTouched, form.provider != 2, !saved.providerChosenByUser,
+              let account = store.account, account.isLoggedIn, !account.requiresDataRestart else { return }
+        guard let member: DeviceFeatureStatus = try? await store.request("settings.membership.get"),
+              member.canUseAccountCloudSync == true, !Task.isCancelled else { return }
+        form.provider = 2
     }
     private func loadMembership() async {
         let key = memberKey

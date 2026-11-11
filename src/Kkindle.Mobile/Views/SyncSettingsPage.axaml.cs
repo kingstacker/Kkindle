@@ -54,8 +54,8 @@ public partial class SyncSettingsPage : UserControl, IShellPage
             await _modules!.Library.Books.InitializeAsync(_lifetime.Token);
             await _shell!.EnsureReaderDataAsync();
             _stored = await _modules.Sync.Service.LoadSettingsAsync(_lifetime.Token);
-            _draftSettings = _stored.Settings;
-            Present(_stored.Settings);
+            _draftSettings = await ApplyAccountCloudSyncDefaultAsync(_stored.Settings);
+            Present(_draftSettings);
             await PresentAccountAsync();
             await PresentLastSyncAsync();
         }
@@ -168,10 +168,36 @@ public partial class SyncSettingsPage : UserControl, IShellPage
 
     private async Task<bool> SaveAsync(S3SyncSettings settings)
     {
+        // Saving this form records the user's explicit provider choice.
+        settings = settings with { ProviderChosenByUser = true };
         await _modules!.Sync.Service.SaveSettingsAsync(_stored!.DeviceId, settings, _lifetime.Token);
         _stored = new S3SyncStoredSettings(_stored.DeviceId, settings);
         _draftSettings = settings;
         return true;
+    }
+
+    /// <summary>
+    /// A Plus account defaults to Kkindle cloud sync until the user saves a
+    /// provider of their own. Only the form is prefilled; the saved settings
+    /// change when the user saves or syncs.
+    /// </summary>
+    private async Task<S3SyncSettings> ApplyAccountCloudSyncDefaultAsync(S3SyncSettings settings)
+    {
+        if (settings.Provider == SyncProvider.AccountServer || settings.ProviderChosenByUser) return settings;
+        try
+        {
+            var account = await _modules!.Accounts.Service.GetStatusAsync(validateSession: true, _lifetime.Token);
+            if (!account.IsLoggedIn || account.RequiresDataRestart || account.Region != _modules.DataRegion)
+                return settings;
+            var member = await _modules.Accounts.Membership.RefreshAsync(_lifetime.Token);
+            return member.CanUseAccountCloudSync ? settings with { Provider = SyncProvider.AccountServer } : settings;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Offline or membership unavailable: keep the saved provider.
+            return settings;
+        }
     }
 
     private async void OnSaveClick(object? sender, RoutedEventArgs e)

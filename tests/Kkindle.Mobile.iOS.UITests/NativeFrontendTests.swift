@@ -158,15 +158,25 @@ final class NativeFrontendTests: XCTestCase {
     }
 
     /// Requires an isolated preview library with enough books to scroll.
-    func testLibraryHeaderStaysVisibleWhenBooksScroll() {
+    func testLibraryHeaderReturnsWhenScrollingDown() {
         showLibrary()
         let book = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book.'")).firstMatch
         XCTAssertTrue(book.waitForExistence(timeout: 15))
         let originalY = book.frame.minY
         app.swipeUp()
         XCTAssertTrue(waitUntil { !book.exists || book.frame.minY < originalY - 30 })
-        XCTAssertTrue(app.staticTexts["library.view.title"].exists)
+        let search = app.buttons.matching(identifier: "library.search.toggle")
+        XCTAssertTrue(waitUntil { !search.allElementsBoundByIndex.contains(where: { $0.isHittable }) })
         attachScreenshot("书库-书籍上滑标题栏")
+        app.swipeUp()
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(waitUntil { search.allElementsBoundByIndex.contains(where: { $0.isHittable }) })
+        XCTAssertTrue(!book.exists || book.frame.minY < originalY - 30)
+        attachScreenshot("书库-下滑恢复标题栏")
+        search.allElementsBoundByIndex.first(where: { $0.isHittable })?.tap()
+        XCTAssertTrue(app.textFields["library.search"].waitForExistence(timeout: 5))
     }
 
     func testLibraryGalleryModeShowsCoversOnlyAndPersists() {
@@ -212,6 +222,47 @@ final class NativeFrontendTests: XCTestCase {
         openLibrarySettings()
         colorful.tap()
         XCTAssertTrue(waitUntil { colorful.value as? String == "0" })
+    }
+
+    /// Requires a long preview library with distinct cover colours.
+    func testColorfulBackgroundFollowsVisibleBooks() {
+        openLibrarySettings()
+        let colorful = app.switches["library.settings.colorful"]
+        XCTAssertTrue(colorful.waitForExistence(timeout: 10))
+        if colorful.value as? String != "1" { colorful.tap() }
+        XCTAssertTrue(waitUntil { colorful.value as? String == "1" })
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.tabBars.buttons["书库"].tap()
+        showLibrary()
+        attachScreenshot("炫彩滚动-顶部")
+        app.tabBars.buttons["阅读资料"].tap()
+        XCTAssertTrue(app.staticTexts["page.materials"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["阅读数据"].tap()
+        XCTAssertTrue(app.staticTexts["page.dashboard"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["书库"].tap()
+        app.swipeUp()
+        app.swipeUp()
+        attachScreenshot("炫彩滚动-中间")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(waitUntil { self.app.buttons.matching(identifier: "library.search.toggle").allElementsBoundByIndex.contains(where: { $0.isHittable }) })
+        attachScreenshot("炫彩滚动-工具栏")
+        // Other tabs must inherit the colours and positions of this viewport,
+        // including when they have already been opened before scrolling.
+        for (tab, page, capture) in [
+            ("阅读资料", "page.materials", "炫彩滚动后-阅读资料"),
+            ("阅读数据", "page.dashboard", "炫彩滚动后-阅读数据")
+        ] {
+            app.tabBars.buttons[tab].tap()
+            XCTAssertTrue(app.staticTexts[page].waitForExistence(timeout: 15))
+            attachScreenshot(capture)
+        }
+        app.tabBars.buttons["我的"].tap()
+        XCTAssertTrue(app.segmentedControls["profile.theme"].waitForExistence(timeout: 10))
+        attachScreenshot("炫彩滚动后-我的")
+        app.tabBars.buttons["书库"].tap()
+        attachScreenshot("炫彩滚动后-返回书库")
     }
 
     func testColorfulModeOnCollectionsMaterialsAndReadingData() {
@@ -454,23 +505,30 @@ final class NativeFrontendTests: XCTestCase {
         app.tabBars.buttons["我的"].tap()
         tapAccountElement(app.buttons["profile.account"])
         let regions = app.segmentedControls["account.region"]
-        XCTAssertTrue(regions.waitForExistence(timeout: 15))
-        XCTAssertEqual(regions.buttons.count, 2)
         if app.staticTexts["account.username"].exists {
             reveal(app.buttons["account.logout"]); tapAccountElement(app.buttons["account.logout"])
         }
+        reveal(regions)
+        XCTAssertTrue(regions.waitForExistence(timeout: 15))
+        XCTAssertEqual(regions.buttons.count, 2)
         tapAccountElement(regions.buttons["中国区"])
         XCTAssertTrue(waitUntil { regions.buttons["中国区"].isSelected })
+        scrollAccountToTop()
         register()
         verifySignOutAndLogin()
         attachScreenshot("账号-中国区")
         tapAccountElement(app.navigationBars["用户账号"].buttons.firstMatch)
         syncCurrentAccount()
         tapAccountElement(app.buttons["profile.account"])
+        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 15))
+        // The region picker only exists on the signed-out form now.
+        reveal(app.buttons["account.logout"]); tapAccountElement(app.buttons["account.logout"])
+        reveal(regions)
         XCTAssertTrue(regions.waitForExistence(timeout: 10))
         tapAccountElement(regions.buttons["国际区"])
         XCTAssertTrue(app.staticTexts["account.restart"].waitForExistence(timeout: 10))
         XCTAssertTrue(waitUntil { regions.buttons["国际区"].isSelected })
+        scrollAccountToTop()
         register()
         verifySignOutAndLogin()
         attachScreenshot("账号-国际区-重开提示")
@@ -488,10 +546,14 @@ final class NativeFrontendTests: XCTestCase {
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book.' AND label CONTAINS 'Native UI EPUB'")).firstMatch.exists)
         app.tabBars.buttons["我的"].tap()
         tapAccountElement(app.buttons["profile.account"])
+        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 15))
+        // Region switching is part of the signed-out form, so sign out first.
+        reveal(app.buttons["account.logout"]); tapAccountElement(app.buttons["account.logout"])
+        reveal(regions)
         XCTAssertTrue(regions.waitForExistence(timeout: 10))
         tapAccountElement(regions.buttons["中国区"])
-        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 15))
-        XCTAssertEqual(app.staticTexts["account.username"].label, username)
+        scrollAccountToTop()
+        XCTAssertTrue(app.segmentedControls["account.mode"].waitForExistence(timeout: 15))
         app.terminate(); app.launch()
         XCTAssertTrue(app.tabBars.buttons["书库"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'book.' AND label CONTAINS 'Native UI EPUB'")).firstMatch.waitForExistence(timeout: 15))
@@ -581,11 +643,13 @@ final class NativeFrontendTests: XCTestCase {
         app.tabBars.buttons["我的"].tap()
         tapAccountElement(app.buttons["profile.account"])
         let regions = app.segmentedControls["account.region"]
-        XCTAssertTrue(regions.waitForExistence(timeout: 15))
         if app.staticTexts["account.username"].exists {
             reveal(app.buttons["account.logout"]); tapAccountElement(app.buttons["account.logout"])
         }
+        reveal(regions)
+        XCTAssertTrue(regions.waitForExistence(timeout: 15))
         tapAccountElement(regions.buttons["中国区"])
+        scrollAccountToTop()
         let mode = app.segmentedControls["account.mode"]
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         tapAccountElement(mode.buttons["注册"])
@@ -649,6 +713,81 @@ final class NativeFrontendTests: XCTestCase {
         tapAccountElement(app.buttons["知道了"])
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["account.username"].exists)
+
+        func enterPassword(_ field: XCUIElement) {
+            reveal(field); field.tap(); field.typeText(String(password.prefix(1)))
+            let suggestion = app.staticTexts["使用强密码？"]
+            if suggestion.waitForExistence(timeout: 2) {
+                let close = app.buttons.matching(NSPredicate(format: "label IN {'关闭', 'Close', '取消', 'Cancel'}")).firstMatch
+                XCTAssertTrue(close.exists); close.tap(); XCTAssertTrue(waitUntil { !suggestion.exists })
+                field.typeText(XCUIKeyboardKey.delete.rawValue); field.typeText(password)
+            } else { field.typeText(String(password.dropFirst())) }
+            dismissKeyboard()
+        }
+    }
+
+    /// A new account gets the one-time 7-day Plus trial only when it turns the
+    /// claim switch on; the switch then locks and the trial quotas take effect.
+    func testTrialStaysUnclaimedUntilTheSwitchIsTurnedOn() {
+        let username = "trial_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))
+        let password = "fictional-native-password"
+        print("KKINDLE_FICTIONAL_ACCOUNT:\(username)")
+        app.tabBars.buttons["我的"].tap()
+        tapAccountElement(app.buttons["profile.account"])
+        let regions = app.segmentedControls["account.region"]
+        if app.staticTexts["account.username"].exists {
+            reveal(app.buttons["account.logout"]); tapAccountElement(app.buttons["account.logout"])
+        }
+        reveal(regions)
+        XCTAssertTrue(regions.waitForExistence(timeout: 15))
+        tapAccountElement(regions.buttons["中国区"])
+        scrollAccountToTop()
+        let mode = app.segmentedControls["account.mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 15))
+        tapAccountElement(mode.buttons["注册"])
+        let email = app.textFields["account.emailField"]
+        reveal(email); replaceText(email, with: username + "@example.invalid"); dismissKeyboard()
+        let user = app.textFields["account.usernameField"]
+        reveal(user); replaceText(user, with: username); dismissKeyboard()
+        enterPassword(app.secureTextFields["account.password"])
+        enterPassword(app.secureTextFields["account.confirmation"])
+        tapAccountElement(app.buttons["account.submit"])
+        XCTAssertTrue(app.staticTexts["account.username"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["account.username"].label, username)
+
+        let toggle = app.switches["membership.trial.toggle"]
+        for _ in 0..<6 {
+            if toggle.exists && toggle.isHittable { break }
+            app.swipeDown()
+        }
+        reveal(toggle)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20))
+        XCTAssertEqual(toggle.value as? String, "0", "Creating the account must not claim the trial.")
+        XCTAssertEqual(app.staticTexts["membership.tier"].label, "Free")
+        let trialStatus = app.staticTexts["membership.trial.status"]
+        XCTAssertTrue(trialStatus.exists)
+        XCTAssertTrue(trialStatus.label.contains("只有主动打开领取开关才会领取"), trialStatus.label)
+        attachScreenshot("试用-未领取")
+
+        // The row label is a plain label; the claim switch itself is the control.
+        let claimSwitch = toggle.switches.firstMatch
+        XCTAssertTrue(claimSwitch.waitForExistence(timeout: 10))
+        tapAccountElement(claimSwitch)
+        XCTAssertTrue(waitUntil {
+            trialStatus.exists && trialStatus.label.contains("试用期至")
+        }, "Turning the switch on must claim the trial: \(app.debugDescription)")
+        XCTAssertTrue(waitUntil { toggle.value as? String == "1" && !toggle.isEnabled },
+                      "The claim switch must lock itself after claiming.")
+        XCTAssertTrue(waitUntil { self.app.staticTexts["membership.tier"].label == "Plus 会员" })
+        let storageQuota = app.staticTexts["membership.storage.quota"]
+        reveal(storageQuota)
+        XCTAssertTrue(storageQuota.waitForExistence(timeout: 15))
+        XCTAssertEqual(storageQuota.label, "共 100 MB")
+        let downloadQuota = app.staticTexts["membership.download.quota"]
+        reveal(downloadQuota)
+        XCTAssertTrue(downloadQuota.waitForExistence(timeout: 5))
+        XCTAssertEqual(downloadQuota.label, "共 200 MB")
+        attachScreenshot("试用-已领取")
 
         func enterPassword(_ field: XCUIElement) {
             reveal(field); field.tap(); field.typeText(String(password.prefix(1)))
@@ -1322,11 +1461,24 @@ final class NativeFrontendTests: XCTestCase {
     }
 
     private func reveal(_ element: XCUIElement) {
-        for _ in 0..<5 {
+        // The account form ends with the region picker, so a signed-in page
+        // needs more than a few swipes to reach its final rows.
+        for _ in 0..<12 {
             if element.exists && element.isHittable && element.frame.maxY < app.frame.maxY - 72 { return }
             let typography = app.scrollViews["typography.scroll"]
             if typography.exists { typography.swipeUp() }
             else { app.swipeUp() }
+        }
+    }
+
+    /// After changing the region at the bottom of the account form, return to
+    /// the login controls at the top without relying on a fixed offset.
+    private func scrollAccountToTop() {
+        for _ in 0..<12 {
+            let mode = app.segmentedControls["account.mode"]
+            let username = app.staticTexts["account.username"]
+            if (mode.exists && mode.isHittable) || (username.exists && username.isHittable) { return }
+            app.swipeDown()
         }
     }
 

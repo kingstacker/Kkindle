@@ -39,7 +39,24 @@ internal sealed partial class IOSNativeFrontend
             case "settings.account.logout":
                 var revoked = await modules.Accounts.Service.SignOutAsync(token);
                 return Data(("message", revoked ? "已退出登录。" : "已在本机退出；服务器暂时不可用，远端会话将在到期后失效。"));
+            case "settings.account.reset.request":
+                if (args.TryGetProperty("region", out var recoveryRegion))
+                    await modules.Accounts.Service.SelectRegionAsync((AccountRegion)recoveryRegion.GetInt32(), token);
+                await modules.Accounts.Service.RequestPasswordResetAsync(Text(args, "serverUrl"), Text(args, "username"), token);
+                return Data(("message", "若该账号已绑定邮箱，验证码已发送（15 分钟内有效）。"));
+            case "settings.account.reset.confirm":
+                await modules.Accounts.Service.ResetPasswordAsync(Text(args, "serverUrl"), Text(args, "username"),
+                    Text(args, "code"), Text(args, "newPassword"), Text(args, "confirmPassword"), token);
+                return Data(("message", "密码已重置，请使用新密码登录。"));
+            case "settings.account.email.request":
+                await modules.Accounts.Service.RequestEmailVerificationAsync(token);
+                return Data(("message", "验证码已发送至注册邮箱（15 分钟内有效）。"));
+            case "settings.account.email.verify":
+                return await modules.Accounts.Service.ConfirmEmailVerificationAsync(Text(args, "code"), token);
             case "settings.membership.get": return await modules.Accounts.Membership.RefreshAsync(token);
+            case "settings.membership.trialClaim":
+                await modules.Accounts.Membership.ClaimTrialAsync(token);
+                return await modules.Accounts.Membership.RefreshAsync(token);
             case "settings.membership.products": return await modules.Accounts.Membership.ProductsAsync(token);
             case "settings.membership.orders": return await modules.Accounts.Membership.OrdersAsync(token);
             case "settings.membership.redeem":
@@ -76,7 +93,8 @@ internal sealed partial class IOSNativeFrontend
             case "settings.sync.run":
                 var current = await modules.Sync.Service.LoadSettingsAsync(token);
                 var settings = ReadSyncSettings(args, _syncDraft ?? current.Settings);
-                settings = settings with { AccountRegion = modules.DataRegion };
+                // Saving this form records the user's explicit provider choice.
+                settings = settings with { AccountRegion = modules.DataRegion, ProviderChosenByUser = true };
                 if (settings.Provider == SyncProvider.AccountServer)
                     settings = await modules.Accounts.Service.CreateSyncSettingsAsync(settings, token);
                 if (command == "settings.sync.run") settings = settings with { Enabled = true };

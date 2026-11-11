@@ -12,25 +12,23 @@
     </Grid>
     <ScrollViewer Grid.Row="1" Name="FormScroller">
       <StackPanel Margin="24,24,24,20" Spacing="14">
-        <StackPanel Name="RegionPanel" Spacing="8">
-          <TextBlock Classes="label" Text="服务器区域" />
-          <c:NativeSegmentGroup>
-            <Border Classes="segments">
-              <Grid ColumnDefinitions="*,*">
-                <Button Name="ChinaRegionButton" Classes="seg on" Content="中国区" Click="OnRegionClick" />
-                <Button Grid.Column="1" Name="InternationalRegionButton" Classes="seg" Content="国际区" Click="OnRegionClick" />
-              </Grid>
-            </Border>
-          </c:NativeSegmentGroup>
-          <TextBlock Classes="muted" FontSize="12" Text="两区账号和同步数据独立，不互通。" TextWrapping="Wrap" />
-          <TextBlock Name="RestartText" Classes="muted" FontSize="12" Text="区域已切换，请重新打开应用后使用该区域的独立书库和同步。"
-                     TextWrapping="Wrap" IsVisible="False" />
-        </StackPanel>
+        <TextBlock Name="RestartText" Classes="muted" FontSize="12" Text="区域已切换，请重新打开应用后使用该区域的独立书库和同步。"
+                   TextWrapping="Wrap" IsVisible="False" />
         <StackPanel Name="AccountPanel" IsVisible="False" Spacing="10">
           <TextBlock Classes="muted" Text="已登录" />
           <TextBlock Name="UsernameText" Classes="title" />
           <TextBlock Name="ServerText" Classes="muted" TextWrapping="Wrap" />
           <TextBlock Name="ExpiryText" Classes="muted" />
+          <StackPanel Spacing="6">
+            <TextBlock Name="EmailVerifiedText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+            <Button Name="SendEmailCodeButton" Classes="secondary" Content="发送验证码" Click="OnSendEmailCodeClick" IsVisible="False" />
+            <StackPanel Name="EmailCodePanel" IsVisible="False" Spacing="6">
+              <TextBox Name="EmailCodeBox" MaxLength="8" PlaceholderText="邮箱验证码"
+                       TextInputOptions.ContentType="Digits" TextInputOptions.AutoCapitalization="False"
+                       TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
+              <Button Name="ConfirmEmailCodeButton" Classes="secondary" Content="确认验证" Click="OnConfirmEmailCodeClick" />
+            </StackPanel>
+          </StackPanel>
         </StackPanel>
         <StackPanel Name="SignInPanel" Spacing="14">
           <c:NativeSegmentGroup>
@@ -72,29 +70,71 @@
                      TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
                      TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
           </StackPanel>
+          <Button Name="ForgotPasswordButton" Classes="secondary" Content="忘记密码？" Click="OnForgotPasswordClick" />
+          <StackPanel Name="ResetPanel" IsVisible="False" Spacing="10">
+            <TextBlock Classes="label" Text="邮箱验证码" />
+            <TextBox Name="ResetCodeBox" MaxLength="8" PlaceholderText="8 位数字"
+                     TextInputOptions.ContentType="Digits" TextInputOptions.AutoCapitalization="False"
+                     TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
+            <TextBlock Classes="muted" FontSize="12" Text="验证码 15 分钟内有效" TextWrapping="Wrap" />
+            <TextBlock Classes="label" Text="新密码" />
+            <TextBox Name="ResetPasswordBox" PasswordChar="•" MaxLength="128"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
+                     TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
+            <TextBlock Classes="label" Text="确认新密码" />
+            <TextBox Name="ResetConfirmPasswordBox" PasswordChar="•" MaxLength="128"
+                     TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True"
+                     TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" />
+            <Button Name="ResetSubmitButton" Classes="primary" Content="重置密码" Click="OnResetSubmitClick" />
+            <Button Name="ResetCancelButton" Classes="secondary" Content="返回登录" Click="OnResetCancelClick" />
+          </StackPanel>
         </StackPanel>
         <StackPanel Name="MembershipPanel" IsVisible="False" Spacing="12">
           <TextBlock Classes="title" Text="会员与设备" />
           <TextBlock Name="MembershipSummary" TextWrapping="Wrap" />
           <TextBlock Name="MembershipStatus" Classes="muted" TextWrapping="Wrap" />
-          <TextBlock Classes="muted" FontSize="12" Text="Free 不支持多端同步。功能解锁使用自备 S3 / WebDAV；Plus 提供官方云同步、10GB 空间和每年 150GB 下载。Plus 到期后停止官方云同步与下载，云数据保留一个月后自动销毁。每个账号最多登录 6 台设备。" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="Free 不支持多端同步。功能解锁永久使用自备 S3 / WebDAV；Plus 按年订阅，订阅期内可使用自备 S3 / WebDAV，并提供官方云同步、10GB 空间和每年 50GB 下载。Plus 到期后，官方云同步、下载以及自备 S3 / WebDAV 一并停用；已购功能解锁不受影响，云数据保留一个月。每个账号最多登录 6 台设备。" TextWrapping="Wrap" />
+          <Border Name="TrialCard" IsVisible="False" Background="{DynamicResource SunkBrush}" CornerRadius="18" Padding="16">
+            <StackPanel Spacing="7">
+              <TextBlock Classes="label" FontSize="16" Text="免费试用 Plus 7 天" />
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="100MB 云空间 · 200MB 累计下载。只有主动打开领取开关才会领取；试用到期后，云端数据保留 7 天后自动销毁。" />
+              <ToggleSwitch Name="TrialClaimSwitch" OnContent="试用已领取" OffContent="领取 7 天免费试用" IsCheckedChanged="OnTrialClaimChanged" />
+              <TextBlock Name="TrialStatusText" Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="False" />
+            </StackPanel>
+          </Border>
           <Button Classes="secondary" Content="刷新会员与设备" Click="OnMembershipRefreshClick" />
           <StackPanel Name="DeviceListPanel" Spacing="10" />
-          <TextBlock Classes="label" Text="购买会员" />
-          <TextBlock Name="NoRefundPolicyText" Classes="muted" FontSize="12" Text="功能解锁、Plus 会员及扩容服务均不支持退款，请在购买前确认方案和期限。" TextWrapping="Wrap" />
-          <ComboBox Name="ProductsBox" HorizontalAlignment="Stretch" />
-          <TextBlock Name="ProductDescription" Classes="muted" TextWrapping="Wrap" FontSize="12" />
-          <Button Name="PurchaseButton" Classes="primary" Content="创建购买订单" Click="OnPurchaseClick" />
-          <TextBlock Classes="muted" FontSize="12" Text="Plus 最多可持有 5 年有效期，付费和激活码共用上限。" TextWrapping="Wrap" />
-          <TextBlock Classes="label" Text="激活码兑换" />
-          <TextBlock Classes="muted" FontSize="12" Text="激活码绑定当前已登录账户。功能会员永久有效，Plus 激活码每个增加 1 年。" TextWrapping="Wrap" />
-          <TextBox Name="ActivationCodeBox" MaxLength="80" PlaceholderText="输入激活码"
-                   TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True"
-                   TextChanged="OnActivationCodeChanged" />
-          <Button Name="ActivationRedeemButton" Classes="secondary" Content="兑换激活码" IsEnabled="False" Click="OnActivationRedeemClick" />
-          <TextBlock Name="ActivationStatusText" Classes="muted" TextWrapping="Wrap" IsVisible="False" />
-          <TextBlock Classes="label" Text="订单" />
-          <StackPanel Name="OrderListPanel" Spacing="10" />
+          <TextBlock Name="PlansRegionText" Classes="muted" FontSize="12" Text="会员方案 · 中国区" />
+          <TextBlock Name="PlansUnavailableText" Classes="muted" FontSize="12" Text="国际区会员计划暂未上线。上线后将在这里公布国际区的价格与会员权益。" TextWrapping="Wrap" IsVisible="False" />
+          <StackPanel Name="PurchasePanel" Spacing="12">
+            <TextBlock Classes="label" Text="购买会员" />
+            <TextBlock Name="NoRefundPolicyText" Classes="muted" FontSize="12" Text="功能解锁、Plus 会员及扩容服务均不支持退款，请在购买前确认方案和期限。" TextWrapping="Wrap" />
+            <ComboBox Name="ProductsBox" HorizontalAlignment="Stretch" />
+            <TextBlock Name="ProductDescription" Classes="muted" TextWrapping="Wrap" FontSize="12" />
+            <Button Name="PurchaseButton" Classes="primary" Content="创建购买订单" Click="OnPurchaseClick" />
+            <TextBlock Classes="muted" FontSize="12" Text="Plus 最多可持有 5 年有效期，付费和激活码共用上限。" TextWrapping="Wrap" />
+            <TextBlock Classes="label" Text="激活码兑换" />
+            <TextBlock Classes="muted" FontSize="12" Text="激活码绑定当前已登录账户。功能会员永久有效，Plus 激活码每个增加 1 年。" TextWrapping="Wrap" />
+            <TextBox Name="ActivationCodeBox" MaxLength="80" PlaceholderText="输入激活码"
+                     TextInputOptions.AutoCapitalization="False" TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True"
+                     TextChanged="OnActivationCodeChanged" />
+            <Button Name="ActivationRedeemButton" Classes="secondary" Content="兑换激活码" IsEnabled="False" Click="OnActivationRedeemClick" />
+            <TextBlock Name="ActivationStatusText" Classes="muted" TextWrapping="Wrap" IsVisible="False" />
+            <TextBlock Classes="label" Text="订单" />
+            <StackPanel Name="OrderListPanel" Spacing="10" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Name="RegionPanel" Spacing="8">
+          <TextBlock Classes="label" Text="服务器区域" />
+          <c:NativeSegmentGroup>
+            <Border Classes="segments">
+              <Grid ColumnDefinitions="*,*">
+                <Button Name="ChinaRegionButton" Classes="seg on" Content="中国区" Click="OnRegionClick" />
+                <Button Grid.Column="1" Name="InternationalRegionButton" Classes="seg" Content="国际区" Click="OnRegionClick" />
+              </Grid>
+            </Border>
+          </c:NativeSegmentGroup>
+          <TextBlock Classes="muted" FontSize="12" Text="两区账号和同步数据独立，不互通。" TextWrapping="Wrap" />
         </StackPanel>
       </StackPanel>
     </ScrollViewer>

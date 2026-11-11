@@ -52,6 +52,18 @@ public sealed class DeviceMembershipService(AccountService accounts) : IDeviceFe
 
     public Task CancelOrderAsync(Guid order, CancellationToken token = default) => accounts.MemberActionAsync("orders/" + order + "/cancel", token);
 
+    /// <summary>Claims the one-time free trial. Only called after the user turns on the claim switch.</summary>
+    public async Task<AccountMembership> ClaimTrialAsync(CancellationToken token = default)
+    {
+        var reply = await accounts.MemberRequestAsync(HttpMethod.Post, "trial",
+            AccountJsonContext.Default.AccountMembership, null, token,
+            UiText.Get("请先登录当前区域的账号后领取免费试用。"));
+        if (reply.Value.AccountId != reply.Scope.User?.Id || reply.Value.Region != reply.Scope.Region
+            || !reply.Value.TrialClaimed || reply.Value.TrialClaimedAt is null || reply.Value.TrialExpiresAt is null)
+            throw new InvalidOperationException("账号服务返回了无效的试用状态。");
+        return reply.Value;
+    }
+
     public async Task<ActivationCodeRedemption> RedeemActivationCodeAsync(string code, Guid requestId, CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(code) || code.Length > 80) throw new InvalidOperationException(UiText.Get("请输入有效的激活码。"));
@@ -78,7 +90,12 @@ public sealed class DeviceMembershipService(AccountService accounts) : IDeviceFe
             || status.Devices.Select(item => item.DeviceId).Distinct().Count() != status.Devices.Length
             || status.Devices.Any(item => item.State is not ("active" or "signed_out" or "blocked" or "expired"))
             || status.Devices.Count(item => item.State == "active") != status.Membership.LoggedInDeviceCount
-            || status.Membership.ActivatedDeviceCount != (status.Membership.HasLifetimeFeatures ? status.Membership.LoggedInDeviceCount : 0))
+            || status.Membership.ActivatedDeviceCount != (status.Membership.HasLifetimeFeatures ? status.Membership.LoggedInDeviceCount : 0)
+            || (status.Membership.TrialAvailable && (status.Membership.TrialClaimed || status.Membership.ProExpiresAt is not null))
+            || status.Membership.TrialClaimed != (status.Membership.TrialClaimedAt is not null)
+            || (status.Membership.TrialExpiresAt is not null && !status.Membership.TrialClaimed)
+            || (status.Membership.TrialExpiresAt is { } trialExpiry && status.Membership.TrialClaimedAt is { } trialClaimed
+                && trialExpiry <= trialClaimed))
             throw new InvalidOperationException("账号服务返回了无效的会员或设备状态。");
     }
 }

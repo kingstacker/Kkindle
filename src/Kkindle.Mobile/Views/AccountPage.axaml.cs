@@ -13,6 +13,9 @@ public partial class AccountPage : UserControl, IShellPage
     private readonly CancellationTokenSource _lifetime = new();
     private bool _register;
     private bool _busy;
+    private bool _presentingTrial;
+    private bool _resetMode;
+    private bool _emailCodeSent;
     private AccountStatus? _status;
     private DeviceFeatureStatus? _memberStatus;
     private Guid _activationRequestId;
@@ -58,21 +61,55 @@ public partial class AccountPage : UserControl, IShellPage
     private void Present(AccountStatus status)
     {
         if (_status?.User?.Id != status.User?.Id || _status?.Region != status.Region)
-        { ClearActivationCode(); _memberStatus = null; }
+        {
+            ClearActivationCode();
+            _memberStatus = null;
+            TrialCard.IsVisible = false;
+            _presentingTrial = true;
+            try { TrialClaimSwitch.IsChecked = false; } finally { _presentingTrial = false; }
+        }
         _status = status;
+        if (status.User is null || status.User.EmailVerified) _emailCodeSent = false;
         ChinaRegionButton.Classes.Set("on", status.Region == AccountRegion.China);
         InternationalRegionButton.Classes.Set("on", status.Region == AccountRegion.International);
         RestartText.IsVisible = status.RequiresDataRestart;
         ServerUrlBox.Text = status.ServerUrl;
         AccountPanel.IsVisible = status.IsLoggedIn;
         SignInPanel.IsVisible = !status.IsLoggedIn;
-        SubmitButton.IsVisible = !status.IsLoggedIn;
+        RegionPanel.IsVisible = !status.IsLoggedIn;
+        ApplyResetMode();
         SignOutButton.IsVisible = status.IsLoggedIn;
         MembershipPanel.IsVisible = status.IsLoggedIn && _membership is not null;
+        var internationalPlans = status.Region == AccountRegion.International;
+        PlansRegionText.Text = "会员方案 · " + AccountRegions.DisplayName(status.Region);
+        PlansUnavailableText.IsVisible = internationalPlans;
+        PurchasePanel.IsVisible = !internationalPlans;
         UsernameText.Text = status.User?.Username;
         ServerText.Text = AccountRegions.DisplayName(status.Region) + " · " + status.ServerUrl;
         ExpiryText.Text = status.ExpiresAt is { } expiry ? $"会话有效至 {expiry.LocalDateTime:yyyy/MM/dd}" : "";
         if (status.IsLoggedIn) ClearPasswords();
+        PresentEmailVerification();
+    }
+
+    private void ApplyResetMode()
+    {
+        ResetPanel.IsVisible = _resetMode;
+        SubmitButton.IsVisible = _status?.IsLoggedIn != true && !_resetMode;
+        ForgotPasswordButton.IsVisible = _status?.IsLoggedIn != true && !_register && !_resetMode;
+        ConfirmPasswordPanel.IsVisible = _register && !_resetMode;
+        RegistrationEmailPanel.IsVisible = _register && !_resetMode;
+    }
+
+    private void PresentEmailVerification()
+    {
+        var user = _status?.User;
+        var available = _status?.IsLoggedIn == true && user?.Email is not null;
+        var verified = user?.EmailVerified == true;
+        EmailVerifiedText.Text = available
+            ? (verified ? "注册邮箱已验证。" : "注册邮箱尚未验证。验证后可找回密码。")
+            : "此账号未设置注册邮箱，无法验证或找回密码。";
+        SendEmailCodeButton.IsVisible = available && !verified && !_emailCodeSent;
+        EmailCodePanel.IsVisible = available && !verified && _emailCodeSent;
     }
 
     private void SetBusy(bool value)
@@ -91,6 +128,8 @@ public partial class AccountPage : UserControl, IShellPage
         if (_busy || _accounts is null) return;
         var region = sender is Button { Name: nameof(InternationalRegionButton) } ? AccountRegion.International : AccountRegion.China;
         SetBusy(true);
+        _resetMode = false;
+        _emailCodeSent = false;
         ClearPasswords();
         ClearActivationCode();
         UsernameBox.Text = "";
@@ -117,10 +156,10 @@ public partial class AccountPage : UserControl, IShellPage
     {
         if (_busy) return;
         _register = sender is Button { Name: nameof(RegisterModeButton) };
+        _resetMode = false;
         LoginModeButton.Classes.Set("on", !_register);
         RegisterModeButton.Classes.Set("on", _register);
-        ConfirmPasswordPanel.IsVisible = _register;
-        RegistrationEmailPanel.IsVisible = _register;
+        ApplyResetMode();
         LoginIdentifierLabel.Text = _register ? "用户名" : "用户名或邮箱";
         UsernameHintText.Text = _register ? "3–32 位字母、数字、点、下划线或连字符" : "使用用户名或邮箱登录同一个账号";
         UsernameBox.MaxLength = _register ? 32 : 254;
@@ -164,7 +203,99 @@ public partial class AccountPage : UserControl, IShellPage
         finally { SetBusy(false); }
     }
 
-    private void ClearPasswords() { PasswordBox.Text = ""; ConfirmPasswordBox.Text = ""; }
+    private async void OnForgotPasswordClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null || _register) return;
+        var identifier = UsernameBox.Text?.Trim() ?? "";
+        if (!AccountValidation.IsLogin(identifier)) { ShowStatus("请输入有效的用户名或邮箱。"); return; }
+        SetBusy(true);
+        ShowStatus("正在发送验证码…");
+        try
+        {
+            await _accounts.RequestPasswordResetAsync(ServerUrlBox.Text ?? "", identifier, _lifetime.Token);
+            _resetMode = true;
+            ApplyResetMode();
+            ResetCodeBox.Text = ""; ResetPasswordBox.Text = ""; ResetConfirmPasswordBox.Text = "";
+            ShowStatus("若该账号已绑定邮箱，验证码已发送（15 分钟内有效）。请查收邮件并设置新密码。");
+            ResetCodeBox.Focus();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { ShowStatus(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private async void OnResetSubmitClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null) return;
+        if (ResetPasswordBox.Text != ResetConfirmPasswordBox.Text)
+        { ShowStatus("两次输入的密码不一致。"); return; }
+        SetBusy(true);
+        ShowStatus("正在重置密码…");
+        try
+        {
+            var user = await _accounts.ResetPasswordAsync(ServerUrlBox.Text ?? "", UsernameBox.Text ?? "",
+                ResetCodeBox.Text ?? "", ResetPasswordBox.Text ?? "", ResetConfirmPasswordBox.Text ?? "", _lifetime.Token);
+            UsernameBox.Text = user.Username;
+            _resetMode = false;
+            ApplyResetMode();
+            ClearPasswords();
+            ShowStatus("密码已重置，请使用新密码登录。");
+            PasswordBox.Focus();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { ShowStatus(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private void OnResetCancelClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        _resetMode = false;
+        ApplyResetMode();
+        ResetCodeBox.Text = ""; ResetPasswordBox.Text = ""; ResetConfirmPasswordBox.Text = "";
+        ShowStatus("已返回登录。");
+    }
+
+    private async void OnSendEmailCodeClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null) return;
+        SetBusy(true);
+        ShowStatus("正在发送邮箱验证码…");
+        try
+        {
+            await _accounts.RequestEmailVerificationAsync(_lifetime.Token);
+            _emailCodeSent = true;
+            EmailCodeBox.Text = "";
+            PresentEmailVerification();
+            EmailCodeBox.Focus();
+            ShowStatus("验证码已发送至注册邮箱（15 分钟内有效）。");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { ShowStatus(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private async void OnConfirmEmailCodeClick(object? sender, RoutedEventArgs e)
+    {
+        if (_busy || _accounts is null) return;
+        SetBusy(true);
+        ShowStatus("正在验证邮箱…");
+        try
+        {
+            Present(await _accounts.ConfirmEmailVerificationAsync(EmailCodeBox.Text ?? "", _lifetime.Token));
+            EmailCodeBox.Text = "";
+            ShowStatus("邮箱验证成功。");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { ShowStatus(exception.Message); }
+        finally { SetBusy(false); }
+    }
+
+    private void ClearPasswords()
+    {
+        PasswordBox.Text = ""; ConfirmPasswordBox.Text = "";
+        ResetCodeBox.Text = ""; ResetPasswordBox.Text = ""; ResetConfirmPasswordBox.Text = "";
+    }
     private void OnBackClick(object? sender, RoutedEventArgs e) => _shell?.GoBack();
     public void OnClosed() { if (_accounts is not null) _accounts.DeviceInvalidated -= OnDeviceInvalidated; _lifetime.Cancel(); ClearPasswords(); ClearActivationCode(); }
 
@@ -182,11 +313,27 @@ public partial class AccountPage : UserControl, IShellPage
                     ? $"\n官方云空间 {MobileFormat.Size(member.StorageBytes)} / {MobileFormat.Size(member.StorageQuota)}"
                         + $"\n已下载 {MobileFormat.Size(member.DownloadBytes)} · 下载剩余 {MobileFormat.Size(member.DownloadRemainingBytes)}"
                         + (member.DownloadCreditBytes > 0 ? $" · 购买余额 {MobileFormat.Size(member.DownloadCreditBytes)}" : "")
+                        + (member.PlusDownloadQuotaBytes is { } annualQuota && member.PlusDownloadUsedBytes is { } annualUsed
+                            ? $"\n本会员年度 {MobileFormat.Size(annualUsed)} / {MobileFormat.Size(annualQuota)}"
+                                + $" · 剩余 {MobileFormat.Size(Math.Max(0, annualQuota - annualUsed))}"
+                            : "")
+                        + (member.PlusEarlyDownloadQuotaBytes is { } earlyQuota
+                            && member.PlusEarlyDownloadEndsAt is { } earlyEnd && earlyEnd > DateTimeOffset.UtcNow
+                            ? $"\n新用户限额 {MobileFormat.Size(member.PlusEarlyDownloadUsedBytes ?? 0)} / {MobileFormat.Size(earlyQuota)}"
+                                + $" · 截止 {earlyEnd.LocalDateTime:yyyy/MM/dd HH:mm}"
+                            : "")
+                        + (member.MetadataDownloadQuotaBytes is { } metadataQuota && member.MetadataDownloadUsedBytes is { } metadataUsed
+                            ? $"\n今日元数据流量 {MobileFormat.Size(metadataUsed)} / {MobileFormat.Size(metadataQuota)}（UTC 零点重置）"
+                            : "")
                     : "\n官方云空间与下载：未开通（需要 Plus）")
                 + (member.ProExpiresAt is { } expiry
-                    ? member.Tier == "pro" ? $"\nPlus 有效至 {expiry.LocalDateTime:yyyy/MM/dd}"
-                        : "\n" + MemberEntitlements.PlusExpiryMessage(expiry, DateTimeOffset.UtcNow)
+                    ? member.Tier == "pro"
+                        ? $"\nPlus 有效至 {expiry.LocalDateTime:yyyy/MM/dd}"
+                            + (MemberEntitlements.PlusRenewalReminder(expiry, DateTimeOffset.UtcNow) is not null
+                                ? "\n" + MemberEntitlements.PlusRenewalMessage(expiry, DateTimeOffset.UtcNow, member.TrialExpiresAt) : "")
+                        : "\n" + MemberEntitlements.PlusExpiryMessage(expiry, DateTimeOffset.UtcNow, member.TrialExpiresAt)
                     : "");
+            PresentTrial(member);
             DeviceListPanel.Children.Clear();
             foreach (var device in status.Devices.Where(item => item.State == "active"))
             {
@@ -225,6 +372,45 @@ public partial class AccountPage : UserControl, IShellPage
         SetBusy(true);
         try { await _membership.KickAsync(device, _lifetime.Token); Present(await _accounts!.GetStatusAsync(cancellationToken: _lifetime.Token)); await LoadMembershipAsync(); }
         catch (Exception error) when (error is not OutOfMemoryException) { MembershipStatus.Text = UiText.Localize(error.Message); }
+        finally { SetBusy(false); }
+    }
+    private void PresentTrial(AccountMembership member)
+    {
+        var active = member.TrialClaimed && member.TrialExpiresAt is { } until && until > DateTimeOffset.UtcNow;
+        TrialCard.IsVisible = member.TrialAvailable || active;
+        _presentingTrial = true;
+        try
+        {
+            TrialClaimSwitch.IsChecked = member.TrialClaimed;
+            TrialClaimSwitch.IsEnabled = member.TrialAvailable;
+        }
+        finally { _presentingTrial = false; }
+        TrialStatusText.IsVisible = active;
+        TrialStatusText.Text = active
+            ? $"试用期至 {member.TrialExpiresAt!.Value.LocalDateTime:yyyy/MM/dd}，到期后云端数据保留 7 天；可随时开通正式 Plus 继续使用。"
+            : "";
+    }
+
+    private async void OnTrialClaimChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_presentingTrial || _busy || _membership is null || _status?.IsLoggedIn != true
+            || TrialClaimSwitch.IsChecked != true) return;
+        SetBusy(true);
+        MembershipStatus.Text = "正在领取免费试用…";
+        try
+        {
+            var member = await _membership.ClaimTrialAsync(_lifetime.Token);
+            if (_status?.User?.Id != member.AccountId || _status.Region != member.Region) return;
+            await LoadMembershipAsync();
+            MembershipStatus.Text = "Plus 免费试用已开通，7 天内可使用云同步、下载和自备存储同步。";
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            _presentingTrial = true;
+            try { TrialClaimSwitch.IsChecked = false; } finally { _presentingTrial = false; }
+            MembershipStatus.Text = UiText.Localize(error.Message);
+        }
         finally { SetBusy(false); }
     }
     private async void OnPurchaseClick(object? sender, RoutedEventArgs e)

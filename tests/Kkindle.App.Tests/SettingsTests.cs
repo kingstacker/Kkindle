@@ -632,6 +632,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         Assert.Equal("Export software logs", button.Content?.ToString());
         Assert.Contains("Email passwords", helpText.Text);
         ToolTip.SetIsOpen(helpTarget, false);
+        ((Kkindle.App)Application.Current!).ApplyLanguage("zh-CN");
     });
 
     [Fact]
@@ -692,6 +693,7 @@ public sealed partial class SettingsTests(SettingsUiSession session)
         AssertWithinWindow(button, scope.Window);
         Assert.Equal(initialPosition, button.TranslatePoint(default, scope.Window)!.Value);
         Capture(scope.Window, $"{language}-{width}-s3-bottom");
+        ((Kkindle.App)Application.Current!).ApplyLanguage("zh-CN");
     });
 
     private Task Run(Func<Task> action) => session.Session.Dispatch(async () => { await action(); return true; }, CancellationToken.None);

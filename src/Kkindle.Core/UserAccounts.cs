@@ -14,7 +14,7 @@ public static class AccountRegions
     { AccountRegion.China => "中国区", AccountRegion.International => "国际区", _ => throw new ArgumentOutOfRangeException(nameof(region)) };
 }
 
-public sealed record AccountUser(Guid Id, string Username, string? Email = null);
+public sealed record AccountUser(Guid Id, string Username, string? Email = null, bool EmailVerified = false);
 public sealed record AccountSessionInfo(AccountUser User, DateTimeOffset ExpiresAt, AccountRegion Region = AccountRegion.China);
 public sealed record AccountStatus(string ServerUrl, AccountUser? User, DateTimeOffset? ExpiresAt,
     AccountRegion Region = AccountRegion.China, bool RequiresDataRestart = false)
@@ -52,6 +52,26 @@ public sealed class AccountClosureRequest
 {
     public string CurrentPassword { get; init; } = "";
     public string Confirmation { get; init; } = "";
+}
+
+/// <summary>Anonymous recovery request; the server never reveals whether the account exists.</summary>
+public sealed class AccountPasswordResetRequest
+{
+    /// <summary>Username or registered email.</summary>
+    public string Username { get; init; } = "";
+}
+
+public sealed class AccountPasswordResetConfirm
+{
+    public string Username { get; init; } = "";
+    public string Code { get; init; } = "";
+    public string NewPassword { get; init; } = "";
+    public string ConfirmPassword { get; init; } = "";
+}
+
+public sealed class AccountEmailVerificationConfirm
+{
+    public string Code { get; init; } = "";
 }
 
 public sealed class AccountSessionResponse
@@ -113,6 +133,9 @@ public static class AccountValidation
 [JsonSerializable(typeof(AccountProfileUpdate))]
 [JsonSerializable(typeof(AccountPasswordChange))]
 [JsonSerializable(typeof(AccountClosureRequest))]
+[JsonSerializable(typeof(AccountPasswordResetRequest))]
+[JsonSerializable(typeof(AccountPasswordResetConfirm))]
+[JsonSerializable(typeof(AccountEmailVerificationConfirm))]
 [JsonSerializable(typeof(AccountSessionResponse))]
 [JsonSerializable(typeof(AccountSessionInfo))]
 [JsonSerializable(typeof(AccountStatus))]

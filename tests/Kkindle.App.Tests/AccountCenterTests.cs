@@ -283,10 +283,10 @@ public sealed partial class SettingsTests
             {
                 Membership = status.Membership with
                 {
-                    StorageBytes = 8 * gib, StorageQuota = 10 * gib,
+                    StorageBytes = 8 * gib, StorageQuota = 20 * gib,
                     UploadBytes = gib, DownloadBytes = 3 * gib,
-                    DownloadRemainingBytes = 137 * gib, DownloadCreditBytes = 2 * gib,
-                    PlusDownloadQuotaBytes = 150 * gib, PlusDownloadUsedBytes = 15 * gib
+                    DownloadRemainingBytes = 87 * gib, DownloadCreditBytes = 2 * gib,
+                    PlusDownloadQuotaBytes = 100 * gib, PlusDownloadUsedBytes = 15 * gib
                 }
             }
         };
@@ -304,14 +304,14 @@ public sealed partial class SettingsTests
             MountAccountCenter(scope, dialog);
             await Until(() => Get<StackPanel>("DeviceListPanel").Children.Count == 2 && Get<StackPanel>("MembershipPanel").IsEnabled);
             Assert.True(Get<Grid>("CloudUsagePanel").IsVisible);
-            Assert.Equal("8 GiB", Get<TextBlock>("StorageUsedText").Text);
-            Assert.Equal("80%", Get<TextBlock>("StoragePercentText").Text);
-            Assert.Equal(0.8, Get<AccountUsageRing>("StorageUsageRing").Ratio, 6);
-            Assert.Equal("15 GiB", Get<TextBlock>("AnnualDownloadUsedText").Text);
-            Assert.Equal("10%", Get<TextBlock>("TrafficPercentText").Text);
-            Assert.Equal(0.1, Get<AccountUsageRing>("TrafficUsageRing").Ratio, 6);
-            Assert.Equal("135 GiB", Get<TextBlock>("DownloadRemainingText").Text);
-            Assert.Equal("3 GiB", Get<TextBlock>("DownloadUsedText").Text);
+            Assert.Equal("8 GB", Get<TextBlock>("StorageUsedText").Text);
+            Assert.Equal("40%", Get<TextBlock>("StoragePercentText").Text);
+            Assert.Equal(0.4, Get<AccountUsageRing>("StorageUsageRing").Ratio, 6);
+            Assert.Equal("15 GB", Get<TextBlock>("AnnualDownloadUsedText").Text);
+            Assert.Equal("15%", Get<TextBlock>("TrafficPercentText").Text);
+            Assert.Equal(0.15, Get<AccountUsageRing>("TrafficUsageRing").Ratio, 6);
+            Assert.Equal("85 GB", Get<TextBlock>("DownloadRemainingText").Text);
+            Assert.Equal("3 GB", Get<TextBlock>("DownloadUsedText").Text);
             Assert.Equal(UiText.Get("{0} / {1} 台", 2, 6), Get<TextBlock>("DeviceCountText").Text);
             Assert.Equal(6, Get<StackPanel>("DeviceSlotsPanel").Children.Count);
             Assert.True(Get<TextBlock>("DownloadCreditText").IsVisible);
@@ -394,7 +394,7 @@ public sealed partial class SettingsTests
             LifetimeFeatures = false, ProExpiresAt = DateTimeOffset.UtcNow.AddDays(365),
             TransformStatus = status => status with { Membership = status.Membership with
             {
-                PlusDownloadQuotaBytes = legacy ? null : 150 * gib, PlusDownloadUsedBytes = legacy ? null : 150 * gib,
+                PlusDownloadQuotaBytes = legacy ? null : 100 * gib, PlusDownloadUsedBytes = legacy ? null : 100 * gib,
                 DownloadBytes = gib, UploadBytes = 19 * gib, DownloadRemainingBytes = 5 * gib, DownloadCreditBytes = 5 * gib
             } }
         };
@@ -410,7 +410,40 @@ public sealed partial class SettingsTests
             Assert.Equal(legacy ? 0 : 1, dialog.FindControl<AccountUsageRing>("TrafficUsageRing")!.Ratio);
             Assert.Equal(legacy ? "—" : "0 B", dialog.FindControl<TextBlock>("DownloadRemainingText")!.Text);
             Assert.True(dialog.FindControl<TextBlock>("DownloadCreditText")!.IsVisible);
-            Assert.Contains("5 GiB", dialog.FindControl<TextBlock>("DownloadCreditText")!.Text);
+            Assert.Contains("5 GB", dialog.FindControl<TextBlock>("DownloadCreditText")!.Text);
+        }
+        finally { UnmountAccountCenter(scope, dialog); }
+    });
+
+    [Fact]
+    public Task AccountUsageShowsNewUserAndMetadataBuckets() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        const long gib = 1024L * 1024 * 1024, mib = 1024L * 1024;
+        using var handler = new MembershipHttpHandler
+        {
+            LifetimeFeatures = false, ProExpiresAt = DateTimeOffset.UtcNow.AddDays(365),
+            TransformStatus = status => status with { Membership = status.Membership with
+            {
+                PlusEarlyDownloadQuotaBytes = 20 * gib, PlusEarlyDownloadUsedBytes = 5 * gib,
+                PlusEarlyDownloadEndsAt = DateTimeOffset.UtcNow.AddHours(12),
+                MetadataDownloadQuotaBytes = 512 * mib, MetadataDownloadUsedBytes = 128 * mib
+            } }
+        };
+        using var http = new HttpClient(handler);
+        using var accounts = new AccountService(scope.Paths, new AccountTestProtector(), http);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Email!, MembershipHttpHandler.Password);
+        var dialog = new AccountCenterView(accounts, new DeviceMembershipService(accounts));
+        try
+        {
+            MountAccountCenter(scope, dialog);
+            await Until(() => dialog.FindControl<StackPanel>("MembershipPanel")!.IsEnabled && dialog.FindControl<Grid>("CloudUsagePanel")!.IsVisible);
+            var early = dialog.FindControl<TextBlock>("EarlyLimitText")!;
+            Assert.True(early.IsVisible);
+            Assert.Contains("5 GB", early.Text); Assert.Contains("20 GB", early.Text);
+            var metadata = dialog.FindControl<TextBlock>("MetadataUsageText")!;
+            Assert.True(metadata.IsVisible);
+            Assert.Contains("128 MB", metadata.Text); Assert.Contains("512 MB", metadata.Text);
         }
         finally { UnmountAccountCenter(scope, dialog); }
     });
@@ -575,13 +608,47 @@ public sealed partial class SettingsTests
     });
 
     [Fact]
+    public Task AccountCenterOnlyClaimsTheTrialWhenTheSwitchIsTurnedOn() => Run(async () =>
+    {
+        await using var scope = await TestWindow.Create();
+        using var handler = new MembershipHttpHandler { LifetimeFeatures = false, TrialAvailable = true };
+        using var http = new HttpClient(handler);
+        using var accounts = new AccountService(scope.Paths, new AccountTestProtector(), http);
+        await accounts.SignInAsync(AccountService.DefaultServerUrl, handler.User.Username, MembershipHttpHandler.Password,
+            true, email: handler.User.Email, confirmPassword: MembershipHttpHandler.Password);
+        var dialog = new AccountCenterView(accounts, new DeviceMembershipService(accounts));
+        try
+        {
+            MountAccountCenter(scope, dialog);
+            await Until(() => dialog.FindControl<Border>("TrialCard")!.IsVisible
+                && dialog.FindControl<StackPanel>("MembershipPanel")!.IsEnabled);
+            var toggle = dialog.FindControl<ToggleSwitch>("TrialClaimToggle")!;
+            Assert.False(toggle.IsChecked);
+            Assert.True(toggle.IsEnabled);
+            Assert.Null(handler.TrialClaimedAt);
+            Assert.False(dialog.FindControl<Grid>("CloudUsagePanel")!.IsVisible);
+
+            toggle.IsChecked = true;
+            await Until(() => handler.TrialClaimedAt is not null
+                && dialog.FindControl<StackPanel>("MembershipPanel")!.IsEnabled);
+            await Until(() => dialog.FindControl<Grid>("CloudUsagePanel")!.IsVisible);
+            Assert.True(toggle.IsChecked);
+            Assert.False(toggle.IsEnabled);
+            Assert.True(dialog.FindControl<TextBlock>("TrialStatusText")!.IsVisible);
+            Assert.Contains("试用期至", dialog.FindControl<TextBlock>("TrialStatusText")!.Text);
+            Assert.Equal("Plus 会员", dialog.FindControl<TextBlock>("TierBadgeText")!.Text);
+        }
+        finally { UnmountAccountCenter(scope, dialog); }
+    });
+
+    [Fact]
     public Task PurchaseServiceFailureKeepsTheCloudUsageAndDeviceDashboard() => Run(async () =>
     {
         await using var scope = await TestWindow.Create();
         using var handler = new MembershipHttpHandler
         {
             LifetimeFeatures = false, ProExpiresAt = DateTimeOffset.UtcNow.AddDays(30), ProductsUnavailable = true,
-            TransformStatus = status => status with { Membership = status.Membership with { StorageBytes = 12L * 1024 * 1024 * 1024 } }
+            TransformStatus = status => status with { Membership = status.Membership with { StorageBytes = 24L * 1024 * 1024 * 1024 } }
         };
         using var http = new HttpClient(handler);
         using var accounts = new AccountService(scope.Paths, new AccountTestProtector(), http);

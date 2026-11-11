@@ -211,7 +211,7 @@
                 <TextBox Name="UsernameBox" MaxLength="254" TextInputOptions.IsSensitive="True" />
                 <TextBlock Name="UsernameHintText" Text="{DynamicResource Ui.Account.LoginIdentifierHint}" Classes="accountMuted" FontSize="11" />
               </StackPanel>
-              <StackPanel Spacing="7">
+              <StackPanel Name="LoginPasswordPanel" Spacing="7">
                 <TextBlock Text="{DynamicResource Ui.Account.LoginPassword}" FontSize="13" />
                 <TextBox Name="PasswordBox" PasswordChar="•" MaxLength="128"
                          TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
@@ -224,6 +224,27 @@
               </StackPanel>
               <Button Name="SubmitButton" Content="{DynamicResource Ui.Account.Login}" Classes="settingsActionCancel"
                       HorizontalAlignment="Left" Click="OnSubmitClick" IsEnabled="False" />
+              <Button Name="ForgotPasswordButton" Content="{DynamicResource Ui.Account.ForgotPassword}" Classes="accountTextAction"
+                      HorizontalAlignment="Left" Click="OnForgotPasswordClick" />
+              <StackPanel Name="ResetPanel" Spacing="7" IsVisible="False">
+                <TextBlock Text="{DynamicResource Ui.Account.EmailCode}" FontSize="13" />
+                <TextBox Name="ResetCodeBox" MaxLength="8" Width="180" HorizontalAlignment="Left"
+                         TextInputOptions.ContentType="Digits" TextInputOptions.AutoCapitalization="False"
+                         TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
+                <TextBlock Text="{DynamicResource Ui.Account.EmailCodeHint}" Classes="accountMuted" FontSize="11" />
+                <TextBlock Text="{DynamicResource Ui.Account.NewPassword}" FontSize="13" />
+                <TextBox Name="ResetPasswordBox" PasswordChar="•" MaxLength="128"
+                         TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+                <TextBlock Text="{DynamicResource Ui.Account.ConfirmNewPassword}" FontSize="13" />
+                <TextBox Name="ResetConfirmPasswordBox" PasswordChar="•" MaxLength="128"
+                         TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                  <Button Name="ResetSubmitButton" Content="{DynamicResource Ui.Account.ResetPassword}" Classes="settingsActionCancel"
+                          Click="OnResetSubmitClick" />
+                  <Button Name="ResetCancelButton" Content="{DynamicResource Ui.Account.BackToLogin}" Classes="accountTextAction"
+                          VerticalAlignment="Center" Click="OnResetCancelClick" />
+                </StackPanel>
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>
@@ -311,6 +332,8 @@
                     <TextBlock Name="DownloadUsedText" Grid.Column="1" Classes="accountMuted" FontSize="11" />
                   </Grid>
                   <TextBlock Name="DownloadCreditText" Classes="accountMuted" FontSize="11" IsVisible="False" />
+                  <TextBlock Name="EarlyLimitText" Classes="accountMuted" FontSize="11" IsVisible="False" TextWrapping="Wrap" />
+                  <TextBlock Name="MetadataUsageText" Classes="accountMuted" FontSize="11" IsVisible="False" TextWrapping="Wrap" />
                 </StackPanel>
               </Grid>
             </Border>
@@ -346,10 +369,29 @@
           </Border>
           <StackPanel Name="MembershipPlansPanel" Spacing="14">
             <StackPanel Spacing="5">
-              <TextBlock Text="{DynamicResource Ui.Account.Plans}" Classes="settingsSectionTitle" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{DynamicResource Ui.Account.Plans}" Classes="settingsSectionTitle" />
+                <Border Background="{DynamicResource SoftHoverBrush}" Padding="6,2" VerticalAlignment="Center">
+                  <TextBlock Name="PlansRegionText" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" />
+                </Border>
+              </StackPanel>
               <TextBlock Text="{DynamicResource Ui.Account.PlansSubtitle}" Classes="accountMuted" />
+              <TextBlock Name="PlansUnavailableText" Text="{DynamicResource Ui.Auto.6ECC46E78B31B24C}" Classes="accountMuted" FontSize="12" TextWrapping="Wrap" IsVisible="False" />
               <TextBlock Name="NoRefundPolicyText" Text="{DynamicResource Ui.Account.NoRefundPolicy}" Classes="accountMuted" FontSize="12" />
             </StackPanel>
+            <Border Name="TrialCard" Classes="flatMetric accountCard" BorderThickness="1" IsVisible="False">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
+                <StackPanel Spacing="5">
+                  <TextBlock Text="{DynamicResource Ui.Account.TrialTitle}" Classes="settingsSectionTitle" />
+                  <TextBlock Text="{DynamicResource Ui.Account.TrialDescription}" Classes="accountMuted" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Name="TrialStatusText" Classes="accountMuted" FontSize="12" TextWrapping="Wrap" IsVisible="False" />
+                </StackPanel>
+                <ToggleSwitch Name="TrialClaimToggle" Grid.Column="1" VerticalAlignment="Center"
+                              OnContent="{DynamicResource Ui.Account.TrialClaimOn}"
+                              OffContent="{DynamicResource Ui.Account.TrialClaimOff}"
+                              IsCheckedChanged="OnTrialClaimToggle" />
+              </Grid>
+            </Border>
             <Grid Name="PlanCardsGrid" ColumnDefinitions="*,*,*" ColumnSpacing="12">
               <Border Name="FreePlanCard" Classes="flatMetric accountCard accountPlanCard" BorderThickness="1">
                 <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="12">
@@ -428,7 +470,7 @@
             </Grid>
             <TextBlock Name="PlanPurchaseHintText" Text="{DynamicResource Ui.Account.OrderActivationHint}" Classes="accountMuted" FontSize="11" />
           </StackPanel>
-          <Border Classes="flatMetric accountCard">
+          <Border Name="ActivationCard" Classes="flatMetric accountCard">
             <StackPanel Spacing="10">
               <TextBlock Text="{DynamicResource Ui.Account.ActivationTitle}" Classes="settingsSectionTitle" />
               <TextBlock Text="{DynamicResource Ui.Account.ActivationHint}" Classes="accountMuted" />
@@ -442,7 +484,7 @@
               <TextBlock Name="ActivationStatusText" Classes="accountMuted" IsVisible="False" />
             </StackPanel>
           </Border>
-          <Border Classes="flatSubsection" Padding="16,0">
+          <Border Name="OrdersCard" Classes="flatSubsection" Padding="16,0">
             <Expander Name="OrdersExpander" Classes="settingsExpander" Header="{DynamicResource Ui.Account.Orders}" IsExpanded="False">
               <StackPanel Spacing="10" Margin="0,12,0,0">
                 <TextBlock Name="OrderEmptyText" Text="{DynamicResource Ui.Account.NoOrders}" Classes="accountMuted" />
@@ -461,6 +503,18 @@
                   <StackPanel Grid.Column="1" Spacing="6"><TextBlock Text="{DynamicResource Ui.Account.Email}" FontSize="13" /><TextBox Name="ProfileEmailBox" IsReadOnly="True" PlaceholderText="{DynamicResource Ui.Account.NoEmail}" TextInputOptions.IsSensitive="True" Background="{DynamicResource SoftHoverBrush}" Foreground="{DynamicResource MutedInkBrush}" /></StackPanel>
                 </Grid>
                 <TextBlock Text="{DynamicResource Ui.Account.UsernameHint}" Classes="accountMuted" FontSize="11" />
+                <StackPanel Spacing="6">
+                  <TextBlock Name="EmailVerifiedText" Classes="accountMuted" FontSize="11" TextWrapping="Wrap" />
+                  <Button Name="SendEmailCodeButton" Content="{DynamicResource Ui.Account.SendEmailCode}" Classes="accountTextAction"
+                          HorizontalAlignment="Left" Click="OnSendEmailCodeClick" IsVisible="False" />
+                  <StackPanel Name="EmailCodePanel" Orientation="Horizontal" Spacing="10" IsVisible="False">
+                    <TextBox Name="EmailCodeBox" MaxLength="8" Width="150" VerticalAlignment="Center"
+                             TextInputOptions.ContentType="Digits" TextInputOptions.AutoCapitalization="False"
+                             TextInputOptions.ShowSuggestions="False" TextInputOptions.IsSensitive="True" />
+                    <Button Name="ConfirmEmailCodeButton" Content="{DynamicResource Ui.Account.ConfirmEmailCode}"
+                            Classes="settingsActionCancel" VerticalAlignment="Center" Click="OnConfirmEmailCodeClick" />
+                  </StackPanel>
+                </StackPanel>
                 <TextBlock Text="{DynamicResource Ui.Account.EmailImmutable}" Classes="accountMuted" FontSize="11" />
                 <TextBlock Text="{DynamicResource Ui.Account.CurrentPassword}" FontSize="13" />
                 <TextBox Name="ProfilePasswordBox" PasswordChar="•" MaxLength="128" TextInputOptions.ContentType="Password" TextInputOptions.IsSensitive="True" />

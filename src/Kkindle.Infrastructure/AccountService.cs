@@ -102,6 +102,13 @@ public sealed class AccountService : IDisposable
         "invalid_device" => "设备信息无效，请检查系统密钥库或更新客户端。",
         "membership_required" => MemberEntitlements.SyncRequirement,
         "plus_required" => MemberEntitlements.AccountCloudRequirement,
+        "traffic_quota_exceeded" => "本会员年度下载额度与额外下载余额已用尽。请等待下一会员年度开始；提前续费不会增加本年度额度。",
+        "new_user_traffic_exceeded" => "新开通 Plus 的临时下载额度已用尽，请稍后再试；年度下载额度不受影响。",
+        "metadata_traffic_exceeded" => "同步元数据今日流量已达上限，将于次日 UTC 零点重置；书籍下载额度不受影响。",
+        "download_rate_limited" => "下载请求过于频繁，请稍后再试。",
+        "storage_quota_exceeded" => "云空间额度已用尽，请删除不再需要的同步文件或调整额度。",
+        "download_link_used" => "该下载链接已经使用，请重新获取下载授权。",
+        "transfer_expired" => "同步链接已失效，请重新同步。",
         "purchases_disabled" => "购买服务暂未开放，请联系管理员。",
         "invalid_product" => "商品不存在或已下架，请刷新商品列表。",
         "order_request_conflict" => "请为不同商品创建新的订单。",
@@ -117,12 +124,13 @@ public sealed class AccountService : IDisposable
         "activation_request_conflict" => "请为其他激活码创建新的兑换请求。",
         "invalid_activation_request" => "兑换请求标识无效。",
         "invalid_activation_kind" => "激活码仅支持永久功能会员或 1 年 Plus。",
-        "lifetime_already_active" => "此账号已永久解锁功能，无需再次兑换。激活码未被使用。",
+        "lifetime_already_active" => "此账号已永久解锁功能，无需再次购买或兑换。",
         "rate_limited" => "请求过于频繁，请稍后再试。",
         "registration_limit_reached" => "此网络的注册次数已达上限，请稍后再试或联系管理员。",
         "registration_blocked" => "此网络或账号信息暂不支持注册，请联系管理员。",
         "username_blocked" => "此用户名暂不可用，请选择其他用户名。",
         "cloud_retention_due" => "云数据保留期限已结束，正在清理，请稍后重新开通 Plus。",
+        "trial_unavailable" => "此账号已使用过 Plus 或领取过免费试用，不能再次领取。",
         "region_mismatch" => "账号服务区域不匹配，请检查所选区域。",
         "username_exists" => "该用户名已注册，请换一个用户名。",
         "email_exists" => "该邮箱已被其他账号使用。",
@@ -136,6 +144,10 @@ public sealed class AccountService : IDisposable
         "confirmation_password_required" => "请输入确认登录密码。",
         "passwords_do_not_match" => "两次输入的密码不一致。",
         "password_unchanged" => "新密码不能与当前密码相同。",
+        "invalid_reset_code" => "验证码无效或已过期，请重新获取。",
+        "invalid_email_code" => "邮箱验证码无效或已过期，请重新获取。",
+        "email_unavailable" => "邮件服务暂不可用，请稍后再试。",
+        "email_not_set" => "此账号未设置注册邮箱，无法验证或找回密码。",
         "confirmation_required" => "请输入“注销账号”确认文字。",
         _ => null
     };
@@ -308,6 +320,86 @@ public sealed class AccountService : IDisposable
         }
         finally { _gate.Release(); }
     }
+
+    /// <summary>Asks the server to email a reset code. Unknown accounts get the same answer.</summary>
+    public async Task RequestPasswordResetAsync(string serverUrl, string username, CancellationToken token = default)
+    {
+        var endpoint = AccountValidation.ServerUri(serverUrl).AbsoluteUri.TrimEnd('/');
+        username = username.Trim();
+        if (!AccountValidation.IsLogin(username))
+            throw new ArgumentException("请输入有效的用户名或邮箱。");
+        await _gate.WaitAsync(token);
+        try
+        {
+            await LoadAsync(token);
+            using var request = Request(HttpMethod.Post, endpoint, "password-reset/request");
+            request.Content = JsonContent.Create(new AccountPasswordResetRequest { Username = username },
+                AccountJsonContext.Default.AccountPasswordResetRequest);
+            using var response = await SendAsync(request, token);
+            EnsureSuccess(response, register: false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Confirms an emailed code and sets a new password. The server revokes every session.</summary>
+    public async Task<AccountUser> ResetPasswordAsync(string serverUrl, string username, string code,
+        string newPassword, string confirmPassword, CancellationToken token = default)
+    {
+        var endpoint = AccountValidation.ServerUri(serverUrl).AbsoluteUri.TrimEnd('/');
+        username = username.Trim();
+        code = code.Trim();
+        if (!AccountValidation.IsLogin(username)) throw new ArgumentException("请输入有效的用户名或邮箱。");
+        if (!IsEmailCode(code)) throw new ArgumentException("请输入邮件中的 8 位验证码。");
+        if (!AccountValidation.IsPassword(newPassword)) throw new ArgumentException("密码需为 8–128 位，且不能全部为空格。");
+        if (newPassword != confirmPassword) throw new ArgumentException("两次输入的密码不一致。");
+        await _gate.WaitAsync(token);
+        try
+        {
+            await LoadAsync(token);
+            using var request = Request(HttpMethod.Post, endpoint, "password-reset/confirm");
+            request.Content = JsonContent.Create(new AccountPasswordResetConfirm { Username = username, Code = code,
+                NewPassword = newPassword, ConfirmPassword = confirmPassword }, AccountJsonContext.Default.AccountPasswordResetConfirm);
+            using var response = await SendAsync(request, token);
+            EnsureSuccess(response, register: false);
+            var user = await ReadAsync(response, AccountJsonContext.Default.AccountUser, token);
+            if (user.Id == Guid.Empty || !AccountValidation.IsUsername(user.Username))
+                throw new InvalidOperationException("账号服务返回了无效的账号资料。");
+            // Resetting revokes every server session; drop this device's stored token for that account.
+            if (_session is { } session && session.User.Id == user.Id && string.Equals(_serverUrl, endpoint, StringComparison.Ordinal))
+                await SetAsync(_serverUrl, null, CancellationToken.None);
+            return user;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public Task RequestEmailVerificationAsync(CancellationToken token = default) => MemberActionAsync("email/verify/request", token);
+
+    /// <summary>Confirms the emailed code and marks the registered email as verified.</summary>
+    public async Task<AccountStatus> ConfirmEmailVerificationAsync(string code, CancellationToken token = default)
+    {
+        code = code.Trim();
+        if (!IsEmailCode(code)) throw new ArgumentException("请输入邮件中的 8 位验证码。");
+        await _gate.WaitAsync(token);
+        try
+        {
+            await LoadAsync(token);
+            var current = _session ?? throw new InvalidOperationException("请先登录当前区域的账号。");
+            using var request = Request(HttpMethod.Post, _serverUrl, "email/verify", current.Token);
+            request.Content = JsonContent.Create(new AccountEmailVerificationConfirm { Code = code },
+                AccountJsonContext.Default.AccountEmailVerificationConfirm);
+            using var response = await SendAsync(request, token);
+            await EnsureAccountChangeSuccessAsync(response, token);
+            var user = await ReadAsync(response, AccountJsonContext.Default.AccountUser, token);
+            if (user.Id != current.User.Id || !AccountValidation.IsUsername(user.Username) || !user.EmailVerified)
+                throw new InvalidOperationException("账号服务返回了无效的账号资料。");
+            await SetAsync(_serverUrl, new AccountSessionResponse { Region = _region, User = user,
+                Token = current.Token, ExpiresAt = current.ExpiresAt }, token);
+            return Status();
+        }
+        finally { _gate.Release(); }
+    }
+
+    private static bool IsEmailCode(string code) => code.Length == 8 && code.All(char.IsAsciiDigit);
 
     public async Task CloseAccountAsync(string currentPassword, string confirmation, CancellationToken token = default)
     {

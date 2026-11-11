@@ -4,6 +4,7 @@ import ImageIO
 
 struct NativeShell: View {
     @ObservedObject var store: NativeStore
+    @State private var selectedTab = 0
     @Environment(\.colorScheme) private var systemColorScheme
     private var appColorScheme: ColorScheme {
         switch store.preferences.themeMode {
@@ -21,15 +22,15 @@ struct NativeShell: View {
         return ambientBooks.map { "\($0.coverPath ?? "")|\($0.updatedAt)" }.joined(separator: "\n")
     }
     var body: some View {
-        TabView {
-            NavigationView { NativeLibraryPage(store: store) }.navigationViewStyle(.stack)
-                .tabItem { NativeTabLabel(title: "书库", symbol: "book") }
+        TabView(selection: $selectedTab) {
+            NavigationView { NativeLibraryPage(store: store, isActive: selectedTab == 0) }.navigationViewStyle(.stack)
+                .tabItem { NativeTabLabel(title: "书库", symbol: "book") }.tag(0)
             NavigationView { NativeMaterials(store: store) }.navigationViewStyle(.stack)
-                .tabItem { NativeTabLabel(title: "阅读资料", symbol: "note.text") }
+                .tabItem { NativeTabLabel(title: "阅读资料", symbol: "note.text") }.tag(1)
             NavigationView { NativeReadingDashboard(store: store) }.navigationViewStyle(.stack)
-                .tabItem { NativeTabLabel(title: "阅读数据", symbol: "chart.bar") }
+                .tabItem { NativeTabLabel(title: "阅读数据", symbol: "chart.bar") }.tag(2)
             NavigationView { NativeProfilePage(store: store) }.navigationViewStyle(.stack)
-                .tabItem { NativeTabLabel(title: "我的", symbol: "person") }
+                .tabItem { NativeTabLabel(title: "我的", symbol: "person") }.tag(3)
         }
         .font(NativeTheme.font()).foregroundStyle(NativeTheme.ink).tint(NativeTheme.ink)
         .environment(\.symbolVariants, .none)
@@ -42,11 +43,14 @@ struct NativeShell: View {
         .modifier(NativeFeedback(store: store, active: store.readerBook == nil))
         .disabled(store.restartRequired || store.dataBusy)
         .task(id: ambientKey) {
-            guard store.preferences.colorfulMode else { store.ambientColors = []; return }
+            guard store.preferences.colorfulMode else {
+                store.visibleAmbientColors = []; store.fallbackAmbientColors = []; return
+            }
+            if store.library.isEmpty { store.visibleAmbientColors = [] }
             let paths = ambientBooks.compactMap(\.coverPath)
             let colors = await Task.detached(priority: .utility) { NativeAmbientPalette.extract(paths: paths) }.value
             guard !Task.isCancelled else { return }
-            store.ambientColors = colors
+            store.fallbackAmbientColors = colors
         }
         .environmentObject(store)
         .overlay {

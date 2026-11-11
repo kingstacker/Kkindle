@@ -5289,6 +5289,7 @@ public partial class MainWindow
     private S3SyncSettings ReadS3SyncSettingsFromControls() => S3SyncSettings.Normalize(new S3SyncSettings
     {
         Provider = (SyncProvider)SyncProviderBox.SelectedIndex,
+        ProviderChosenByUser = _s3SyncStoredSettings.Settings.ProviderChosenByUser,
         Enabled = S3SyncEnabledCheck.IsChecked == true,
         AutomaticSyncEnabled = S3AutomaticSyncCheck.IsChecked == true,
         DownloadBookFilesOnSync = S3DownloadBookFilesCheck.IsChecked == true,
@@ -5325,7 +5326,8 @@ public partial class MainWindow
 
     private async Task<bool> PersistS3SyncSettingsAsync(bool showStatus, CancellationToken cancellationToken)
     {
-        var settings = ReadS3SyncSettingsFromControls();
+        // Saving from this form is the user's explicit provider choice.
+        var settings = ReadS3SyncSettingsFromControls() with { ProviderChosenByUser = true };
         var editVersion = _s3SettingsEditVersion;
         var validation = settings.Enabled ? settings.Validate() : null;
         if (validation is not null)
