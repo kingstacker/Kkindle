@@ -2085,6 +2085,12 @@ internal sealed class BookReflectionEditorSurface : Border
         Action close,
         bool canResize = false)
     {
+        if (DesktopPlatform.UsesNativeWindowChrome)
+        {
+            dialog.Title = title;
+            DesktopPlatform.ApplyNativeWindowChrome(dialog);
+            return;
+        }
         if (dialog.Content is not Control body)
             return;
 

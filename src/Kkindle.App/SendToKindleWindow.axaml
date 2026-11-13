@@ -44,7 +44,7 @@
         </Style>
     </Window.Styles>
     <Grid>
-    <Border BorderBrush="{DynamicResource InkBrush}" BorderThickness="1">
+    <Border x:Name="SendWindowFrame" BorderBrush="{DynamicResource InkBrush}" BorderThickness="1">
     <Grid RowDefinitions="38,Auto,3,*,Auto">
         <Grid x:Name="SendWindowTitleBar" ColumnDefinitions="*,Auto">
             <Border Background="Transparent" PointerPressed="TitleBarDragRegion_PointerPressed">

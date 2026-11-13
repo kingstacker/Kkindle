@@ -37,7 +37,7 @@ dotnet publish "src/Kkindle.Desktop.MacOS/Kkindle.Desktop.MacOS.csproj" \
 mkdir -p "$app_root/Contents/MacOS" "$app_root/Contents/Resources"
 cp -a "$publish_root/." "$app_root/Contents/MacOS/"
 cp "$repo_root/LICENSE" "$app_root/Contents/Resources/LICENSE"
-cp "$repo_root/src/Kkindle.App/Assets/Icons/Kkindle.ico" "$app_root/Contents/Resources/Kkindle.ico"
+bash "$repo_root/scripts/macos-app-icon.sh" "$app_root/Contents/Resources/Kkindle.icns"
 chmod 0755 "$app_root/Contents/MacOS/Kkindle"
 
 cat > "$app_root/Contents/Info.plist" <<EOF
@@ -50,6 +50,7 @@ cat > "$app_root/Contents/Info.plist" <<EOF
   <key>CFBundleIdentifier</key><string>io.github.kingstacker.kkindle</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Kkindle</string>
+  <key>CFBundleIconFile</key><string>Kkindle.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$short_version</string>
   <key>CFBundleVersion</key><string>$build_version</string>

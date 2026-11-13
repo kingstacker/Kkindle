@@ -28,11 +28,12 @@ public sealed partial class SettingsTests
         scope.Call("MainWindow_GlobalKeyDown", scope.Window, buttonKey);
         Assert.False(buttonKey.Handled);
         scope.Call("ShowStage3Page", scope.Get<Grid>("SettingsPage"), null);
-        var select = new KeyEventArgs { Key = Key.A, KeyModifiers = KeyModifiers.Control };
+        var command = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+        var select = new KeyEventArgs { Key = Key.A, KeyModifiers = command };
         scope.Call("MainWindow_GlobalKeyDown", scope.Window, select);
         Assert.False(select.Handled);
         scope.Call("ShowLibraryPage");
-        select = new KeyEventArgs { Key = Key.A, KeyModifiers = KeyModifiers.Control };
+        select = new KeyEventArgs { Key = Key.A, KeyModifiers = command };
         scope.Call("MainWindow_GlobalKeyDown", scope.Window, select);
         Assert.True(select.Handled);
         await Render();

@@ -33,6 +33,7 @@ public partial class App : Application
 
     public override void Initialize()
     {
+        Name = "Kkindle";
         FontManager.Current.AddFontCollection(new BundledAppFontCollection());
         AvaloniaXamlLoader.Load(this);
         ApplyTheme(AppTheme.Classic);
@@ -66,6 +67,14 @@ public partial class App : Application
                 services: _services,
                 startupSettings: startupSettings);
             desktop.MainWindow = window;
+            if (OperatingSystem.IsMacOS()
+                && this.TryGetFeature<IActivatableLifetime>() is { } activatable)
+            {
+                activatable.Activated += (_, e) =>
+                {
+                    if (e.Kind == ActivationKind.Reopen) window.ReopenMacOSWindow();
+                };
+            }
             // Prepare TTS in the background while the library opens. If the
             // user enters a reader before setup finishes, the reader awaits
             // this same task instead of starting a second installer.
