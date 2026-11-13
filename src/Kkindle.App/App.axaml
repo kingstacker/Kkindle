@@ -2285,6 +2285,63 @@
         <!-- Reader header chrome buttons: stable sizes keep the reader header
              aligned when the WebView area becomes narrow (WinUI reference's
              ReaderHeaderButtonStyle / ReaderHeaderIconButtonStyle). -->
+        <!-- Quiet shelf actions share the title baseline instead of forming
+             another boxed toolbar above the existing library controls. -->
+        <!-- Reading is a cover overlay: one continuous scrim separates the
+             action from the cover artwork and its printed typography. -->
+        <Style Selector="Button.coverReadAction">
+            <Setter Property="Background" Value="#66000000" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="{TemplateBinding Background}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="9" IsHitTestVisible="False">
+                            <Path Data="M12 5C9 3 5 3 2 4V20C5 19 9 19 12 21C15 19 19 19 22 20V4C19 3 15 3 12 5V21"
+                                  Width="28" Height="28" Stretch="Uniform" Stroke="White" StrokeThickness="1.4"
+                                  StrokeLineCap="Round" StrokeJoin="Round" />
+                            <TextBlock Text="{TemplateBinding Content}" Foreground="White" FontSize="14"
+                                       HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="Button.coverReadAction:pointerover">
+            <Setter Property="Background" Value="#88000000" />
+        </Style>
+        <Style Selector="Button.coverReadAction:pressed">
+            <Setter Property="Background" Value="#A0000000" />
+        </Style>
+        <Style Selector="Button.inlineAction">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="9,4" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Template" Value="{StaticResource ReaderToolbarButtonTemplate}" />
+        </Style>
+        <Style Selector="Button.inlineAction.emphasis">
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.inlineAction:pointerover">
+            <Setter Property="Background" Value="{DynamicResource SoftHoverBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+        </Style>
+        <Style Selector="Button.inlineAction:pressed">
+            <Setter Property="Background" Value="{DynamicResource PressedBrush}" />
+        </Style>
+        <Style Selector="Button.inlineAction:disabled">
+            <Setter Property="Opacity" Value="0.3" />
+        </Style>
         <Style Selector="Button.readerHeader">
             <Setter Property="FontFamily" Value="{StaticResource DefaultAppFontFamily}" />
             <Setter Property="Width" Value="56" />
