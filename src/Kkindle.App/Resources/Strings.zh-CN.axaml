@@ -1,4 +1,16 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <x:String x:Key="Ui.Auto.355AC74E4825F60B">返回书库</x:String>
+    <x:String x:Key="Ui.Auto.38461A52924E337E">返回笔记</x:String>
+    <x:String x:Key="Ui.Auto.5873C6A71E4157A1">返回阅读数据</x:String>
+    <x:String x:Key="Ui.Auto.A0CBD56C9420442B">返回设备书库</x:String>
+    <x:String x:Key="Ui.Auto.D00BFE7C685CF125">返回设置</x:String>
+    <x:String x:Key="Ui.Auto.E8952EA03F9173F3">查看原文</x:String>
+    <x:String x:Key="Ui.Auto.27F5FC103795A4D4">编辑思考</x:String>
+    <x:String x:Key="Ui.Auto.28E747DC466F6A89">导出到电脑</x:String>
+    <x:String x:Key="Ui.Auto.397B43B140454C69">阅读所选书籍</x:String>
+    <x:String x:Key="Ui.Auto.E288CC90C8994794">Ctrl+O  阅读所选书籍</x:String>
+    <x:String x:Key="Ui.Auto.B1368FACC042F28A">{0}  返回上一页面</x:String>
+
     <x:String x:Key="Ui.KindleWeb.Auth.AccountLabel">邮箱或手机号码</x:String>
     <x:String x:Key="Ui.KindleWeb.Auth.PasswordLabel">密码</x:String>
     <x:String x:Key="Ui.KindleWeb.Auth.CodeLabel">验证码</x:String>

@@ -103,9 +103,14 @@ public partial class MainWindow
         new("outlook", "smtp-mail.outlook.com", 587, true)
     ];
 
-    private void SettingsButton_Click(object? sender, RoutedEventArgs e)
+    private async void SettingsButton_Click(object? sender, RoutedEventArgs e)
+        => await OpenApplicationSettingsAsync();
+
+    private async Task OpenApplicationSettingsAsync()
     {
         if (BlockNavigationWhileTransferring()) return;
+        if (ReaderRoot.IsVisible) await CloseReaderAsync();
+        if (ReaderRoot.IsVisible) return;
         ShowStage3Page(SettingsPage, SettingsNavigationButton);
         SettingsDataPathText.Text = _paths.Data;
         InitializeMcpSettings();
@@ -134,6 +139,8 @@ public partial class MainWindow
     private async void ReaderAiSettingsButton_Click(object? sender, RoutedEventArgs e)
     {
         if (BlockNavigationWhileTransferring()) return;
+        if (ReaderRoot.IsVisible) await CloseReaderAsync();
+        if (ReaderRoot.IsVisible) return;
         OpenSettingsExpander("Reading", SettingsAiExpander);
         await EnsureMainReaderAiSettingsLoadedAsync();
         if (SettingsReadingSection.IsVisible && SettingsAiExpander.IsExpanded)
@@ -144,6 +151,7 @@ public partial class MainWindow
     {
         if (BlockNavigationWhileTransferring()) return;
         if (ReaderRoot.IsVisible) await CloseReaderAsync();
+        if (ReaderRoot.IsVisible) return;
         OpenSettingsExpander("Reading", SettingsAiExpander);
         await EnsureMainReaderAiSettingsLoadedAsync();
         Dispatcher.UIThread.Post(() =>

@@ -615,7 +615,7 @@ public partial class MainWindow
         WindowBrandText.IsVisible = false;
         SetSidebarActive(AllBooksButton);
         FadeInPage(LibraryWorkspace);
-        LibraryDetailPane.IsVisible = _selectedCard is not null;
+        LibraryDetailPane.IsVisible = false;
         if (LibraryRoot.ColumnDefinitions.Count >= 3)
             LibraryRoot.ColumnDefinitions[2].Width = new GridLength(0);
         DevicePage.IsVisible = false;
@@ -2096,12 +2096,6 @@ public partial class MainWindow
         if (CurrentDevice is not null) ShowDeviceModelPicker();
     }
 
-    private async void DeviceBook_DoubleTapped(object? sender, TappedEventArgs e)
-    {
-        if (sender is Control { DataContext: KindleBookCardViewModel card })
-            await ExportDeviceBookAsync(card);
-    }
-
     private async void ExportDeviceBookButton_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: KindleBookCardViewModel card })
@@ -3526,6 +3520,17 @@ public partial class MainWindow
     {
         if (sender is not Control { DataContext: Stage3ReadingMaterialViewModel item }) return;
         e.Handled = true;
+        await OpenReadingMaterialAsync(item);
+    }
+
+    private async void ReadingMaterialOpenButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: Stage3ReadingMaterialViewModel item })
+            await OpenReadingMaterialAsync(item);
+    }
+
+    private async Task OpenReadingMaterialAsync(Stage3ReadingMaterialViewModel item)
+    {
         if (item.LocalReflection is { } reflection)
         {
             await OpenBookReflectionFromReadingMaterialsAsync(reflection);
@@ -4523,11 +4528,15 @@ public partial class MainWindow
         }
     }
 
-    private async void DashboardRecentBook_DoubleTapped(object? sender, TappedEventArgs e)
+    private async void DashboardRecentBook_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Control { DataContext: Stage3DashboardRecentViewModel item }
-            || _bookOpenInProgress > 0) return;
-        e.Handled = true;
+        if (sender is Control { DataContext: Stage3DashboardRecentViewModel item })
+            await OpenDashboardRecentBookAsync(item);
+    }
+
+    private async Task OpenDashboardRecentBookAsync(Stage3DashboardRecentViewModel item)
+    {
+        if (_bookOpenInProgress > 0) return;
         BookCardViewModel? temporaryCard = null;
         try
         {

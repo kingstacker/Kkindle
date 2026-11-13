@@ -1,4 +1,16 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <x:String x:Key="Ui.Auto.355AC74E4825F60B">Back to library</x:String>
+    <x:String x:Key="Ui.Auto.38461A52924E337E">Back to notes</x:String>
+    <x:String x:Key="Ui.Auto.5873C6A71E4157A1">Back to reading activity</x:String>
+    <x:String x:Key="Ui.Auto.A0CBD56C9420442B">Back to device library</x:String>
+    <x:String x:Key="Ui.Auto.D00BFE7C685CF125">Back to settings</x:String>
+    <x:String x:Key="Ui.Auto.E8952EA03F9173F3">View in book</x:String>
+    <x:String x:Key="Ui.Auto.27F5FC103795A4D4">Edit reflection</x:String>
+    <x:String x:Key="Ui.Auto.28E747DC466F6A89">Export to computer</x:String>
+    <x:String x:Key="Ui.Auto.397B43B140454C69">Read selected book</x:String>
+    <x:String x:Key="Ui.Auto.E288CC90C8994794">Ctrl+O  Read selected book</x:String>
+    <x:String x:Key="Ui.Auto.B1368FACC042F28A">{0}  Back to previous page</x:String>
+
     <x:String x:Key="Ui.KindleWeb.Auth.AccountLabel">Email or mobile number</x:String>
     <x:String x:Key="Ui.KindleWeb.Auth.PasswordLabel">Password</x:String>
     <x:String x:Key="Ui.KindleWeb.Auth.CodeLabel">Verification code</x:String>
