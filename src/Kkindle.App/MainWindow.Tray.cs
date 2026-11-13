@@ -18,8 +18,10 @@ public partial class MainWindow
     {
         try
         {
-            var icon = new WindowIcon(AssetLoader.Open(
-                new Uri("avares://Kkindle.App/Assets/Icons/kkindle.png")));
+            using var iconStream = AssetLoader.Open(new Uri(OperatingSystem.IsMacOS()
+                ? "avares://Kkindle.App/Assets/Icons/kkindle-tray-template.png"
+                : "avares://Kkindle.App/Assets/Icons/kkindle.png"));
+            var icon = new WindowIcon(iconStream);
 
             var openItem = new NativeMenuItem(T("打开 Kkindle"));
             openItem.Click += (_, _) => RestoreFromTray();
@@ -40,6 +42,8 @@ public partial class MainWindow
                 Menu = menu,
                 IsVisible = true
             };
+            if (OperatingSystem.IsMacOS())
+                MacOSProperties.SetIsTemplateIcon(_trayIcon, true);
             // A left click also brings the window back, matching common
             // Windows tray behaviour.
             _trayIcon.Clicked += (_, _) => RestoreFromTray();
@@ -71,7 +75,7 @@ public partial class MainWindow
         Show();
         if (WindowState == WindowState.Minimized)
             WindowState = WindowState.Normal;
-        else if (wasHidden)
+        else if (wasHidden && !OperatingSystem.IsMacOS())
             BeginWindowRestoreAnimation();
         Activate();
     }

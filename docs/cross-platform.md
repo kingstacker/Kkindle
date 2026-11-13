@@ -16,6 +16,40 @@ currently enumerated on those systems.
 - macOS stores its wrapping key in the login Keychain.
 - Windows continues to use DPAPI and its existing data layout.
 
+## macOS desktop behavior
+
+macOS uses the system title bar, traffic lights, rounded window frame, shadow
+and resize controls in the library, reader and editor windows. The page extends
+under the transparent native title bar, with no separate grey strip or window
+title; content leaves room for the traffic lights. The menu-bar
+status icon is a monochrome template image; AppKit supplies its light/dark
+appearance independently of the full-color Dock icon.
+
+Drag the top header, page title or empty space alongside it to move the window
+immediately. Buttons and inputs in that area retain their normal actions;
+reading, book selection and fullscreen do not start window moves. Double-click
+the header to zoom or restore the window.
+
+Use Command-F to search, Command-I to import, Command-click to select multiple
+books, Command-, for settings, and Control-Command-F for native fullscreen.
+The View menu also exposes Zen mode while a reader is open. Zen enters a native
+fullscreen Space and restores the reader panels when it exits, including when
+fullscreen is left through the green traffic light.
+
+The red traffic light and Command-W save and hide the main window. Click the
+Dock icon or choose Open Kkindle from its status menu to reopen it. Command-Q
+exits after saving the reading session and pending settings.
+
+For a local Debug app with its own .NET runtime, quit Kkindle, then run:
+
+```sh
+bash scripts/build-macos-debug.sh
+open artifacts/Kkindle.app
+```
+
+The builder uses the pinned SDK from PATH or `.tools/dotnet`, and generates a
+macOS `.icns` Dock icon and an ad-hoc signed app bundle.
+
 ## Build and package
 
 Install the exact .NET SDK version pinned by the repository root `global.json`

@@ -51,6 +51,15 @@ public partial class SendToKindleWindow : Window, IKindleWebPage, IKindleWebAuth
         _useNativeBrowser = page is null;
         _authentication = page is null ? this : page as IKindleWebAuthentication;
         InitializeComponent();
+        if (DesktopPlatform.UsesNativeWindowChrome)
+        {
+            DesktopPlatform.ApplyNativeWindowChrome(this);
+            SendWindowTitleBar.IsVisible = false;
+            SendWindowTitleBar.Height = 0;
+            if (SendWindowTitleBar.Parent is Grid layout) layout.RowDefinitions[0].Height = new GridLength(0);
+            SendWindowFrame.BorderThickness = new Avalonia.Thickness(0);
+            WindowResizeLayer.IsVisible = false;
+        }
         FileList.ItemsSource = _files;
         RecentStatusList.ItemsSource = _recentStatusItems;
         QueuePanel.AddHandler(DragDrop.DragEnterEvent, Queue_DragOver, RoutingStrategies.Bubble, true);

@@ -3214,7 +3214,7 @@ public sealed class NativeReaderHost : Control, IReaderHost, IReaderPageSnapshot
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        var ctrl = (e.KeyModifiers & KeyModifiers.Control) != 0;
+        var ctrl = DesktopPlatform.IsCommand(e.KeyModifiers);
         if (ctrl && e.Key is Key.F or Key.B)
         {
             Emit(new { type = "shortcut", key = e.Key == Key.F ? "f" : "b", ctrlKey = true });

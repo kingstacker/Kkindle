@@ -272,6 +272,7 @@ public partial class MainWindow : Window
         ViewModel.ViewChanged += ViewModel_ViewChanged;
 
         InitializeComponent();
+        InitializeMacOSWindow();
         PromoteModalOverlays();
         InitializeKindleEmailClipboardSupport();
         ApplyMainAppearance();
@@ -856,7 +857,16 @@ public partial class MainWindow : Window
         base.OnPropertyChanged(change);
         if (change.Property == WindowStateProperty)
         {
-            if (change.NewValue is WindowState newState)
+            if (OperatingSystem.IsMacOS() && _readerZenMode
+                && change.OldValue is WindowState.FullScreen
+                && change.NewValue is WindowState.Normal or WindowState.Maximized)
+            {
+                // Escape / the green traffic light can exit the native Space.
+                // Restore reader panels as well, without entering fullscreen again.
+                _readerWindowStateBeforeZen = (WindowState)change.NewValue!;
+                ExitReaderZenMode();
+            }
+            if (!OperatingSystem.IsMacOS() && change.NewValue is WindowState newState)
             {
                 if (change.OldValue is WindowState.Minimized
                     && newState != WindowState.Minimized)
@@ -904,7 +914,7 @@ public partial class MainWindow : Window
         if (WindowFrameOverlay is not null)
             WindowFrameOverlay.Margin = new Thickness(0);
         if (WindowResizeLayer is not null)
-            WindowResizeLayer.IsVisible = !maximized;
+            WindowResizeLayer.IsVisible = !DesktopPlatform.UsesNativeWindowChrome && !maximized;
     }
 
     // Let the platform own the resize gesture. Updating Width, Height and
@@ -970,6 +980,20 @@ public partial class MainWindow : Window
         if (_allowWindowCloseForPendingUpdate || _allowWindowCloseForS3Sync)
         {
             DisposeDeviceChangeNotifier();
+            return;
+        }
+        if (OperatingSystem.IsMacOS() && !e.IsProgrammatic
+            && e.CloseReason == WindowCloseReason.WindowClosing)
+        {
+            e.Cancel = true;
+            _ = HideMacOSWindowAsync();
+            return;
+        }
+        if (OperatingSystem.IsMacOS() && ReaderRoot.IsVisible
+            && e.CloseReason == WindowCloseReason.ApplicationShutdown)
+        {
+            e.Cancel = true;
+            _ = QuitMacOSAfterReaderAsync();
             return;
         }
         if (ReaderRoot.IsVisible || Volatile.Read(ref _readerCloseInProgress) != 0)
@@ -4397,10 +4421,10 @@ public partial class MainWindow : Window
             return;
         }
         if (_readerDocument is not null || _readerIsPdf) return;
-        if (e.Source is Control source && (source is TextBox or ComboBox or Button
-            || source.GetVisualAncestors().Any(parent => parent is TextBox or ComboBox or Button))) return;
+        var inputFocused = e.Source is Control source && (source is TextBox or ComboBox or Button
+            || source.GetVisualAncestors().Any(parent => parent is TextBox or ComboBox or Button));
 
-        var control = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        var control = DesktopPlatform.IsCommand(e.KeyModifiers);
         if (control && e.Key == Key.F)
         {
             e.Handled = true;
@@ -4415,7 +4439,7 @@ public partial class MainWindow : Window
             ImportFilesButton_Click(this, new RoutedEventArgs());
             return;
         }
-        if (!LibraryWorkspace.IsVisible) return;
+        if (inputFocused || !LibraryWorkspace.IsVisible) return;
         if (control && e.Key == Key.A)
         {
             e.Handled = true;
@@ -4463,9 +4487,9 @@ public partial class MainWindow : Window
         T("键盘快捷键"),
         string.Join("\n", new[]
         {
-            T("Ctrl+F  搜索书库"),
-            T("Ctrl+I  导入书籍"),
-            T("Ctrl+A  全选当前页"),
+            DesktopPlatform.ShortcutLabel(T("Ctrl+F  搜索书库")),
+            DesktopPlatform.ShortcutLabel(T("Ctrl+I  导入书籍")),
+            DesktopPlatform.ShortcutLabel(T("Ctrl+A  全选当前页")),
             T("Enter  打开选中的书"),
             T("Delete  删除选中的书"),
             T("Esc  清除搜索或选择"),
@@ -4654,7 +4678,7 @@ public partial class MainWindow : Window
         // cannot steal movement before the drag crosses the threshold.
         e.Pointer.Capture(control);
 
-        if ((e.KeyModifiers & KeyModifiers.Control) != 0)
+        if (DesktopPlatform.IsCommand(e.KeyModifiers))
         {
             if (_selectedBookIds.Remove(card.Book.Id))
                 card.IsMultiSelected = false;

@@ -45,7 +45,7 @@ public partial class SendToKindleWindow
         var label = UiText.Get(maximized ? "还原" : "最大化");
         AutomationProperties.SetName(MaximizeWindowButton, label);
         ToolTip.SetTip(MaximizeWindowButton, label);
-        WindowResizeLayer.IsVisible = !maximized;
+        WindowResizeLayer.IsVisible = !DesktopPlatform.UsesNativeWindowChrome && !maximized;
     }
 
     private void WindowResize_PointerPressed(object? sender, PointerPressedEventArgs e)

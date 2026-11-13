@@ -2328,4 +2328,10 @@
     <x:String x:Key="Ui.Auto.A8FE93A424AF05F6">{0} failed books are no longer in the computer library.</x:String>
     <x:String x:Key="Ui.Auto.2C8F8091E220C543">Skipped books that may already be on the device. Nothing was sent.</x:String>
     <x:String x:Key="Ui.Auto.5AE6FD40CA2C0289">Transfer complete: {0} sent, {1} possible existing books skipped, {2} failed.</x:String>
+    <x:String x:Key="Ui.Auto.1C5C067138704DDA">View</x:String>
+    <x:String x:Key="Ui.Auto.9EFE01F647D67D91">Window</x:String>
+    <x:String x:Key="Ui.Auto.A57CFCB8428DA408">Help</x:String>
+    <x:String x:Key="Ui.Auto.22EA3F47FEE80536">Enter Full Screen</x:String>
+    <x:String x:Key="Ui.Auto.0F1505B6AD3FAFE4">Exit Full Screen</x:String>
+    <x:String x:Key="Ui.Auto.EBAAEA13D207F3AD">Paste images · Ctrl+V</x:String>
 </ResourceDictionary>

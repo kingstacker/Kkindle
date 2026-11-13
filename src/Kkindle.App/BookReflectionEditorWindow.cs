@@ -256,6 +256,14 @@ internal sealed class BookReflectionEditorWindow : Window
             Children = { frameBorder, _windowResizeLayer, frameOutline }
         };
         _windowResizeLayer.ZIndex = 10;
+        if (DesktopPlatform.UsesNativeWindowChrome)
+        {
+            DesktopPlatform.ApplyNativeWindowChrome(this);
+            titleBarBorder.IsVisible = false;
+            frame.RowDefinitions[0].Height = new GridLength(0);
+            frameBorder.Padding = new Thickness(0);
+            frameOutline.IsVisible = false;
+        }
         UpdateWindowChrome();
 
         Opened += (_, _) => Dispatcher.UIThread.Post(() =>
@@ -367,7 +375,7 @@ internal sealed class BookReflectionEditorWindow : Window
         var label = UiText.Get(maximized ? "还原" : "最大化");
         AutomationProperties.SetName(_maximizeButton, label);
         ToolTip.SetTip(_maximizeButton, label);
-        _windowResizeLayer.IsVisible = !maximized;
+        _windowResizeLayer.IsVisible = !DesktopPlatform.UsesNativeWindowChrome && !maximized;
     }
 
     private Grid CreateResizeLayer()

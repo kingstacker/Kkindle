@@ -1337,7 +1337,7 @@ public partial class MainWindow
 
     private async void ReaderAiQuestionBox_KeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        if (e.Key != Key.Enter || !DesktopPlatform.IsCommand(e.KeyModifiers)) return;
         e.Handled = true;
         if (_readerAiBusy) return;
         var question = ReaderAiQuestionBox.Text?.Trim() ?? string.Empty;
@@ -1619,7 +1619,7 @@ public partial class MainWindow
             ReaderAiSendGlyph.Data = Avalonia.Media.Geometry.Parse(busy
                 ? "M 5,5 L 19,5 L 19,19 L 5,19 Z"
                 : "M 12,3 L 18.2,9.2 L 17.3,10.1 L 12.45,5.25 L 12.45,21 L 11.55,21 L 11.55,5.25 L 6.7,10.1 L 5.8,9.2 Z");
-            ToolTip.SetTip(ReaderAiSendButton, busy ? T("停止生成") : T("发送 · Ctrl+Enter"));
+            ToolTip.SetTip(ReaderAiSendButton, busy ? T("停止生成") : DesktopPlatform.ShortcutLabel(T("发送 · Ctrl+Enter")));
             Avalonia.Automation.AutomationProperties.SetName(ReaderAiSendButton, busy ? T("停止生成") : T("发送"));
         }
         if (ReaderAiOptionsButton is not null)

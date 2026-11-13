@@ -1111,6 +1111,9 @@ public partial class MainWindow
     private int _readerBookPageCountSequence;
     private DateTimeOffset _readerSessionStarted;
     private WindowState _readerWindowStateBeforeZen = WindowState.Normal;
+    private WindowDecorations _readerWindowDecorationsBeforeZen;
+    private bool _readerExtendedClientAreaBeforeZen;
+    private double _readerTitleBarHeightBeforeZen;
     private Avalonia.Styling.ControlTheme? _readerWindowDecorationsThemeBeforeZen;
     private bool _readerZenMode;
     private bool _readerAssistantVisibleBeforeZen = true;
@@ -4188,13 +4191,13 @@ public partial class MainWindow
             e.Handled = HandleReaderEscapeShortcut();
             return e.Handled;
         }
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.F)
+        if (DesktopPlatform.IsCommand(e.KeyModifiers) && e.Key == Key.F)
         {
             e.Handled = true;
             OpenReaderSearchShortcut();
             return true;
         }
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.B)
+        if (DesktopPlatform.IsCommand(e.KeyModifiers) && e.Key == Key.B)
         {
             e.Handled = true;
             _ = ObserveReaderTaskAsync(ToggleReaderBookmarkAsync());
@@ -9089,8 +9092,12 @@ public partial class MainWindow
         if (!_readerZenMode)
         {
             _readerWindowStateBeforeZen = WindowState;
+            _readerWindowDecorationsBeforeZen = WindowDecorations;
+            _readerExtendedClientAreaBeforeZen = ExtendClientAreaToDecorationsHint;
+            _readerTitleBarHeightBeforeZen = ExtendClientAreaTitleBarHeightHint;
             _readerWindowDecorationsThemeBeforeZen = WindowDecorationsTheme;
-            WindowDecorationsTheme = (Avalonia.Styling.ControlTheme)Resources["ReaderZenWindowDecorations"]!;
+            if (!DesktopPlatform.UsesNativeWindowChrome)
+                WindowDecorationsTheme = (Avalonia.Styling.ControlTheme)Resources["ReaderZenWindowDecorations"]!;
             _readerAssistantVisibleBeforeZen = ReaderAssistantPanel.IsVisible;
             _readerTocExpandedBeforeZen = ReaderTocPanel.IsVisible;
             _readerTocMinimalBeforeZen = ReaderTocCompactPanel.IsVisible;
@@ -9098,8 +9105,11 @@ public partial class MainWindow
             _readerZenMode = true;
             // True fullscreen hides the taskbar. The empty decorations theme
             // removes Fluent's separate fullscreen caption popover.
-            ExtendClientAreaToDecorationsHint = true;
-            ExtendClientAreaTitleBarHeightHint = 0;
+            if (!DesktopPlatform.UsesNativeWindowChrome)
+            {
+                ExtendClientAreaToDecorationsHint = true;
+                ExtendClientAreaTitleBarHeightHint = 0;
+            }
             WindowState = WindowState.FullScreen;
             ApplyReaderZenWindowChrome();
             Dispatcher.UIThread.Post(
@@ -9190,14 +9200,14 @@ public partial class MainWindow
     private void ExitReaderZenModeCore()
     {
         if (!_readerZenMode) return;
+        _readerZenMode = false;
         WindowState = _readerWindowStateBeforeZen;
         WindowDecorationsTheme = _readerWindowDecorationsThemeBeforeZen;
-        ExtendClientAreaToDecorationsHint = false;
-        ExtendClientAreaTitleBarHeightHint = -1;
-        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
-        _readerZenMode = false;
+        ExtendClientAreaToDecorationsHint = _readerExtendedClientAreaBeforeZen;
+        ExtendClientAreaTitleBarHeightHint = _readerTitleBarHeightBeforeZen;
+        WindowDecorations = _readerWindowDecorationsBeforeZen;
         RestoreReaderWindowChromeAfterZen();
-        ReaderWindowTitleBar.IsVisible = true;
+        ReaderWindowTitleBar.IsVisible = !DesktopPlatform.UsesNativeWindowChrome;
         ReaderTocPanel.IsVisible = false;
         ReaderAssistantPanel.IsVisible = _readerAssistantVisibleBeforeZen;
         if (_readerAssistantVisibleBeforeZen)
@@ -9213,10 +9223,10 @@ public partial class MainWindow
         ReaderHeaderBar.IsVisible = true;
         ReaderContentPanel.RowDefinitions[2].Height = new GridLength(50);
         ReaderFooterBar.IsVisible = true;
-        ReaderTocPanel.Margin = new Thickness(0, 38, 0, 0);
-        ReaderTocCompactPanel.Margin = new Thickness(0, 38, 0, 0);
-        ReaderContentPanel.Margin = new Thickness(0, 38, 0, 0);
-        ReaderAssistantPanel.Margin = new Thickness(0, 38, 0, 0);
+        ReaderTocPanel.Margin = new Thickness(0, DesktopPlatform.ReaderTitleBarInset, 0, 0);
+        ReaderTocCompactPanel.Margin = new Thickness(0, DesktopPlatform.ReaderTitleBarInset, 0, 0);
+        ReaderContentPanel.Margin = new Thickness(0, DesktopPlatform.ReaderTitleBarInset, 0, 0);
+        ReaderAssistantPanel.Margin = new Thickness(0, DesktopPlatform.ReaderTitleBarInset, 0, 0);
         ReaderLayoutSettingsOverlay.Margin = new Thickness(0);
         ReaderWebViewBottomCover.Margin = new Thickness(0, 0, 0, 10);
         UpdateReaderBookmarkCornerSurface();
@@ -9231,9 +9241,9 @@ public partial class MainWindow
         ReaderZenActivationRegion.IsVisible = false;
         ReaderZenControlsPopup.IsOpen = false;
         UpdateReaderTtsFloatingPointerWatch();
-        MinimizeWindowButton.IsVisible = true;
-        MaximizeWindowButton.IsVisible = true;
-        CloseWindowButton.IsVisible = true;
+        MinimizeWindowButton.IsVisible = !DesktopPlatform.UsesNativeWindowChrome;
+        MaximizeWindowButton.IsVisible = !DesktopPlatform.UsesNativeWindowChrome;
+        CloseWindowButton.IsVisible = !DesktopPlatform.UsesNativeWindowChrome;
         WindowBrandText.IsVisible = ReaderRoot.IsVisible;
     }
 
@@ -9512,6 +9522,7 @@ public partial class MainWindow
         // the Windows build. ReaderZenControlsPopup remains independent and
         // continues to provide the custom zen exit row.
         ReaderWindowTitleBar.IsVisible = false;
+        if (DesktopPlatform.UsesNativeWindowChrome) return;
         WindowDecorations = Avalonia.Controls.WindowDecorations.None;
 
         // FullScreen/Maximized can cause Windows to restore the native
@@ -9620,9 +9631,9 @@ public partial class MainWindow
         if (_readerZenMode) ApplyReaderZenWindowChrome();
         ReaderZenTitleTocButton.IsVisible = false;
         ReaderZenTitleExitButton.IsVisible = false;
-        MinimizeWindowButton.IsVisible = visible;
-        MaximizeWindowButton.IsVisible = visible;
-        CloseWindowButton.IsVisible = visible;
+        MinimizeWindowButton.IsVisible = visible && !DesktopPlatform.UsesNativeWindowChrome;
+        MaximizeWindowButton.IsVisible = visible && !DesktopPlatform.UsesNativeWindowChrome;
+        CloseWindowButton.IsVisible = visible && !DesktopPlatform.UsesNativeWindowChrome;
         if (_readerZenMode && visible)
         {
             // Anchor the fallback/native popup to the reader surface instead

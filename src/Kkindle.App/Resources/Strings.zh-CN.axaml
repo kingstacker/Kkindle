@@ -2328,4 +2328,10 @@
     <x:String x:Key="Ui.Auto.A8FE93A424AF05F6">有 {0} 本失败的书籍已不在电脑书库。</x:String>
     <x:String x:Key="Ui.Auto.2C8F8091E220C543">已跳过设备中可能已有的书籍，没有发送。</x:String>
     <x:String x:Key="Ui.Auto.5AE6FD40CA2C0289">发送完成：成功 {0} 本，跳过可能已有 {1} 本，失败 {2} 本。</x:String>
+    <x:String x:Key="Ui.Auto.1C5C067138704DDA">视图</x:String>
+    <x:String x:Key="Ui.Auto.9EFE01F647D67D91">窗口</x:String>
+    <x:String x:Key="Ui.Auto.A57CFCB8428DA408">帮助</x:String>
+    <x:String x:Key="Ui.Auto.22EA3F47FEE80536">全屏</x:String>
+    <x:String x:Key="Ui.Auto.0F1505B6AD3FAFE4">退出全屏</x:String>
+    <x:String x:Key="Ui.Auto.EBAAEA13D207F3AD">支持粘贴图片 · Ctrl+V</x:String>
 </ResourceDictionary>
